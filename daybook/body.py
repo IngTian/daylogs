@@ -1,0 +1,255 @@
+"""Weight and food: reads, writes, trend windows, and BMR.
+
+Every write validates before it touches SQLite, so a bad prompt never
+produces a half-valid row. Deletes return the removed row so the caller can
+push it onto the undo stack.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import re
+import sqlite3
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SOURCES = frozenset({"labeled", "estimated"})
+_MAX_KG = 500.0
+
+
+class BodyError(ValueError):
+    pass
+
+
+def _check_date(date: str) -> str:
+    if not _DATE_RE.match(date):
+        raise BodyError(f"date {date!r} must be YYYY-MM-DD")
+    try:
+        dt.date.fromisoformat(date)
+    except ValueError as e:
+        raise BodyError(f"date {date!r} is not a real date") from e
+    return date
+
+
+def _window_start(end_date: str, days: int) -> str:
+    return (dt.date.fromisoformat(end_date) - dt.timedelta(days=days - 1)).isoformat()
+
+
+# ── weight ───────────────────────────────────────────────────────────────
+def add_weight(conn, *, kg: float, date: str, at: int, note: str | None = None) -> int:
+    if not 0 < float(kg) <= _MAX_KG:
+        raise BodyError(f"{kg} kg is not a plausible weight")
+    cur = conn.execute(
+        "INSERT INTO weight (date, measured_at, kg, note) VALUES (?, ?, ?, ?)",
+        (_check_date(date), int(at), float(kg), note or None),
+    )
+    return int(cur.lastrowid)
+
+
+def list_weight(conn, *, since: str | None = None, limit: int = 200) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM weight"
+    args: list = []
+    if since:
+        sql += " WHERE date >= ?"
+        args.append(_check_date(since))
+    sql += " ORDER BY date DESC, measured_at DESC LIMIT ?"
+    args.append(int(limit))
+    return list(conn.execute(sql, args))
+
+
+def latest_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | None:
+    sql = "SELECT * FROM weight"
+    args: list = []
+    if on_or_before:
+        sql += " WHERE date <= ?"
+        args.append(_check_date(on_or_before))
+    sql += " ORDER BY date DESC, measured_at DESC LIMIT 1"
+    return conn.execute(sql, args).fetchone()
+
+
+def weight_series(conn, *, end_date: str, days: int) -> list[tuple[str, float]]:
+    """One point per day in the window, ascending. When a day has several
+    readings the latest wins — a morning weigh-in plus a curious evening
+    re-check should not become two points."""
+    rows = conn.execute(
+        """
+        SELECT date, kg FROM weight w
+        WHERE date BETWEEN ? AND ?
+          AND measured_at = (
+              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+          )
+        GROUP BY date
+        ORDER BY date ASC
+        """,
+        (_window_start(_check_date(end_date), days), end_date),
+    ).fetchall()
+    return [(r["date"], r["kg"]) for r in rows]
+
+
+def weight_series_between(
+    conn, *, start: str | None, end: str
+) -> list[tuple[str, float]]:
+    """One point per day between `start` and `end` inclusive, ascending.
+    `start=None` means unbounded. Same last-reading-wins rule as weight_series."""
+    sql = """
+        SELECT date, kg FROM weight w
+        WHERE date <= ?
+          AND measured_at = (
+              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+          )
+    """
+    args: list = [_check_date(end)]
+    if start is not None:
+        sql += " AND date >= ?"
+        args.append(_check_date(start))
+    sql += " GROUP BY date ORDER BY date ASC"
+    return [(r["date"], r["kg"]) for r in conn.execute(sql, args)]
+
+
+def kcal_series_between(conn, *, start: str | None, end: str) -> list[tuple[str, int]]:
+    """Daily calorie totals between `start` and `end`, ascending. Days with no
+    entries are absent rather than zero — a logging gap is not a fast."""
+    sql = "SELECT date, SUM(kcal) AS total FROM food WHERE date <= ?"
+    args: list = [_check_date(end)]
+    if start is not None:
+        sql += " AND date >= ?"
+        args.append(_check_date(start))
+    sql += " GROUP BY date ORDER BY date ASC"
+    return [(r["date"], int(r["total"])) for r in conn.execute(sql, args)]
+
+
+def kcal_average(conn, *, start: str | None, end: str) -> int | None:
+    """Mean intake over the days that actually have entries."""
+    series = kcal_series_between(conn, start=start, end=end)
+    if not series:
+        return None
+    return round(sum(v for _, v in series) / len(series))
+
+
+def weight_delta(conn, *, end_date: str, days: int) -> float | None:
+    series = weight_series(conn, end_date=end_date, days=days)
+    if len(series) < 2:
+        return None
+    return round(series[-1][1] - series[0][1], 2)
+
+
+def update_weight(conn, id: int, **fields) -> bool:
+    return _update(conn, "weight", id, fields, allowed={"kg", "date", "measured_at", "note"})
+
+
+def delete_weight(conn, id: int) -> dict | None:
+    return _delete(conn, "weight", id)
+
+
+# ── food ─────────────────────────────────────────────────────────────────
+def add_food(conn, *, description: str, kcal: int, source: str, date: str, at: int) -> int:
+    if source not in _SOURCES:
+        raise BodyError(f"source must be one of {sorted(_SOURCES)}")
+    if not description.strip():
+        raise BodyError("description must be non-empty")
+    if int(kcal) < 0:
+        raise BodyError("kcal must be >= 0")
+    cur = conn.execute(
+        "INSERT INTO food (date, ate_at, description, kcal, source) VALUES (?, ?, ?, ?, ?)",
+        (_check_date(date), int(at), description.strip(), int(kcal), source),
+    )
+    return int(cur.lastrowid)
+
+
+def list_food(conn, *, date: str) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM food WHERE date = ? ORDER BY ate_at ASC, id ASC",
+            (_check_date(date),),
+        )
+    )
+
+
+def day_kcal(conn, *, date: str) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(kcal), 0) AS total FROM food WHERE date = ?",
+        (_check_date(date),),
+    ).fetchone()
+    return int(row["total"])
+
+
+def update_food(conn, id: int, **fields) -> bool:
+    if "source" in fields and fields["source"] not in _SOURCES:
+        raise BodyError(f"source must be one of {sorted(_SOURCES)}")
+    return _update(
+        conn,
+        "food",
+        id,
+        fields,
+        allowed={"description", "kcal", "source", "date", "ate_at"},
+    )
+
+
+def restamp(at: int, *, date: str, hhmm: str) -> int | None:
+    """The new epoch-second timestamp for a row whose clock time was edited, or
+    `None` when the minute did not change.
+
+    Stored timestamps carry seconds; the grammar's only time token is `HH:MM`. So
+    re-deriving the timestamp on every edit would quietly shave the seconds off a
+    row whose time nobody touched — and for weight those seconds are the
+    tie-breaker `weight_series` uses to pick a day's reading. Returning `None`
+    means "leave the column alone", which is what the caller wants far more often
+    than a rewrite.
+    """
+    current = dt.datetime.fromtimestamp(int(at))
+    if current.strftime("%H:%M") == hhmm:
+        return None
+    hh, mm = (int(part) for part in hhmm.split(":"))
+    return int(
+        dt.datetime.combine(dt.date.fromisoformat(date), dt.time(hh, mm)).timestamp()
+    )
+
+
+def delete_food(conn, id: int) -> dict | None:
+    return _delete(conn, "food", id)
+
+
+# ── BMR ──────────────────────────────────────────────────────────────────
+def age_from_birthday(birthday: str | None, today: str | None = None) -> int | None:
+    if not birthday:
+        return None
+    try:
+        b = dt.date.fromisoformat(birthday)
+    except ValueError:
+        return None
+    t = dt.date.fromisoformat(today) if today else dt.date.today()
+    return t.year - b.year - ((t.month, t.day) < (b.month, b.day))
+
+
+def compute_bmr(cfg, kg: float | None, today: str | None = None) -> int | None:
+    """Mifflin-St Jeor. None whenever an input is missing — a calorie total with
+    no maintenance baseline is better shown bare than shown against a guess."""
+    if kg is None or cfg.height_cm is None or not cfg.sex:
+        return None
+    age = age_from_birthday(cfg.birthday, today)
+    if age is None:
+        return None
+    base = 10 * float(kg) + 6.25 * float(cfg.height_cm) - 5 * age
+    return round(base + (5 if cfg.sex == "male" else -161))
+
+
+# ── shared row helpers ───────────────────────────────────────────────────
+def _update(conn, table: str, id: int, fields: dict, *, allowed: set[str]) -> bool:
+    fields = {k: v for k, v in fields.items() if v is not None}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise BodyError(f"cannot update {sorted(unknown)} on {table}")
+    if not fields:
+        return False
+    if "date" in fields:
+        _check_date(fields["date"])
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    cur = conn.execute(f"UPDATE {table} SET {sets} WHERE id = ?", (*fields.values(), int(id)))
+    return cur.rowcount > 0
+
+
+def _delete(conn, table: str, id: int) -> dict | None:
+    row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (int(id),)).fetchone()
+    if row is None:
+        return None
+    conn.execute(f"DELETE FROM {table} WHERE id = ?", (int(id),))
+    return dict(row)

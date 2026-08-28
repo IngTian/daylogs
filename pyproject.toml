@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daybook"
+version = "0.1.0"
+description = "A three-feature personal daybook: weight, food, expenses, and one daily summary."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["tui", "terminal", "textual", "expenses", "budget", "weight", "self-tracking"]
+dependencies = ["textual>=8.2,<9"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/IngTian/daybook"
+Repository = "https://github.com/IngTian/daybook"
+Issues = "https://github.com/IngTian/daybook/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "pytest-textual-snapshot>=1",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+day = "daybook.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["daybook*"]
+
+# Textual loads app.tcss via App.CSS_PATH at runtime. setuptools ships no
+# non-Python files by default, so without this a non-editable install (and any
+# binary built from the wheel) starts up with no stylesheet.
+[tool.setuptools.package-data]
+"daybook.tui" = ["*.tcss"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

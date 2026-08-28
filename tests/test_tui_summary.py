@@ -1,0 +1,202 @@
+import datetime as dt
+from zoneinfo import ZoneInfo
+
+from daybook.summary import get_report, target_date, upsert_report
+
+TZ = ZoneInfo("America/Toronto")
+MORNING = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)
+
+
+def _body(app):
+    """The rendered markdown source, plus the empty-state line."""
+    from textual.widgets import Markdown, Static
+    md = app.query_one("#summary-body", Markdown)
+    empty = app.query_one("#summary-empty", Static)
+    return f"{md.source}\n{empty.content}"
+
+
+async def go_summary(pilot, app):
+    await pilot.press("3")
+    await pilot.pause()
+    return app.query_one("#summary")
+
+
+async def test_shows_the_newest_report_on_open(make_app, db):
+    upsert_report(db, date="2026-08-25", content="older")
+    upsert_report(db, date="2026-08-26", content="## Body\n\nnewer")
+    app = make_app()
+    async with app.run_test() as pilot:
+        tab = await go_summary(pilot, app)
+        assert tab.viewing_date == "2026-08-26"
+        assert "newer" in _body(app)
+
+
+async def test_empty_state_when_no_reports(make_app, db):
+    app = make_app()
+    async with app.run_test() as pilot:
+        tab = await go_summary(pilot, app)
+        assert tab.viewing_date is None
+        assert "press r" in _body(app)
+
+
+async def test_g_generates_and_persists(make_app, db):
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        return "## Body\n\nSteady."
+
+    app = make_app(runner_text=runner)
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        await pilot.press("r")
+        await pilot.pause()
+        await pilot.pause()
+        target = target_date(app.today())
+    assert get_report(db, target)["content"].startswith("## Body")
+
+
+async def test_generation_failure_surfaces_and_persists_nothing(make_app, db):
+    from daybook.claude import ClaudeError
+
+    async def runner(*a, **k):
+        raise ClaudeError("down")
+
+    app = make_app(runner_text=runner)
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        await pilot.press("r")
+        await pilot.pause()
+        await pilot.pause()
+        target = target_date(app.today())
+        assert app.is_running is True
+    assert get_report(db, target) is None
+
+
+async def test_bracket_keys_browse_earlier_reports(make_app, db):
+    upsert_report(db, date="2026-08-25", content="older")
+    upsert_report(db, date="2026-08-26", content="newer")
+    app = make_app()
+    async with app.run_test() as pilot:
+        tab = await go_summary(pilot, app)
+        await pilot.press("[")
+        await pilot.pause()
+        assert tab.viewing_date == "2026-08-25"
+        await pilot.press("]")
+        await pilot.pause()
+        assert tab.viewing_date == "2026-08-26"
+
+
+async def test_browsing_stops_at_the_oldest_report(make_app, db):
+    upsert_report(db, date="2026-08-25", content="only")
+    app = make_app()
+    async with app.run_test() as pilot:
+        tab = await go_summary(pilot, app)
+        await pilot.press("[")
+        await pilot.press("[")
+        await pilot.pause()
+        assert tab.viewing_date == "2026-08-25"
+        assert "only" in _body(app)
+
+
+async def test_browsing_stops_at_the_newest_report(make_app, db):
+    upsert_report(db, date="2026-08-25", content="a")
+    upsert_report(db, date="2026-08-26", content="b")
+    app = make_app()
+    async with app.run_test() as pilot:
+        tab = await go_summary(pilot, app)
+        await pilot.press("]")
+        await pilot.pause()
+        assert tab.viewing_date == "2026-08-26"
+
+
+async def test_markup_tags_are_translated_not_shown_raw(make_app, db):
+    upsert_report(db, date="2026-08-26", content="spent <num>$23.04</num>")
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        rendered = _body(app)
+    assert "<num>" not in rendered
+    assert "23.04" in rendered
+
+
+async def test_header_shows_the_report_date_and_time(make_app, db):
+    upsert_report(db, date="2026-08-26", content="x")
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        head = str(app.query_one("#summary-head").content)
+    assert "Aug 26" in head
+    assert "generated" in head
+
+
+async def test_regenerating_replaces_the_viewed_day(make_app, db):
+    upsert_report(db, date="2026-08-20", content="stale")
+
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        assert '"target_date": "2026-08-20"' in user_prompt
+        return "fresh"
+
+    app = make_app(runner_text=runner)
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        await pilot.press("r")
+        await pilot.pause()
+        await pilot.pause()
+    assert get_report(db, "2026-08-20")["content"] == "fresh"
+
+
+async def test_autorun_fires_when_past_the_hour_and_no_report(make_app, db):
+    calls = []
+
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        calls.append(1)
+        return "generated overnight"
+
+    app = make_app(summary_after_hour=6, now=lambda: MORNING, runner_text=runner)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+    assert app.summary_worker_started is True
+    assert len(calls) == 1
+    assert get_report(db, "2026-08-26")["content"] == "generated overnight"
+
+
+async def test_autorun_targets_yesterday_not_today(make_app, db):
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        return "y"
+
+    app = make_app(summary_after_hour=6, now=lambda: MORNING, runner_text=runner)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+    assert get_report(db, "2026-08-26") is not None
+    assert get_report(db, "2026-08-27") is None
+
+
+async def test_autorun_skipped_when_a_report_already_exists(make_app, db):
+    upsert_report(db, date="2026-08-26", content="already there")
+    calls = []
+
+    async def runner(*a, **k):
+        calls.append(1)
+        return "should not run"
+
+    app = make_app(summary_after_hour=6, now=lambda: MORNING, runner_text=runner)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+    assert app.summary_worker_started is False
+    assert calls == []
+    assert get_report(db, "2026-08-26")["content"] == "already there"
+
+
+async def test_autorun_failure_does_not_break_the_app(make_app, db):
+    from daybook.claude import ClaudeError
+
+    async def runner(*a, **k):
+        raise ClaudeError("offline")
+
+    app = make_app(summary_after_hour=6, now=lambda: MORNING, runner_text=runner)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        assert app.is_running is True
+    assert get_report(db, "2026-08-26") is None

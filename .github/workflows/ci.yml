@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Installs from pyproject.toml only. A dependency that exists solely in
+      # a local env has to fail here, not in daily use.
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: pytest -q
+
+      # An editable install reads the source tree, so it cannot catch a missing
+      # package-data declaration. Build a real wheel and assert the stylesheet
+      # is inside it — without app.tcss the app installs fine and then starts
+      # up unstyled.
+      - name: wheel ships the stylesheet
+        run: |
+          pip install -q build
+          python -m build --wheel --outdir dist_check
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist_check/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          if "daybook/tui/app.tcss" not in names:
+              sys.exit(f"app.tcss missing from {wheel}")
+          print("app.tcss present in", wheel)
+          PY
+
+      # The wheel is inspected above but never run. Install it non-editably in a
+      # clean venv and invoke the console script: that is the only step that
+      # exercises `[project.scripts]`, the package-data path resolution and the
+      # absence of any accidental dependency on the source tree.
+      - name: installed wheel runs
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install -q dist_check/*.whl
+          /tmp/smoke/bin/day --version
+          /tmp/smoke/bin/python -c "import daybook.tui.app; print('imports clean')"

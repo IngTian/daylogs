@@ -1,0 +1,123 @@
+"""The prompt's discoverability contract.
+
+`profile` shipped with a working grammar and no way to learn it, which is the
+regression these tests exist to prevent: a new prompt with no hint now fails the
+suite, and every example shown to the user is parsed to prove it is valid.
+"""
+
+import datetime as dt
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from daybook import editline
+from daybook.categories import slugs
+from daybook.parse import (
+    parse_budget,
+    parse_expense,
+    parse_food,
+    parse_profile,
+    parse_recurring,
+    parse_weigh,
+)
+from daybook.tui import hints
+
+SRC = Path(__file__).resolve().parents[1] / "daybook"
+
+# Fixed, because a parser result must never depend on when the suite runs.
+NOW = dt.datetime(2026, 8, 28, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
+
+# Which parser is behind each prompt. Prompts whose input is free text (filter),
+# a filesystem path (photo path), a bare category (fix category) or a date
+# (go to date) have no grammar parser and are checked separately.
+PARSERS = {
+    "weigh": parse_weigh,
+    "food": parse_food,
+    "confirm food": parse_food,
+    "expense": parse_expense,
+    "budget": parse_budget,
+    "recurring": parse_recurring,
+}
+
+# Edit prompts use the field-separated grammar in editline.py, not the entry
+# grammar — see that module for why reusing the entry grammar corrupts rows.
+EDIT_PARSERS = {
+    "edit weigh": editline.parse_weight,
+    "edit food": editline.parse_food,
+    "edit expense": editline.parse_expense,
+    "edit recurring": editline.parse_recurring,
+}
+
+NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile"}
+
+
+def test_every_prompt_opened_in_the_app_has_a_hint():
+    """The invariant. There is no table of labels to check against — they are string
+    literals at the call sites — so the source is the register."""
+    opened = set()
+    for path in SRC.rglob("*.py"):
+        opened |= hints.labels_in_source(path.read_text())
+    assert opened, "found no prompt.open() call sites — the regex has rotted"
+    missing = sorted(opened - {h.label for h in hints.HINTS})
+    assert not missing, f"prompts with no hint: {missing}"
+
+
+def test_no_hint_describes_a_prompt_that_does_not_exist():
+    """The other direction: a stale hint is a lie about what the app does."""
+    opened = set()
+    for path in SRC.rglob("*.py"):
+        opened |= hints.labels_in_source(path.read_text())
+    # Edit prompts are opened with a computed label in some paths; allow them.
+    stale = sorted(
+        h.label for h in hints.HINTS if h.label not in opened and not h.label.startswith("edit ")
+    )
+    assert not stale, f"hints for prompts that are never opened: {stale}"
+
+
+def test_hint_labels_are_unique():
+    labels = [h.label for h in hints.HINTS]
+    assert len(labels) == len(set(labels))
+
+
+def test_every_hint_has_both_an_example_and_a_grammar():
+    for h in hints.HINTS:
+        assert h.example.strip(), f"{h.label} has no example"
+        assert h.grammar.strip(), f"{h.label} has no grammar"
+
+
+@pytest.mark.parametrize("label", sorted(PARSERS))
+def test_every_example_is_a_line_the_parser_accepts(label):
+    """An example a reader copies verbatim must work. Otherwise the hint is worse
+    than no hint."""
+    hint = hints.for_label(label)
+    PARSERS[label](hint.example, now=NOW, known_slugs=slugs())
+
+
+def test_the_profile_example_parses_too():
+    """parse_profile takes no `now`, so it sits outside the parametrized case."""
+    p = parse_profile(hints.for_label("profile").example)
+    assert p.height_cm and p.sex and p.birthday
+
+
+@pytest.mark.parametrize("label", sorted(EDIT_PARSERS))
+def test_every_edit_example_is_a_line_the_edit_parser_accepts(label):
+    EDIT_PARSERS[label](hints.for_label(label).example)
+
+
+def test_labels_without_a_parser_are_deliberate_not_forgotten():
+    """Keeps the parser map honest: a new grammar-backed prompt must be added to
+    PARSERS rather than quietly landing in the free-text bucket."""
+    covered = set(PARSERS) | set(EDIT_PARSERS) | NO_PARSER
+    uncovered = sorted({h.label for h in hints.HINTS} - covered)
+    assert not uncovered, f"classify these in PARSERS or NO_PARSER: {uncovered}"
+
+
+def test_labels_in_source_finds_both_call_shapes():
+    text = 'self.app.prompt.open("weigh")\nself.prompt.open("filter", self.view.filter_text)\n'
+    assert hints.labels_in_source(text) == {"weigh", "filter"}
+
+
+def test_labels_in_source_handles_a_multiline_call():
+    text = 'self.app.prompt.open(\n    "confirm food", f"{x} {y}"\n)\n'
+    assert hints.labels_in_source(text) == {"confirm food"}

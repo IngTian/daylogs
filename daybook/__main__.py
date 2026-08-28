@@ -1,0 +1,101 @@
+"""Entry point.
+
+No arguments launches the TUI. The subcommands exist so the summary and a
+backup can run headless from cron without any code change — and because a
+single-file SQLite database that only exists in one place is one accident away
+from being no database at all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import datetime as dt
+import sys
+from pathlib import Path
+
+from daybook import __version__, claude, summary
+from daybook.config import load_config
+from daybook.db import connect, ensure_schema
+from daybook.log import setup_logging
+from daybook.money import MoneyError, check_date
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="day", description="personal daybook")
+    parser.add_argument("--version", action="store_true", help="print version and exit")
+    sub = parser.add_subparsers(dest="cmd")
+
+    p_sum = sub.add_parser("summary", help="generate the daily summary and print it")
+    p_sum.add_argument("--date", help="YYYY-MM-DD; defaults to yesterday")
+
+    p_bak = sub.add_parser("backup", help="write a consistent copy of the database")
+    p_bak.add_argument("dest", help="destination directory")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        return int(e.code) if e.code else 0
+
+    if args.version:
+        print(f"daybook {__version__}")
+        return 0
+
+    cfg = load_config()
+    setup_logging()
+    conn = connect(cfg.db_path)
+    ensure_schema(conn)
+
+    try:
+        if args.cmd == "summary":
+            return _summary(conn, cfg, args.date)
+        if args.cmd == "backup":
+            return _backup(conn, Path(args.dest).expanduser())
+        return _tui(conn, cfg)
+    finally:
+        conn.close()
+
+
+def _summary(conn, cfg, date: str | None) -> int:
+    target = date or summary.target_date(dt.date.today().isoformat())
+    try:
+        check_date(target)
+    except MoneyError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    try:
+        content = asyncio.run(
+            summary.generate(conn, cfg, date=target, runner=claude.run_oneshot_text)
+        )
+    except Exception as e:  # noqa: BLE001 - top-level CLI boundary
+        print(str(e), file=sys.stderr)
+        return 1
+    print(content)
+    return 0
+
+
+def _backup(conn, dest: Path) -> int:
+    """VACUUM INTO writes a consistent single-file copy without stopping the
+    app — exactly what a cron backup to a synced folder needs."""
+    dest.mkdir(parents=True, exist_ok=True)
+    out = dest / f"daybook-{dt.date.today().isoformat()}.db"
+    out.unlink(missing_ok=True)
+    conn.execute("VACUUM INTO ?", (str(out),))
+    print(out)
+    return 0
+
+
+def _tui(conn, cfg) -> int:
+    from daybook.tui.app import DaybookApp
+
+    DaybookApp(cfg, conn).run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

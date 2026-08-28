@@ -1,0 +1,131 @@
+Screen {
+    background: $surface;
+}
+
+/* Prompt and footer share ONE bottom-docked container. Docking both
+   independently made the footer claim the last row and clip the prompt's
+   bottom border. */
+#bottom {
+    dock: bottom;
+    height: auto;
+}
+
+#prompt {
+    height: 3;
+    border: round $accent;
+    /* Both corners left-aligned: the label sits above the text you are typing and
+       the grammar below it, so the eye tracks one column instead of three. */
+    border-title-align: left;
+    border-subtitle-align: left;
+}
+
+#prompt.error {
+    border: round $error;
+}
+
+/* Two rows: state on top, grouped keys below. One row meant nineteen hints in
+   a single 190-character line, where nothing stood out. */
+#keyfooter {
+    height: 2;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+/* ── panels ─────────────────────────────────────────────────────────── */
+.panel-row {
+    height: auto;
+}
+
+/* Under 100 columns the two panels stack rather than share the width. Side by
+   side they had ~40 columns each, which is not enough for a label, a bar and two
+   amounts — the bars vanished and the figures truncated. See
+   DaybookApp.HORIZONTAL_BREAKPOINTS. */
+.-narrow .panel-row {
+    layout: vertical;
+}
+
+.panel {
+    width: 1fr;
+    border: round $panel-lighten-2;
+    padding: 0 1;
+    height: auto;
+}
+
+.panel-title {
+    color: $text-muted;
+    text-style: bold;
+}
+
+/* One long line; on a narrow terminal it wrapped onto a second row and pushed the
+   panels down, so it truncates instead. */
+.pane-title {
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+/* nowrap so a chart slightly too wide truncates at the edge instead of
+   wrapping every row and doubling the panel's height.
+
+   `text-overflow` matters as much as `text-wrap`: nowrap only stops *word*
+   wrapping, and the default overflow is `fold`, which pushes the excess onto the
+   next line anyway — mid-word. A narrow terminal rendered "(1 days logg" / "ed)"
+   inside the ENERGY panel with nowrap already set. Charts clip, because an
+   ellipsis in a braille plot reads as data. */
+.chart {
+    color: $accent;
+    padding: 0;
+    text-wrap: nowrap;
+    text-overflow: clip;
+}
+
+.panel-body {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.muted {
+    color: $text-muted;
+    padding: 0 1;
+}
+
+.keys {
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* 1fr so the table absorbs the leftover height instead of leaving a void */
+DataTable {
+    height: 1fr;
+    min-height: 6;
+    margin: 0 1;
+}
+
+#summary-body {
+    padding: 0 2;
+    height: 1fr;
+}
+
+/* ── help overlay ───────────────────────────────────────────────────── */
+HelpScreen {
+    align: center middle;
+}
+
+#help-body {
+    width: 92;
+    max-height: 85%;
+    background: $surface;
+    border: round $accent;
+    padding: 1 2;
+}
+
+#help-columns {
+    height: auto;
+}
+
+.help-col {
+    width: 1fr;
+    padding: 0 1;
+}

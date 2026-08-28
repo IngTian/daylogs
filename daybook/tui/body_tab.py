@@ -1,0 +1,565 @@
+"""Tab 1 — weight and food for one day.
+
+Holds no arithmetic. Weight deltas come from body.weight_delta, the day's calorie
+total from body.day_kcal, BMR from body.compute_bmr, and the plot from chart.py.
+What lives here is key handling, the estimate review flow, and rendering.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+from textual import work
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.widgets import DataTable, Static
+
+from daybook import body, editline, estimate, photo
+from daybook import horizon as hz
+from daybook.config import load_config, update_config
+from daybook.fmt import hhmm, human_date
+from daybook.parse import parse_food, parse_profile, parse_weigh
+from daybook.tui import chart
+from daybook.tui.common import PanelTab
+from daybook.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
+
+_CHART_H = 8
+_YLABEL_W = 7
+# Deliberately not horizon.DEFAULT ("MTD"). A weight trend reads better over a
+# rolling month than over a month-to-date window that is one day wide on the 1st;
+# Money wants MTD because a budget is a calendar-month thing. The horizon *list* is
+# shared, the starting point is per-tab.
+_DEFAULT_HORIZON = "1m"
+
+
+class BodyTab(PanelTab):
+    def __init__(self, **kw) -> None:
+        super().__init__(**kw)
+        self.viewing_date = ""
+        self.table_mode = "food"
+        self.horizon = _DEFAULT_HORIZON
+        self._pending: estimate.Estimate | None = None
+        self._pending_photo: tuple[object, bool] | None = None
+        self._ids: list[int] = []
+        # The row an open edit prompt belongs to. InlinePrompt carries a label and
+        # text but no id, so the tab holds the identity between open and submit.
+        self._editing: tuple[str, int] | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Static(id="weight-head", classes="pane-title")
+        # Two panels side by side: the trend, and the energy balance. v2 left the
+        # right two-thirds of the screen empty.
+        with Horizontal(classes="panel-row"):
+            with Vertical(classes="panel", id="panel-trend"):
+                yield Static("TREND", classes="panel-title")
+                yield Static(id="weight-chart", classes="chart")
+            with Vertical(classes="panel", id="panel-energy"):
+                yield Static("ENERGY", classes="panel-title")
+                yield Static(id="energy-body", classes="panel-body")
+        yield Static(id="food-head", classes="pane-title")
+        yield DataTable(id="body-table", cursor_type="row")
+        yield Static(id="inbox-line", classes="muted")
+
+    def on_mount(self) -> None:
+        self.viewing_date = self.app.today()
+
+    def focus_default(self) -> None:
+        self.query_one("#body-table", DataTable).focus()
+
+    def span(self) -> hz.Span:
+        return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
+
+    def status_hint(self) -> str:
+        date = self.viewing_date or self.app.today()
+        parts = [self.horizon]
+        if date != self.app.today():
+            parts.insert(0, human_date(date))
+        return " · ".join(parts)
+
+    # ── rendering ────────────────────────────────────────────────────────
+    def reload(self) -> None:
+        conn, cfg = self.app.conn, self.app.cfg
+        date = self.viewing_date or self.app.today()
+
+        latest = body.latest_weight(conn, on_or_before=date)
+        kg = latest["kg"] if latest else None
+        if kg is None:
+            head = "WEIGHT   no weigh-in yet — press w"
+        else:
+            d7 = body.weight_delta(conn, end_date=date, days=7)
+            d30 = body.weight_delta(conn, end_date=date, days=30)
+            head = f"WEIGHT   {kg:g} kg   {_delta(d7, '7d')}   {_delta(d30, '30d')}"
+            # The reading is the latest *on or before* the viewed day, which can
+            # be much older. Showing a stale number as today's is the kind of
+            # quiet wrongness that makes a tracker untrustworthy.
+            if latest["date"] != date:
+                head += f"   (last weighed {human_date(latest['date'])})"
+        span = self.span()
+        head += f"   ·  {span.label}"
+        self.query_one("#weight-head", Static).update(head)
+
+        points = body.weight_series_between(conn, start=span.start, end=span.end)
+        # Plot against real dates, not point index. Two readings a day apart were
+        # being spread across a month-wide panel as a smooth climb; at their true
+        # positions they sit together at the right edge with the unweighed weeks
+        # visibly empty, which is the honest picture.
+        ax = hz.axis(span, [d for d, _ in points])
+        # Width from the panel, not a constant: a hardcoded width wider than the
+        # panel makes every chart row wrap, doubling its height and looking broken.
+        rows = chart.frame_chart(
+            [v for _, v in points],
+            width=self._chart_width(),
+            height=_CHART_H,
+            ylabel_width=_YLABEL_W,
+            x_labels=ax.labels(),
+            unit="",
+            positions=ax.fractions([d for d, _ in points]),
+        )
+        self.query_one("#weight-chart", Static).update("\n".join(rows))
+
+        kcal = body.day_kcal(conn, date=date)
+        bmr = body.compute_bmr(cfg, kg, today=date)
+        self.query_one("#energy-body", Static).update(
+            self._energy_panel(conn, cfg, date=date, kcal=kcal, bmr=bmr, span=span)
+        )
+
+        label = human_date(date)
+        if bmr is None:
+            fhead = f"FOOD   {label}   {kcal:,} kcal in"
+        else:
+            fhead = f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
+        self.query_one("#food-head", Static).update(fhead)
+
+        self._fill_table(date)
+
+        pending = photo.pending_count(cfg.inbox_dir)
+        line = self.query_one("#inbox-line", Static)
+        line.update(f"{pending} photo{'s' if pending != 1 else ''} in inbox — press p")
+        line.display = pending > 0
+
+    def _chart_width(self) -> int:
+        """Braille cells inside the trend panel, after the y labels and the axis."""
+        return max(16, self.panel_width("#panel-trend", minimum=24) - _YLABEL_W - 1)
+
+    def _energy_panel(self, conn, cfg, *, date, kcal, bmr, span) -> str:
+        """Intake against maintenance for the day, then the same over the horizon.
+
+        A calorie count means nothing without a baseline, which is why BMR sits
+        next to it rather than on its own line elsewhere.
+        """
+        lines: list[str] = []
+        if bmr is None:
+            lines.append(f"  in        {kcal:>7,} kcal")
+            # Name the key, not the file. Telling someone to edit config.toml is
+            # how this panel stayed empty: the fix was real but nobody was going
+            # to leave the app to apply it.
+            lines.append("  BMR             —   press h to set height,")
+            lines.append("                      sex and birthday")
+        else:
+            net = kcal - bmr
+            lines.append(f"  in        {kcal:>7,} kcal")
+            lines.append(f"  BMR      −{bmr:>7,}")
+            lines.append("            ─────────")
+            lines.append(f"  net       {net:>+7,}")
+            if kcal:
+                lines.append("")
+                bar_w = max(10, self.panel_width("#panel-energy", minimum=24) - 6)
+                lines.append(f"  {burn_bar(kcal, bmr, width=bar_w, marker_frac=None)}")
+                lines.append(f"  {round(kcal / bmr * 100)}% of maintenance")
+
+        avg = body.kcal_average(conn, start=span.start, end=span.end)
+        logged = body.kcal_series_between(conn, start=span.start, end=span.end)
+        lines.append("")
+        lines.append(f"  over {span.horizon}")
+        if avg is None:
+            lines.append("    no food logged in this window")
+        else:
+            lines.append(f"    avg in    {avg:>7,} kcal  ({len(logged)} days logged)")
+            if bmr is not None:
+                lines.append(f"    avg net   {avg - bmr:>+7,}")
+            spark_w = max(10, self.panel_width("#panel-energy", minimum=24) - 6)
+            lines.append(
+                # Calories are a magnitude from zero, so scale from zero: a run of
+                # similar days is a plateau, not a floor.
+                f"    {sparkline([float(v) for _, v in logged], width=spark_w, from_zero=True)}"
+            )
+        return "\n".join(lines)
+
+    def _fill_table(self, date: str) -> None:
+        table = self.query_one("#body-table", DataTable)
+        table.clear(columns=True)
+        self._ids = []
+        if self.table_mode == "weight":
+            table.add_columns("date", "kg", "note")
+            for r in body.list_weight(self.app.conn, limit=60):
+                table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
+                self._ids.append(r["id"])
+        else:
+            table.add_columns("time", "description", "kcal", "src")
+            for r in body.list_food(self.app.conn, date=date):
+                table.add_row(
+                    hhmm(r["ate_at"]),
+                    r["description"],
+                    f"{r['kcal']:,}",
+                    "lab" if r["source"] == "labeled" else "est",
+                )
+                self._ids.append(r["id"])
+
+    def _selected_row(self):
+        table = self.query_one("#body-table", DataTable)
+        row = table.cursor_row
+        if row is None or not (0 <= row < len(self._ids)):
+            return None
+        row_id = self._ids[row]
+        which = "weight" if self.table_mode == "weight" else "food"
+        return self.app.conn.execute(
+            f"SELECT * FROM {which} WHERE id = ?", (row_id,)
+        ).fetchone()
+
+    # ── keys ─────────────────────────────────────────────────────────────
+    def key_weigh(self) -> None:
+        self.app.prompt.open("weigh")
+
+    def key_profile(self) -> None:
+        cfg = self.app.cfg
+        current = " ".join(
+            str(v)
+            for v in (
+                f"{cfg.height_cm:g}" if cfg.height_cm else "",
+                cfg.sex or "",
+                cfg.birthday or "",
+            )
+            if v
+        )
+        self.app.prompt.open("profile", prefill=current)
+
+    def key_food(self) -> None:
+        self.app.prompt.open("food")
+
+    def key_activate(self) -> None:
+        """enter edits the row under the cursor.
+
+        Body had no key_activate at all, so enter did nothing here — the edit path
+        was specified in the original design and never wired up.
+        """
+        row = self._selected_row()
+        if row is None:
+            self.app.notify("no row selected", timeout=3)
+            return
+        if self.table_mode == "weight":
+            self._editing = ("weight", row["id"])
+            self.app.prompt.open("edit weigh", prefill=editline.render_weight(row))
+        else:
+            self._editing = ("food", row["id"])
+            self.app.prompt.open("edit food", prefill=editline.render_food(row))
+
+    def key_next_subview(self) -> None:
+        self.table_mode = "weight" if self.table_mode == "food" else "food"
+        self.reload()
+
+    key_prev_subview = key_next_subview  # only two sub-views; direction is moot
+
+    def key_prev_period(self) -> None:
+        self._shift_day(-1)
+
+    def key_next_period(self) -> None:
+        self._shift_day(1)
+
+    def _shift_day(self, delta: int) -> None:
+        base = dt.date.fromisoformat(self.viewing_date or self.app.today())
+        self.viewing_date = (base + dt.timedelta(days=delta)).isoformat()
+        self.reload()
+
+    def key_jump_now(self) -> None:
+        self.viewing_date = self.app.today()
+        self.reload()
+
+    def key_zoom_in(self) -> None:
+        self.horizon = hz.next_horizon(self.horizon, 1)
+        self.reload()
+
+    def key_zoom_out(self) -> None:
+        self.horizon = hz.next_horizon(self.horizon, -1)
+        self.reload()
+
+    def key_back(self) -> bool:
+        return False
+
+    def key_delete(self) -> None:
+        row = self._selected_row()
+        if row is None:
+            self.app.notify("nothing selected", timeout=3)
+            return
+        mode = self.table_mode
+        if mode == "weight":
+            label = f"{row['kg']:g} kg on {row['date']}"
+        else:
+            label = f"{row['description']} ({row['kcal']:,} kcal)"
+        self.app.ask_confirm(
+            f"delete {label}?   y/n", lambda: self._do_delete(mode, row["id"])
+        )
+
+    def _do_delete(self, mode: str, row_id: int) -> None:
+        table = "weight" if mode == "weight" else "food"
+        fn = body.delete_weight if mode == "weight" else body.delete_food
+        row = fn(self.app.conn, row_id)
+        if row is None:
+            return
+        self.app.undo_stack.push(table, row)
+        self.app.notify("deleted · u to undo", timeout=4)
+        self.reload()
+
+    def key_photo(self) -> None:
+        cfg = self.app.cfg
+        clip = photo.clipboard_image(cfg.root / ".tmp")
+        if clip is not None:
+            self._estimate_photo(clip, from_inbox=False)
+            return
+        nxt = photo.next_inbox_image(cfg.inbox_dir)
+        if nxt is not None:
+            self._estimate_photo(nxt, from_inbox=True)
+            return
+        self.app.prompt.open("photo path")
+
+    def _estimate_photo(self, path, *, from_inbox: bool) -> None:
+        self._pending_photo = (path, from_inbox)
+        self.app.notify("estimating from photo…", timeout=3)
+        self._run_image_estimate(path)
+
+    # ── workers ──────────────────────────────────────────────────────────
+    @work(exclusive=True)
+    async def _run_image_estimate(self, path) -> None:
+        try:
+            est = await estimate.from_image(
+                image_path=path,
+                note=None,
+                runner=self.app.runner_image,
+                timeout_sec=self.app.cfg.estimate_timeout_sec,
+                model=self.app.cfg.claude_model,
+            )
+        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+            self._pending_photo = None
+            self.app.notify_error(f"photo estimate failed: {e}")
+            return
+        self._offer(est)
+
+    @work(exclusive=True)
+    async def _run_text_estimate(self, description: str) -> None:
+        try:
+            est = await estimate.from_text(
+                description=description,
+                runner=self.app.runner_json,
+                timeout_sec=self.app.cfg.estimate_timeout_sec,
+                model=self.app.cfg.claude_model,
+            )
+        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+            self.app.notify_error(f"estimate failed: {e}")
+            return
+        self._offer(est)
+
+    def _offer(self, est: estimate.Estimate) -> None:
+        """Show the estimate as an editable line. Correcting it goes through the
+        same grammar as typing it, so there is one code path, not two."""
+        self._pending = est
+        self.app.prompt.open("confirm food", f"{est.description} {est.kcal}")
+
+    # ── prompt handling ──────────────────────────────────────────────────
+    def handle_prompt(self, label: str, value: str) -> None:
+        """Malformed input raises; the app catches it, keeps the text, and shows
+        why. Catching it here would discard the line the user typed."""
+        if not value:
+            self._pending = None
+            self._pending_photo = None
+            return
+        if label == "weigh":
+            self._submit_weigh(value)
+        elif label == "food":
+            self._submit_food(value)
+        elif label == "confirm food":
+            self._submit_confirmed_food(value)
+        elif label == "photo path":
+            self._estimate_photo(photo.resolve_path(value), from_inbox=False)
+        elif label == "go to date":
+            self._submit_goto(value)
+        elif label == "profile":
+            self._submit_profile(value)
+        elif label == "edit weigh":
+            self._submit_edit_weight(value)
+        elif label == "edit food":
+            self._submit_edit_food(value)
+
+    def _take_editing(self, which: str) -> int | None:
+        """The id an open edit prompt belongs to, consumed once.
+
+        Cleared on read so a stale id cannot be reused by the next submission — the
+        row may have been deleted in between.
+        """
+        if self._editing is None or self._editing[0] != which:
+            return None
+        _, row_id = self._editing
+        self._editing = None
+        return row_id
+
+    def _submit_edit_weight(self, value: str) -> None:
+        row_id = self._take_editing("weight")
+        if row_id is None:
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM weight WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        fields = editline.parse_weight(value)
+        # measured_at is not in the grammar and so is never passed — an edit cannot
+        # re-stamp the timestamp that decides which of a day's readings counts.
+        # The pre-image is pushed *after* the write: if the write raises, a pushed
+        # pre-image would sit on the stack for `u` to apply to a row that never
+        # changed. Both tabs do it in this order.
+        body.update_weight(self.app.conn, row_id, **fields)
+        self.app.undo_stack.push("weight", dict(before))
+        after = self.app.conn.execute(
+            "SELECT * FROM weight WHERE id = ?", (row_id,)
+        ).fetchone()
+        self.app.notify(
+            f"{after['kg']:g} kg on {after['date']} · u to undo", timeout=4
+        )
+        self.reload()
+
+    def _submit_edit_food(self, value: str) -> None:
+        row_id = self._take_editing("food")
+        if row_id is None:
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM food WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        fields = editline.parse_food(value)
+        # The grammar carries HH:MM but the column is epoch seconds, so re-deriving
+        # it unconditionally would silently drop the seconds off every edit. Only a
+        # changed minute rewrites it.
+        clock = fields.pop("time", None)
+        if clock is not None:
+            at = body.restamp(
+                before["ate_at"], date=fields.get("date", before["date"]), hhmm=clock
+            )
+            if at is not None:
+                fields["ate_at"] = at
+        # `source` is deliberately absent from the grammar: it is provenance
+        # (labelled vs estimated) that the digest reads, not something an edit of the
+        # description should rewrite. Pre-image after the write — see above.
+        body.update_food(self.app.conn, row_id, **fields)
+        self.app.undo_stack.push("food", dict(before))
+        after = self.app.conn.execute(
+            "SELECT * FROM food WHERE id = ?", (row_id,)
+        ).fetchone()
+        self.app.notify(
+            f"{after['description']} · {after['kcal']:,} kcal · u to undo", timeout=4
+        )
+        self.reload()
+
+    def _submit_profile(self, value: str) -> None:
+        """Persist to config.toml and reload, so BMR appears on this keystroke.
+
+        `load_config` is re-read from the app's own root rather than the default,
+        or a DAYBOOK_HOME-based run would write one file and read another.
+        """
+        profile = parse_profile(value)
+        update_config(self.app.cfg.root / "config.toml", profile.fields())
+        self.app.cfg = load_config(self.app.cfg.root)
+        cfg = self.app.cfg
+        if body.compute_bmr(cfg, 70.0, today=self.app.today()) is None:
+            missing = ", ".join(
+                name
+                for name, ok in (
+                    ("height", cfg.height_cm),
+                    ("sex", cfg.sex),
+                    ("birthday", cfg.birthday),
+                )
+                if not ok
+            )
+            self.app.notify(f"saved — still need {missing} for BMR", timeout=5)
+        else:
+            self.app.notify("profile saved", timeout=3)
+        self.app.refresh_tabs()
+
+    def _submit_goto(self, value: str) -> None:
+        # One shared rule. This used to build a throwaway MoneyView as a parser and
+        # then re-derive the date itself, which broke the day the month branch
+        # started returning the month's last day.
+        self.viewing_date = hz.resolve_goto(value)
+        self.reload()
+
+    def _submit_weigh(self, value: str) -> None:
+        r = parse_weigh(value, now=self.app.now())
+        body.add_weight(self.app.conn, kg=r.kg, date=r.date, at=r.at, note=r.note)
+        self.viewing_date = r.date
+        self.reload()
+        d7 = body.weight_delta(self.app.conn, end_date=r.date, days=7)
+        trend = "" if d7 is None else f" · {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+        self.app.notify(f"{r.kg:g} kg logged{trend}", timeout=4)
+
+    def _submit_food(self, value: str) -> None:
+        r = parse_food(value, now=self.app.now())
+        if r.kcal is None:
+            self.app.notify("estimating calories…", timeout=3)
+            self._run_text_estimate(r.description)
+            return
+        self._write_food(r, source="labeled")
+
+    def _submit_confirmed_food(self, value: str) -> None:
+        r = parse_food(value, now=self.app.now())
+        if r.kcal is None and self._pending is not None:
+            r = type(r)(
+                description=r.description,
+                kcal=self._pending.kcal,
+                date=r.date,
+                at=r.at,
+            )
+        self._write_food(r, source="estimated")
+        self._pending = None
+        # Only consume the inbox file once the row is actually written. A failed
+        # estimate must leave the photo pending, not silently eat it.
+        if self._pending_photo is not None:
+            path, from_inbox = self._pending_photo
+            if from_inbox:
+                photo.mark_processed(path, self.app.cfg.inbox_dir)
+            self._pending_photo = None
+
+    def _write_food(self, r, *, source: str) -> None:
+        body.add_food(
+            self.app.conn,
+            description=r.description,
+            kcal=r.kcal or 0,
+            source=source,
+            date=r.date,
+            at=r.at,
+        )
+        self.viewing_date = r.date
+        self.reload()
+        total = body.day_kcal(self.app.conn, date=r.date)
+        latest = body.latest_weight(self.app.conn, on_or_before=r.date)
+        bmr = body.compute_bmr(self.app.cfg, latest["kg"] if latest else None, today=r.date)
+        # The useful answer is not "saved" but where the day now stands.
+        against = f"{total:,} today" if bmr is None else f"{total - bmr:+,} vs BMR"
+        self.app.notify(f"{r.description} · {r.kcal or 0:,} kcal · {against}", timeout=4)
+
+
+def _delta(value: float | None, label: str) -> str:
+    """A weight change, coloured down-is-good.
+
+    That direction is an assumption, and the only one available: daybook stores no
+    goal weight, so "good" has to come from somewhere. Losing reads as progress
+    for the person who built a weight tracker. The arrow carries the direction
+    regardless, so the colour adds emphasis rather than being the only signal —
+    which matters if the assumption is ever wrong for you.
+    """
+    if value is None:
+        return f"— vs {label}"
+    arrow = "▼" if value < 0 else ("▲" if value > 0 else "→")
+    style = GOOD if value < 0 else (BAD if value > 0 else "")
+    return mark(f"{arrow} {abs(value):g} vs {label}", style)
+
+

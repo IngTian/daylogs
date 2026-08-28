@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+docs/
+.superpowers/
+.DS_Store
+*.spec
+dist_check/
+
+# daybook's own data, in case anyone ever points DAYBOOK_HOME at the checkout.
+# Nothing here is currently tracked; this keeps it that way.
+*.db
+*.db-journal
+config.toml
+memory.md
+inbox/
