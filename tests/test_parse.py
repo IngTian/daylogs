@@ -13,6 +13,7 @@ from daybook.parse import (
     parse_profile,
     parse_recurring,
     parse_weigh,
+    render_budget,
     render_expense,
     render_food,
     render_weigh,
@@ -310,25 +311,45 @@ def test_expense_round_trips(row):
 
 
 # ── budget ───────────────────────────────────────────────────────────────
-def test_budget_amount_and_category_name_defaults_to_display():
-    r = B("500 grocery")
-    assert (r.amount, r.category, r.name) == (500.0, "grocery", "Grocery")
+def test_budget_name_defaults_to_the_category_display():
+    r = B("500 !grocery")
+    assert (r.amount, r.name, r.category) == (500.0, "Grocery", "grocery")
 
 
-def test_budget_explicit_name():
-    r = B("500 household staples grocery")
-    assert (r.amount, r.category, r.name) == (500.0, "grocery", "household staples")
+def test_budget_takes_an_explicit_name():
+    r = B("500 household staples !grocery")
+    assert (r.name, r.category) == ("household staples", "grocery")
 
 
-def test_budget_requires_known_category():
-    with pytest.raises(ParseError):
-        B("500 nonsense")
+def test_a_budget_name_containing_a_category_word_survives():
+    r = B("300 restaurant fund !grocery")
+    assert (r.name, r.category) == ("restaurant fund", "grocery")
 
 
-@pytest.mark.parametrize("bad", ["-500 grocery", "0 grocery", "grocery"])
-def test_budget_rejects_bad_amount(bad):
-    with pytest.raises(ParseError):
-        B(bad)
+def test_budget_requires_a_category():
+    with pytest.raises(ParseError, match="!grocery"):
+        B("500 household staples")
+
+
+def test_budget_requires_a_positive_amount():
+    with pytest.raises(ParseError, match="positive"):
+        B("0 !grocery")
+    with pytest.raises(ParseError, match="positive"):
+        B("-5 !grocery")
+
+
+BUDGET_ROWS = [
+    dict(amount=500.0, name="Grocery", category="grocery"),
+    dict(amount=300.0, name="restaurant fund", category="grocery"),
+    dict(amount=200.0, name="household staples", category="other"),
+    dict(amount=75.0, name="July only line", category="other"),
+]
+
+
+@pytest.mark.parametrize("row", BUDGET_ROWS, ids=[r["name"][:14] for r in BUDGET_ROWS])
+def test_budget_round_trips(row):
+    got = B(render_budget(row))
+    assert (got.amount, got.name, got.category) == (row["amount"], row["name"], row["category"])
 
 
 # ── recurring ────────────────────────────────────────────────────────────

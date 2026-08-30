@@ -59,7 +59,7 @@ HINTS: tuple[Hint, ...] = (
         "12.40 lunch restaurant",
         f"amount · what · category — a negative amount is a refund · {WHEN}",
     ),
-    Hint("budget", "500 grocery", "amount · name (defaults to the category) · category"),
+    Hint("budget", "500 !grocery", "amount · name (defaults to the category) · !category"),
     Hint(
         "recurring",
         "20.99 streaming subscriptions",

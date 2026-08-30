@@ -94,7 +94,7 @@ async def test_b_sets_a_budget_line(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("b")
-        await type_into(pilot, "500 grocery")
+        await type_into(pilot, "500 !grocery")
         await pilot.press("enter")
         await pilot.pause()
         month = app.today()[:7]

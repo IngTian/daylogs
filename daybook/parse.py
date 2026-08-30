@@ -324,17 +324,25 @@ def render_expense(row) -> str:
 
 
 def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> BudgetInput:
-    t = tokenize(raw, now=now, known_slugs=known_slugs)
-    if t.amount is None or t.amount <= 0:
-        raise ParseError("budget needs a positive amount, e.g. 500 grocery")
-    if t.category is None:
-        raise ParseError("name a known category, e.g. 500 grocery")
-    cat = get(t.category)
+    toks = _tokens(raw)
+    amount = _leading_amount(toks, "a positive amount, e.g. 500 !grocery")
+    if amount <= 0:
+        raise ParseError("a budget needs a positive amount, e.g. 500 !grocery")
+    g = sigil.group(toks[1:])
+    slug = _single(g, "!", "category")
+    if slug is None:
+        raise ParseError("name a category, e.g. 500 !grocery")
+    category = _vocab(slug, known_slugs, "category")
+    cat = get(category)
     return BudgetInput(
-        amount=t.amount,
-        name=t.text or (cat.display if cat else t.category),
-        category=t.category,
+        amount=amount,
+        name=g.text or (cat.display if cat else category),
+        category=category,
     )
+
+
+def render_budget(row) -> str:
+    return f"{row['amount']:g} {sigil.escape(row['name'])} !{row['category']}"
 
 
 def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> RecurringInput:

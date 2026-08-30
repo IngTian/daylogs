@@ -343,7 +343,7 @@ async def test_budget_write_reports_spent_and_left(make_app, seeded, type_into):
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("b")
-        await type_into(pilot, "500 grocery")
+        await type_into(pilot, "500 !grocery")
         await pilot.press("enter")
         await pilot.pause()
     assert any("spent" in m and "left" in m for m in seen), f"{seen}"
