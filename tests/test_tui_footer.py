@@ -1,3 +1,4 @@
+from helpers import go_body
 from textual.content import Content
 
 from daybook.tui import keymap as km
@@ -103,6 +104,7 @@ async def test_footer_shows_the_tabs_state_chip(make_app):
 async def test_question_mark_opens_the_help_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("question_mark")
         await pilot.pause()
@@ -112,6 +114,7 @@ async def test_question_mark_opens_the_help_overlay(make_app):
 async def test_escape_closes_the_help_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         await pilot.press("escape")
@@ -122,6 +125,7 @@ async def test_escape_closes_the_help_overlay(make_app):
 async def test_question_mark_also_closes_the_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         await pilot.press("question_mark")
@@ -133,6 +137,7 @@ async def test_help_lists_every_key_in_the_map(make_app):
     """Generated from KEYMAP, so a bound key can never be undocumented."""
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))
@@ -143,6 +148,7 @@ async def test_help_lists_every_key_in_the_map(make_app):
 async def test_help_groups_keys_under_headings(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))
@@ -153,6 +159,7 @@ async def test_help_groups_keys_under_headings(make_app):
 async def test_help_marks_which_tab_a_scoped_key_belongs_to(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))

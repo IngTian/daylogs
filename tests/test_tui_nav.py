@@ -1,7 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from helpers import all_expenses
+from helpers import all_expenses, go_body
 
 from daybook.summary import upsert_report
 
@@ -13,6 +13,7 @@ NOW = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)
 async def test_t_returns_body_to_today_from_far_away(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-03-01"
@@ -67,6 +68,7 @@ async def test_t_on_summary_returns_to_the_newest_report(make_app, db):
 async def test_g_jumps_body_to_a_date(make_app, type_into):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("g")
         await type_into(pilot, "2026-06-15")
@@ -90,6 +92,7 @@ async def test_g_jumps_money_to_a_month(make_app, type_into):
 async def test_g_with_junk_keeps_the_prompt_open(make_app, type_into):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("g")
         await type_into(pilot, "june")
@@ -103,6 +106,7 @@ async def test_g_with_junk_keeps_the_prompt_open(make_app, type_into):
 async def test_tab_cycles_body_subview(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         assert body.table_mode == "food"
@@ -189,6 +193,7 @@ async def test_plus_zooms_the_body_horizon_and_both_tabs_share_the_list(make_app
     """The same horizon list serves Body and Money, so `+` means one thing."""
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         assert body.horizon == "1m"
@@ -259,6 +264,7 @@ async def test_typing_a_refund_into_the_prompt_is_not_eaten_by_the_minus_key(
 async def test_escape_never_quits(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         for _ in range(4):
             await pilot.press("escape")
@@ -339,6 +345,7 @@ async def test_a_bad_g_input_keeps_the_prompt_open(make_app):
 async def test_right_walks_forward_through_the_tabs(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         assert app.scope == "body"
         await pilot.press("right")
@@ -387,6 +394,7 @@ async def test_walking_stops_at_both_ends(make_app, db):
                  date="2026-08-27", at=1787000000 + i * 3600)
     app = make_app(now=lambda: NOW.replace(tzinfo=None))
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         # Walk to the far end first, so this test cannot pass merely because the
         # keys are unbound — it has to see them working before it checks they stop.
@@ -432,6 +440,7 @@ async def test_arrows_move_the_text_cursor_while_the_prompt_is_open(make_app, ty
     """
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.pause()
@@ -464,6 +473,7 @@ async def test_the_arrow_order_matches_the_tab_pane_order(make_app):
 
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         panes = [p.id for p in app.query_one("#tabs", TabbedContent).query(TabPane)]
     assert panes == list(_TAB_OF.values()), (
@@ -478,6 +488,7 @@ async def test_arrows_do_not_walk_tabs_behind_the_help_overlay(make_app):
     moment someone makes these keys priority."""
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("question_mark")
         await pilot.pause()

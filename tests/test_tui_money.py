@@ -1,6 +1,6 @@
 import datetime as dt
 
-from helpers import all_expenses
+from helpers import all_expenses, go_money
 
 from daybook.money import (
     add_expense,
@@ -9,12 +9,6 @@ from daybook.money import (
     upsert_budget,
     upsert_recurring,
 )
-
-
-async def go_money(pilot, app):
-    await pilot.press("3")
-    await pilot.pause()
-    return app.query_one("#money")
 
 
 async def test_e_logs_an_expense_with_inferred_category(make_app, db, type_into):

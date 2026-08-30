@@ -1,6 +1,8 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+from helpers import go_body
+
 TZ = ZoneInfo("America/Toronto")
 
 
@@ -25,6 +27,7 @@ async def test_number_keys_switch_tabs(make_app):
 async def test_prompt_opens_and_escape_closes_it(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         assert app.prompt.is_open is True
         await pilot.press("escape")
@@ -35,6 +38,7 @@ async def test_prompt_opens_and_escape_closes_it(make_app):
 async def test_tab_keys_are_inert_while_the_prompt_is_open(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.press("2")
         assert app.active_tab_id == "tab-body"
@@ -44,6 +48,7 @@ async def test_tab_keys_are_inert_while_the_prompt_is_open(make_app):
 async def test_q_does_not_quit_while_the_prompt_is_open(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.press("q")
         await pilot.pause()
@@ -54,6 +59,7 @@ async def test_q_does_not_quit_while_the_prompt_is_open(make_app):
 async def test_prompt_history_recalls_last_entry(make_app, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -147,6 +153,7 @@ async def test_the_pane_labels_are_numbered_in_order(make_app):
     app = make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        panes = app.query_one("#tabs", TabbedContent).query(TabPane)
-        labels = [str(p._title) for p in panes]
+        tabs_widget = app.query_one("#tabs", TabbedContent)
+        panes = tabs_widget.query(TabPane)
+        labels = [str(tabs_widget.get_tab(p.id).label) for p in panes]
     assert labels == ["1 Day", "2 Body", "3 Money"]

@@ -1,4 +1,4 @@
-from helpers import all_expenses
+from helpers import all_expenses, go_body
 
 from daybook.body import list_weight
 
@@ -6,6 +6,7 @@ from daybook.body import list_weight
 async def test_bad_weight_keeps_the_prompt_open_with_the_text(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -25,6 +26,7 @@ async def test_the_error_is_visible_while_the_text_is_still_there(make_app, db, 
     """
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -41,6 +43,7 @@ async def test_the_error_does_not_hide_in_the_placeholder(make_app, db, type_int
     """Regression guard for the original bug."""
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -51,6 +54,7 @@ async def test_the_error_does_not_hide_in_the_placeholder(make_app, db, type_int
 async def test_the_border_title_clears_on_success(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -64,6 +68,7 @@ async def test_the_border_title_clears_on_success(make_app, db, type_into):
 async def test_fixing_the_text_then_submitting_succeeds(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -79,6 +84,7 @@ async def test_fixing_the_text_then_submitting_succeeds(make_app, db, type_into)
 async def test_escape_abandons_a_failed_entry(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -120,6 +126,7 @@ async def test_an_unknown_category_keeps_its_text(make_app, db, type_into):
 async def test_a_successful_entry_is_remembered_in_history(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -133,6 +140,7 @@ async def test_a_rejected_entry_is_not_remembered(make_app, db, type_into):
     """History is for things that worked; recalling a rejected line is noise."""
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")

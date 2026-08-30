@@ -1,3 +1,5 @@
+from helpers import go_body
+
 from daybook.body import add_food, add_weight, list_food, list_weight
 from daybook.estimate import Estimate
 
@@ -5,6 +7,7 @@ from daybook.estimate import Estimate
 async def test_w_logs_a_weight(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -16,6 +19,7 @@ async def test_w_logs_a_weight(make_app, db, type_into):
 async def test_w_with_a_bad_value_writes_nothing(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -27,6 +31,7 @@ async def test_w_with_a_bad_value_writes_nothing(make_app, db, type_into):
 async def test_weight_header_renders_the_reading(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -44,6 +49,7 @@ async def test_f_with_explicit_calories_does_not_call_claude(make_app, db, type_
 
     app = make_app(runner_json=runner_json)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "salad =610")
         await pilot.press("enter")
@@ -65,6 +71,7 @@ async def test_f_without_calories_estimates_then_logs_as_estimated(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", fake_from_text)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "chicken caesar salad")
         await pilot.press("enter")
@@ -89,6 +96,7 @@ async def test_an_estimate_can_be_corrected_before_accepting(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", fake_from_text)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "salad")
         await pilot.press("enter")
@@ -117,6 +125,7 @@ async def test_estimate_failure_surfaces_and_logs_nothing(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", boom)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery meal")
         await pilot.press("enter")
@@ -145,6 +154,7 @@ async def test_p_uses_the_inbox_when_the_clipboard_is_empty(
 
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         await pilot.pause()
@@ -176,6 +186,7 @@ async def test_a_failed_photo_estimate_leaves_the_inbox_file_pending(
 
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         await pilot.pause()
@@ -201,6 +212,7 @@ async def test_p_prefers_the_clipboard_over_the_inbox(make_app, db, tmp_path, mo
 
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         await pilot.pause()
@@ -212,6 +224,7 @@ async def test_p_with_nothing_available_opens_the_path_prompt(make_app, db, monk
     monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         assert app.prompt.label == "photo path"
@@ -224,6 +237,7 @@ async def test_inbox_line_shows_pending_count(make_app, tmp_path, monkeypatch):
     (inbox / "b.jpg").write_bytes(b"x")
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         line = app.query_one("#inbox-line")
         assert line.display is True
@@ -233,6 +247,7 @@ async def test_inbox_line_shows_pending_count(make_app, tmp_path, monkeypatch):
 async def test_inbox_line_hidden_when_empty(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         assert app.query_one("#inbox-line").display is False
 
@@ -240,6 +255,7 @@ async def test_inbox_line_hidden_when_empty(make_app):
 async def test_bracket_keys_move_the_viewing_date(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         start = app.query_one("#body").viewing_date
         await pilot.press("[")
@@ -251,6 +267,7 @@ async def test_bracket_keys_move_the_viewing_date(make_app):
 async def test_tab_toggles_the_table_mode(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         assert body.table_mode == "food"
@@ -264,6 +281,7 @@ async def test_x_deletes_the_selected_food_row_and_u_restores_it(make_app, db):
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -283,6 +301,7 @@ async def test_x_then_n_cancels_the_delete(make_app, db):
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -297,6 +316,7 @@ async def test_x_then_n_cancels_the_delete(make_app, db):
 async def test_x_with_an_empty_table_does_not_crash(make_app, db):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("x")
         await pilot.pause()
@@ -307,6 +327,7 @@ async def test_x_deletes_a_weight_row_in_weight_mode(make_app, db):
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("tab")
         await pilot.pause()
@@ -321,6 +342,7 @@ async def test_weight_series_renders_a_braille_chart(make_app, db):
         add_weight(db, kg=kg, date=day, at=int(day[-2:]))
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -334,6 +356,7 @@ async def test_food_header_omits_bmr_without_a_profile(make_app, db):
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -350,6 +373,7 @@ async def test_food_header_shows_net_with_a_profile(make_app, make_cfg, db):
     cfg = make_cfg(height_cm=180, sex="male", birthday="1996-08-27")
     app = make_app(cfg=cfg)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -365,6 +389,7 @@ async def test_photo_path_prompt_rejects_a_non_image(make_app, tmp_path, type_in
     bad.write_text("x")
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         app.prompt.value = str(bad)
@@ -377,6 +402,7 @@ async def test_stale_weight_is_labelled_with_its_date(make_app, db):
     add_weight(db, kg=80.0, date="2026-07-07", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -391,6 +417,7 @@ async def test_todays_weight_is_not_labelled_stale(make_app, db):
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -900,6 +927,7 @@ async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated_from_text)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
         await pilot.press("enter")
@@ -922,6 +950,7 @@ async def test_the_footer_state_row_shows_estimating_while_in_flight(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", runner)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
         await pilot.press("enter")
@@ -1041,6 +1070,7 @@ async def test_the_indicator_clears_when_the_estimate_fails(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", boom)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
         await pilot.press("enter")
@@ -1064,6 +1094,7 @@ async def test_the_indicator_clears_when_the_estimate_times_out(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", timed_out)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
         await pilot.press("enter")
@@ -1100,6 +1131,7 @@ async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicato
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", two_stage)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "first stew")
         await pilot.press("enter")
@@ -1142,6 +1174,7 @@ async def test_the_photo_estimate_shows_the_same_indicator(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await started.wait()
         await pilot.pause()
@@ -1172,6 +1205,7 @@ async def test_no_three_second_toast_is_fired_for_an_estimate(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         app.notify = lambda msg, **kw: toasts.append((msg, kw.get("timeout")))  # type: ignore[method-assign]
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
@@ -1274,6 +1308,7 @@ async def test_only_one_estimate_runs_at_a_time(
 
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")                  # photo estimate starts, blocks
         await pilot.pause()
         await pilot.press("f")                  # text estimate should cancel it

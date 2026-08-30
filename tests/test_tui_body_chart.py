@@ -1,6 +1,8 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+from helpers import go_body
+
 from daybook.body import add_food, add_weight
 
 TZ = ZoneInfo("America/Toronto")
@@ -21,6 +23,7 @@ async def test_chart_renders_braille(make_app, db):
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-07-28"
@@ -35,6 +38,7 @@ async def test_chart_is_multirow_not_a_sparkline(make_app, db):
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-07-28"
@@ -48,6 +52,7 @@ async def test_chart_has_an_axis_and_date_labels(make_app, db):
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-07-28"
@@ -65,6 +70,7 @@ async def test_chart_labels_the_window_extent(make_app, db):
     add_weight(db, kg=79.9, date="2026-07-20", at=2)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-07-28"
@@ -78,6 +84,7 @@ async def test_chart_labels_the_window_extent(make_app, db):
 async def test_empty_chart_says_so(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         assert "no data" in _chart(app).lower()
 
@@ -86,6 +93,7 @@ async def test_zoom_changes_the_horizon_and_the_header_shows_the_span(make_app, 
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         assert body.horizon == "1m"
@@ -100,6 +108,7 @@ async def test_zoom_clamps_at_all(make_app, db):
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         for _ in range(10):
             await pilot.press("plus")
@@ -111,6 +120,7 @@ async def test_a_wider_window_shows_more_of_the_series(make_app, db):
     add_weight(db, kg=80.0, date="2026-07-20", at=2)
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-07-28"
@@ -133,6 +143,7 @@ async def test_weigh_in_reports_its_trend_not_just_the_number(make_app, db, type
     add_weight(db, kg=78.6, date="2026-08-22", at=1)
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
@@ -147,6 +158,7 @@ async def test_weigh_in_reports_its_trend_not_just_the_number(make_app, db, type
 async def test_first_ever_weigh_in_reports_without_a_trend(make_app, db, type_into):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
@@ -160,6 +172,7 @@ async def test_first_ever_weigh_in_reports_without_a_trend(make_app, db, type_in
 async def test_labelled_food_reports_the_day_total(make_app, db, type_into):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
@@ -178,6 +191,7 @@ async def test_food_feedback_uses_bmr_when_a_profile_exists(
     cfg = make_cfg(height_cm=180, sex="male", birthday="1996-08-27")
     app = make_app(cfg=cfg, now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
@@ -194,6 +208,7 @@ async def test_delete_confirm_names_the_row(make_app, db):
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=1)
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
@@ -211,6 +226,7 @@ async def test_weight_delete_confirm_names_the_reading(make_app, db):
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("tab")
         await pilot.pause()
@@ -225,6 +241,7 @@ async def test_delete_mentions_undo(make_app, db):
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=1)
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
