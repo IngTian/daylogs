@@ -26,7 +26,7 @@ async def test_t_returns_body_to_today_from_far_away(make_app):
 async def test_t_returns_money_to_this_month(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         money.view.anchor = "2026-03-15"
@@ -38,7 +38,7 @@ async def test_t_returns_money_to_this_month(make_app):
 async def test_t_on_money_also_clears_filters(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         money.view.filter_text = "coffee"
@@ -54,7 +54,6 @@ async def test_t_on_summary_returns_to_the_newest_report(make_app, db):
     upsert_report(db, date="2026-08-26", content="newer")
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("3")
         await pilot.pause()
         await pilot.press("left_square_bracket")
         await pilot.pause()
@@ -80,7 +79,7 @@ async def test_g_jumps_body_to_a_date(make_app, type_into):
 async def test_g_jumps_money_to_a_month(make_app, type_into):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("g")
         await type_into(pilot, "2026-06")
@@ -119,7 +118,7 @@ async def test_tab_cycles_body_subview(make_app):
 async def test_tab_cycles_money_panes_and_shift_tab_reverses(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         assert money.view.pane == "categories"
@@ -132,7 +131,7 @@ async def test_tab_cycles_money_panes_and_shift_tab_reverses(make_app):
 async def test_shift_tab_wraps_backwards(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         await pilot.press("shift+tab")
@@ -146,7 +145,7 @@ async def test_brackets_step_a_day_on_body_and_a_month_on_money(make_app):
         await pilot.pause()
         await pilot.press("left_square_bracket")
         assert app.query_one("#body").viewing_date == "2026-08-26"
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("left_square_bracket")
         assert app.query_one("#money").view.anchor == "2026-07-27"
@@ -155,7 +154,7 @@ async def test_brackets_step_a_day_on_body_and_a_month_on_money(make_app):
 async def test_brackets_step_by_the_active_range(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         await pilot.press("plus")  # 3m
@@ -168,7 +167,7 @@ async def test_brackets_browse_reports_on_summary(make_app, db):
     upsert_report(db, date="2026-08-26", content="newer")
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("3")
+        await pilot.press("1")
         await pilot.pause()
         await pilot.press("left_square_bracket")
         await pilot.pause()
@@ -179,7 +178,7 @@ async def test_brackets_browse_reports_on_summary(make_app, db):
 async def test_plus_widens_the_money_horizon_and_minus_narrows(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
         assert money.view.horizon == "MTD"
@@ -399,36 +398,41 @@ async def test_walking_stops_at_both_ends(make_app, db):
         # Walk to the far end first, so this test cannot pass merely because the
         # keys are unbound — it has to see them working before it checks they stop.
         await pilot.press("right")
-        await pilot.press("right")
         await pilot.pause()
-        assert app.scope == "summary", f"the arrows did not walk at all: {app.scope}"
+        assert app.scope == "money", f"the arrows did not walk at all: {app.scope}"
         await pilot.press("right")          # already on the last tab
         await pilot.pause()
         at_end = app.scope
         await pilot.press("left")
         await pilot.press("left")
         await pilot.pause()
-        assert app.scope == "body", f"the arrows did not walk back: {app.scope}"
+        assert app.scope == "summary", f"the arrows did not walk back: {app.scope}"
+        await pilot.press("left")           # already on the first tab
+        await pilot.pause()
+        at_start = app.scope
         # Seeded rows + a moved cursor, because "clamped" must mean "did nothing",
         # not "re-showed the tab you are on". Re-showing runs reload() ->
         # _fill_table -> table.clear(), which throws the cursor back to row 0 — the
-        # same defect body_tab._set_estimating exists to avoid. Holding `←` at the
-        # left end is exactly what a user does.
-        table = app.query_one("#body-table", DataTable)
+        # same defect body_tab._set_estimating exists to avoid. Holding `→` at the
+        # right end is exactly what a user does.
+        await pilot.press("right")
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.scope == "money", "walked back to money for table test"
+        table = app.query_one("#money-table", DataTable)
         table.focus()
         await pilot.press("down")
         await pilot.pause()
         cursor_before = table.cursor_row
         assert cursor_before > 0, "could not move the cursor — this would prove nothing"
-        await pilot.press("left")           # already on the first tab
+        await pilot.press("right")          # already on the last tab
         await pilot.pause()
-        at_start = app.scope
         cursor_after = table.cursor_row
     assert cursor_after == cursor_before, (
         f"a clamped arrow re-showed the tab and reset the cursor {cursor_before} -> {cursor_after}"
     )
-    assert at_end == "summary", f"right on the last tab moved to {at_end}"
-    assert at_start == "body", f"left on the first tab moved to {at_start}"
+    assert at_end == "money", f"right on the last tab moved to {at_end}"
+    assert at_start == "summary", f"left on the first tab moved to {at_start}"
 
 
 async def test_arrows_move_the_text_cursor_while_the_prompt_is_open(make_app, type_into):
@@ -523,7 +527,7 @@ async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db
                     date="2026-08-27")
     app = make_app(now=lambda: NOW.replace(tzinfo=None))
     async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("tab")            # categories -> the expense list
         await pilot.pause()

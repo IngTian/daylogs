@@ -1,4 +1,3 @@
-from helpers import go_body
 from textual.content import Content
 
 from daybook.tui import keymap as km
@@ -83,19 +82,19 @@ async def test_footer_updates_when_the_tab_changes(make_app):
     app = make_app()
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert "weigh" in str(app.query_one("#keyfooter").content)
+        assert "regenerate" in str(app.query_one("#keyfooter").content)
         await pilot.press("2")
         await pilot.pause()
-        assert "expense" in str(app.query_one("#keyfooter").content)
+        assert "weigh" in str(app.query_one("#keyfooter").content)
         await pilot.press("3")
         await pilot.pause()
-        assert "regenerate" in str(app.query_one("#keyfooter").content)
+        assert "expense" in str(app.query_one("#keyfooter").content)
 
 
 async def test_footer_shows_the_tabs_state_chip(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         text = str(app.query_one("#keyfooter").content)
     assert "2026" in text or "august" in text.lower()
@@ -104,7 +103,6 @@ async def test_footer_shows_the_tabs_state_chip(make_app):
 async def test_question_mark_opens_the_help_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.pause()
         await pilot.press("question_mark")
         await pilot.pause()
@@ -114,7 +112,6 @@ async def test_question_mark_opens_the_help_overlay(make_app):
 async def test_escape_closes_the_help_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         await pilot.press("escape")
@@ -125,7 +122,6 @@ async def test_escape_closes_the_help_overlay(make_app):
 async def test_question_mark_also_closes_the_overlay(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         await pilot.press("question_mark")
@@ -137,7 +133,6 @@ async def test_help_lists_every_key_in_the_map(make_app):
     """Generated from KEYMAP, so a bound key can never be undocumented."""
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))
@@ -148,7 +143,6 @@ async def test_help_lists_every_key_in_the_map(make_app):
 async def test_help_groups_keys_under_headings(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))
@@ -159,7 +153,6 @@ async def test_help_groups_keys_under_headings(make_app):
 async def test_help_marks_which_tab_a_scoped_key_belongs_to(make_app):
     app = make_app()
     async with app.run_test() as pilot:
-        await go_body(pilot, app)
         await pilot.press("question_mark")
         await pilot.pause()
         text = "\n".join(str(w.content) for w in app.screen.query("Static"))
@@ -272,7 +265,7 @@ async def test_footer_occupies_two_rows(make_app):
 async def test_state_row_and_key_row_are_separate_lines(make_app):
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         state, keys = str(app.query_one("#keyfooter").content).split("\n")
     assert "sort" in state
@@ -285,7 +278,7 @@ async def test_money_state_row_shows_all_sort_fields_with_the_active_one_marked(
     set with the active one emphasised does not."""
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         state = plain(str(app.query_one("#keyfooter").content).split("\n")[0])
     for field in ("date", "cost", "category"):
@@ -296,7 +289,7 @@ async def test_money_state_row_shows_all_sort_fields_with_the_active_one_marked(
 async def test_money_state_row_follows_a_sort_change(make_app):
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("c")
         await pilot.pause()
         state = plain(str(app.query_one("#keyfooter").content).split("\n")[0])
@@ -310,7 +303,6 @@ async def test_the_footer_never_advertises_a_key_nothing_handles(make_app):
     names dead keys has the same defect as a hand-written one."""
     app = make_app()
     async with app.run_test(size=(160, 30)) as pilot:
-        await pilot.press("3")
         await pilot.pause()
         keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
     assert "regenerate" in keys
@@ -321,7 +313,6 @@ async def test_the_footer_never_advertises_a_key_nothing_handles(make_app):
 async def test_the_footer_still_advertises_keys_the_tab_does_handle(make_app):
     app = make_app()
     async with app.run_test(size=(160, 30)) as pilot:
-        await pilot.press("3")
         await pilot.pause()
         keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
     for expected in ("prev", "next", "today", "quit", "keys"):
@@ -331,7 +322,7 @@ async def test_the_footer_still_advertises_keys_the_tab_does_handle(make_app):
 async def test_body_and_money_keep_their_sub_view_and_horizon_keys(make_app):
     app = make_app()
     async with app.run_test(size=(200, 30)) as pilot:
-        for key in ("1", "2"):
+        for key in ("2", "3"):
             await pilot.press(key)
             await pilot.pause()
             keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])

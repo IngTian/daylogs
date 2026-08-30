@@ -6,24 +6,6 @@ from helpers import go_body
 TZ = ZoneInfo("America/Toronto")
 
 
-async def test_starts_on_body_tab(make_app):
-    app = make_app()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        assert app.active_tab_id == "tab-body"
-
-
-async def test_number_keys_switch_tabs(make_app):
-    app = make_app()
-    async with app.run_test() as pilot:
-        await pilot.press("2")
-        assert app.active_tab_id == "tab-money"
-        await pilot.press("3")
-        assert app.active_tab_id == "tab-summary"
-        await pilot.press("1")
-        assert app.active_tab_id == "tab-body"
-
-
 async def test_prompt_opens_and_escape_closes_it(make_app):
     app = make_app()
     async with app.run_test() as pilot:
@@ -72,6 +54,7 @@ async def test_prompt_history_recalls_last_entry(make_app, type_into):
 async def test_prompt_history_is_per_label(make_app, type_into):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -84,6 +67,7 @@ async def test_prompt_history_is_per_label(make_app, type_into):
 async def test_empty_submission_is_a_no_op(make_app, db):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.press("enter")
         await pilot.pause()

@@ -99,7 +99,7 @@ async def test_escape_abandons_a_failed_entry(make_app, db, type_into):
 async def test_bad_expense_keeps_its_text_too(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("e")
         await type_into(pilot, "lunch")
@@ -113,7 +113,7 @@ async def test_bad_expense_keeps_its_text_too(make_app, db, type_into):
 async def test_an_unknown_category_keeps_its_text(make_app, db, type_into):
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("b")
         await type_into(pilot, "500 nonsense")
@@ -158,7 +158,7 @@ async def test_a_handler_that_chains_to_another_prompt_is_not_stomped(make_app, 
     *different* prompt the handler just opened."""
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         await pilot.press("e")
         await type_into(pilot, "12.40 lunch")
@@ -267,7 +267,7 @@ async def test_fixing_an_error_restores_the_grammar(make_app, db, type_into):
 async def test_tab_completes_a_category(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("e")
         await type_into(pilot, "12.40 lunch !gro")
         await pilot.press("tab")
@@ -280,7 +280,7 @@ async def test_tab_still_changes_sub_view_when_the_prompt_is_closed(make_app):
     """The binding has to keep its original job."""
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.pause()
         before = app.query_one("#money").view.pane
         await pilot.press("tab")
@@ -292,7 +292,7 @@ async def test_tab_still_changes_sub_view_when_the_prompt_is_closed(make_app):
 async def test_the_border_shows_candidates_while_in_a_sigil_token(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("e")
         await type_into(pilot, "12.40 lunch !")
         await pilot.pause()
@@ -306,7 +306,7 @@ async def test_the_border_returns_to_the_grammar_outside_a_sigil_token(make_app,
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("e")
         await type_into(pilot, "12.40 lunch !grocery")
         await pilot.press("tab")
@@ -318,7 +318,7 @@ async def test_the_border_returns_to_the_grammar_outside_a_sigil_token(make_app,
 async def test_repeated_tabs_cycle_an_ambiguous_prefix(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("e")
         await type_into(pilot, "12.40 x !e")
         await pilot.press("tab")
@@ -349,7 +349,7 @@ async def test_completing_mid_line_leaves_the_cursor_after_the_completed_word(ma
     """The pure engine is tested for this; this proves the widget does not clamp it."""
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.press("2")
+        await pilot.press("3")
         await pilot.press("e")
         await type_into(pilot, "12.40 lunch !gro")
         await type_into(pilot, " extra")
