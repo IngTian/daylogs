@@ -56,6 +56,9 @@ class BodyTab(PanelTab):
         # itself; a `finally` would clear it in the gap between the two and blink the
         # indicator off mid-estimate. Same shape as summary_tab's `busy`.
         self._estimating = False
+        # The FOOD header without the estimate suffix, kept so the suffix can be
+        # painted on and off without recomputing the line or touching the table.
+        self._food_head = ""
 
     def compose(self) -> ComposeResult:
         yield Static(id="weight-head", classes="pane-title")
@@ -79,8 +82,19 @@ class BodyTab(PanelTab):
         self.query_one("#body-table", DataTable).focus()
 
     def cancel_editing(self) -> None:
-        """Drop the armed edit id when a prompt is cancelled."""
+        """Drop everything an abandoned prompt was carrying.
+
+        Not just the edit id. `_pending_photo` says "this inbox file belongs to the
+        row about to be written", and it is consumed — the file is *moved* into
+        `processed/` — by whichever `confirm food` submission comes next. Leave it
+        armed after someone escapes the confirm prompt and the next typed meal, with
+        nothing to do with the photo, eats it: no food row for it, and it vanishes
+        from the inbox count with no message. `_pending` is dropped for the same
+        reason, so a stale estimate cannot supply calories to an unrelated line.
+        """
         self._editing = None
+        self._pending = None
+        self._pending_photo = None
 
     def span(self) -> hz.Span:
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
@@ -143,12 +157,12 @@ class BodyTab(PanelTab):
 
         label = human_date(date)
         if bmr is None:
-            fhead = f"FOOD   {label}   {kcal:,} kcal in"
+            self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
         else:
-            fhead = f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
-        if self._estimating:
-            fhead += _ESTIMATING
-        self.query_one("#food-head", Static).update(fhead)
+            self._food_head = (
+                f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
+            )
+        self._paint_food_head()
 
         self._fill_table(date)
 
@@ -346,9 +360,24 @@ class BodyTab(PanelTab):
         self._run_image_estimate(path)
 
     # ── workers ──────────────────────────────────────────────────────────
+    def _paint_food_head(self) -> None:
+        suffix = _ESTIMATING if self._estimating else ""
+        self.query_one("#food-head", Static).update(self._food_head + suffix)
+
     def _set_estimating(self, running: bool) -> None:
+        """Repaint only the two places the indicator appears.
+
+        Deliberately not `reload()`. That calls `_fill_table`, which does
+        `table.clear(columns=True)` and so resets the DataTable cursor to row 0 —
+        starting an estimate would throw away whichever food row you had selected.
+        And `reload()` could not show the footer half anyway: the footer is a
+        sibling widget, rewritten only by `App.refresh_footer()`, so without this
+        call `status_hint()`'s suffix never reaches the screen and a footer painted
+        by some other keypress mid-estimate would never be cleared.
+        """
         self._estimating = running
-        self.reload()
+        self._paint_food_head()
+        self.app.refresh_footer()
 
     @work(exclusive=True)
     async def _run_image_estimate(self, path) -> None:
@@ -371,6 +400,11 @@ class BodyTab(PanelTab):
 
     @work(exclusive=True)
     async def _run_text_estimate(self, description: str) -> None:
+        # A typed estimate supersedes any photo waiting to be confirmed — it shares
+        # the exclusive group, so starting this cancels the image worker, and a
+        # cancelled worker never reaches the `except` that would have released the
+        # photo. Left armed, the file would be consumed by THIS estimate's confirm.
+        self._pending_photo = None
         self._set_estimating(True)
         try:
             est = await estimate.from_text(

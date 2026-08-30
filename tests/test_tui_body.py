@@ -877,6 +877,18 @@ def _food_head(app) -> str:
     return str(app.query_one("#food-head", Static).content)
 
 
+def _footer(app) -> str:
+    """The footer's PAINTED text.
+
+    Deliberately not `status_hint()`: the footer is a sibling widget rewritten only
+    by App.refresh_footer(), so asserting on the method passes while the screen
+    stays silent. That is exactly how the first version of this shipped half-dead.
+    """
+    from daybook.tui.footer import KeyFooter
+
+    return str(app.query_one(KeyFooter).render())
+
+
 async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
     make_app, db, type_into, monkeypatch
 ):
@@ -922,6 +934,100 @@ async def test_the_footer_state_row_shows_estimating_while_in_flight(
         after = app.query_one("#body").status_hint()
     assert "estimating" in mid.lower(), f"footer silent mid-flight: {mid!r}"
     assert "estimating" not in after.lower(), f"footer still busy after: {after!r}"
+
+
+async def test_the_rendered_footer_shows_and_then_clears_the_indicator(
+    make_app, db, type_into, monkeypatch
+):
+    """The footer half, asserted on the painted widget.
+
+    `_set_estimating` has to call `app.refresh_footer()` itself: `reload()` only
+    repaints BodyTab's own widgets, and every other refresh_footer call site is
+    driven by a keypress. Without it the footer never shows the indicator during
+    the wait, and — worse — a footer painted by any keypress mid-estimate keeps
+    claiming an estimate is running long after it finished.
+    """
+    import asyncio
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def gated(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="gated", kcal=500)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        during = _footer(app)
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = _footer(app)
+    assert "estimating" in during.lower(), f"painted footer silent mid-estimate: {during!r}"
+    assert "estimating" not in after.lower(), (
+        f"painted footer still claims an estimate is running: {after!r}"
+    )
+
+
+async def test_a_photo_estimate_does_not_move_the_selected_food_row(
+    make_app, db, tmp_path, monkeypatch
+):
+    """Starting an estimate must not disturb what you were looking at.
+
+    The indicator first repainted via reload(), which calls _fill_table, which does
+    table.clear(columns=True) and resets the cursor to row 0.
+
+    The PHOTO path is the one that proves it: `p` opens no prompt, so nothing else
+    repaints the tab and _set_estimating was the only thing touching the table. (The
+    `f` path already resets the cursor when the prompt opens — pre-existing, and not
+    this change's to fix.)
+    """
+    import asyncio
+    import datetime as dt
+
+    from textual.widgets import DataTable
+
+    for i in range(4):
+        add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
+                 date="2026-08-28", at=1787000000 + i * 3600)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def gated(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="ribeye", kcal=910)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#body-table", DataTable)
+        table.focus()
+        table.move_cursor(row=3)
+        await pilot.pause()
+        assert table.cursor_coordinate.row == 3, (
+            "could not select row 3 — this test would prove nothing"
+        )
+        await pilot.press("p")
+        await started.wait()
+        await pilot.pause()
+        during = table.cursor_coordinate.row
+        release.set()
+        await pilot.pause()
+    assert during == 3, f"starting a photo estimate moved the cursor from row 3 to row {during}"
 
 
 async def test_the_indicator_clears_when_the_estimate_fails(
@@ -1079,6 +1185,41 @@ async def test_no_three_second_toast_is_fired_for_an_estimate(
     )
 
 
+async def test_no_three_second_toast_is_fired_for_a_photo_estimate(
+    make_app, db, tmp_path, monkeypatch
+):
+    """The photo path had its own copy of the defect ("estimating from photo…",
+    also timeout=3). Pinned separately because intercepting only the text path
+    leaves this one free to come back."""
+    import asyncio
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    started, release = asyncio.Event(), asyncio.Event()
+    toasts = []
+
+    async def gated(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="ribeye", kcal=910)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        app.notify = lambda msg, **kw: toasts.append((msg, kw.get("timeout")))  # type: ignore[method-assign]
+        await pilot.press("p")
+        await started.wait()
+        await pilot.pause()
+        release.set()
+        await pilot.pause()
+    assert not [t for t in toasts if "estimat" in t[0].lower()], (
+        f"a photo estimate toast was still fired: {toasts}"
+    )
+
+
 async def test_only_one_estimate_runs_at_a_time(
     make_app, db, tmp_path, type_into, monkeypatch
 ):
@@ -1146,3 +1287,116 @@ async def test_only_one_estimate_runs_at_a_time(
         f"{peak} estimates were live at once — the photo and text workers no longer "
         "share an exclusive group, so a flag is not enough; use a count"
     )
+
+
+# ── an abandoned photo must not be eaten by the next meal ─────────────────
+
+
+def _inbox_state(tmp_path):
+    inbox = tmp_path / "inbox"
+    processed = inbox / "processed"
+    return (
+        sorted(p.name for p in inbox.glob("*.jpg")),
+        sorted(p.name for p in processed.glob("*.jpg")) if processed.exists() else [],
+    )
+
+
+async def test_escaping_a_photo_confirm_does_not_let_the_next_meal_eat_the_photo(
+    make_app, db, tmp_path, type_into, monkeypatch
+):
+    """`_pending_photo` is what says "this inbox file belongs to the row about to be
+    written". Walking away from the confirm prompt has to drop it, or the NEXT
+    confirmed estimate — a typed meal, nothing to do with the photo — moves the
+    file into `processed/` and the photo is gone without ever being logged.
+    """
+    import asyncio  # noqa: F401
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr(
+        "daybook.tui.body_tab.estimate.from_image",
+        lambda **kw: _immediate(Estimate(description="ribeye", kcal=910)),
+    )
+    monkeypatch.setattr(
+        "daybook.tui.body_tab.estimate.from_text",
+        lambda **kw: _immediate(Estimate(description="side salad", kcal=120)),
+    )
+
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label == "confirm food", "the photo estimate never offered"
+        await pilot.press("escape")             # changed my mind
+        await pilot.pause()
+        # Asserted as state, not as loss: the typed estimate below also releases the
+        # photo, so with both clears in place the damage is unreachable and only the
+        # invariant itself can be pinned here. An abandoned prompt carries nothing
+        # forward — that is what keeps it unreachable when someone adds a new route
+        # into `confirm food`.
+        tab = app.query_one("#body")
+        assert tab._pending_photo is None, "escaping the confirm prompt kept the photo armed"
+        assert tab._pending is None, "escaping the confirm prompt kept a stale estimate armed"
+        await pilot.press("f")                  # a completely unrelated meal
+        await type_into(pilot, "side salad")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("enter")              # accept the typed estimate
+        await pilot.pause()
+        today = app.today()
+    pending, processed = _inbox_state(tmp_path)
+    rows = [r["description"] for r in list_food(db, date=today)]
+    assert rows == ["side salad"], f"unexpected food rows: {rows}"
+    assert pending == ["meal.jpg"], f"the photo was consumed by an unrelated meal: {pending}"
+    assert processed == [], f"the photo was moved to processed without being logged: {processed}"
+
+
+async def test_a_superseded_photo_estimate_does_not_let_the_next_meal_eat_the_photo(
+    make_app, db, tmp_path, type_into, monkeypatch
+):
+    """Same loss by the other route: the photo estimate is still running when a typed
+    one supersedes it. The image worker is cancelled, so its `except` — the only
+    place that clears `_pending_photo` on failure — never runs.
+    """
+    import asyncio
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    async def never(**kw):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", never)
+    monkeypatch.setattr(
+        "daybook.tui.body_tab.estimate.from_text",
+        lambda **kw: _immediate(Estimate(description="side salad", kcal=120)),
+    )
+
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.press("p")                  # photo estimate starts, hangs
+        await pilot.pause()
+        await pilot.press("f")                  # supersedes it
+        await type_into(pilot, "side salad")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label == "confirm food", "the typed estimate never offered"
+        await pilot.press("enter")
+        await pilot.pause()
+        today = app.today()
+    pending, processed = _inbox_state(tmp_path)
+    rows = [r["description"] for r in list_food(db, date=today)]
+    assert rows == ["side salad"], f"unexpected food rows: {rows}"
+    assert pending == ["meal.jpg"], f"the photo was consumed by an unrelated meal: {pending}"
+    assert processed == [], f"the photo was moved to processed without being logged: {processed}"
+
+
+async def _immediate(value):
+    return value
