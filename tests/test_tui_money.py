@@ -669,14 +669,21 @@ async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, d
 
 async def test_empty_submit_on_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
     """If user arms an expense edit, clears the line, submits empty, then submits a
-    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row.
+
+    The clock is pinned and the prompt asserted open: the Money table defaults to
+    MTD, so on an unpinned clock this row falls outside the window from September
+    and `enter` would arm nothing, passing every assertion below for free.
+    """
     add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
