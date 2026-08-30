@@ -212,12 +212,26 @@ def tokenize(
 
 
 def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> WeighInput:
-    t = tokenize(raw, now=now)
-    if t.amount is None:
-        raise ParseError("start with a weight, e.g. 78.2")
-    if not 0 < t.amount <= MAX_KG:
-        raise ParseError(f"{t.amount} kg is not a plausible weight")
-    return WeighInput(kg=t.amount, note=t.text or None, date=t.date, at=t.at)
+    toks = _tokens(raw)
+    kg = _leading_amount(toks, "a weight, e.g. 78.2")
+    if not 0 < kg <= MAX_KG:
+        raise ParseError(f"{kg:g} kg is not a plausible weight")
+    g = sigil.group(toks[1:])
+    if "~" in g.by_sigil:
+        raise ParseError("a weigh-in's note is just the words — drop the ~")
+    when = resolve_when(g.by_sigil.get("@", []), now=now)
+    return WeighInput(kg=kg, note=g.text or None, date=when.date, at=when.at)
+
+
+def render_weigh(row) -> str:
+    """No time in the line: `measured_at` is the tie-breaker weight_series uses to
+    pick a day's reading, and re-deriving it from an HH:MM token would shave the
+    seconds off every edit."""
+    parts = [f"{row['kg']:g}"]
+    if row["note"]:
+        parts.append(sigil.escape(row["note"]))
+    parts.append(f"@{row['date']}")
+    return " ".join(parts)
 
 
 def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodInput:

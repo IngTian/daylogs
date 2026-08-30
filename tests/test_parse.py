@@ -13,6 +13,7 @@ from daybook.parse import (
     parse_recurring,
     parse_weigh,
     render_expense,
+    render_weigh,
     resolve_when,
 )
 
@@ -42,55 +43,62 @@ def R(raw):
 
 
 # ── weigh ────────────────────────────────────────────────────────────────
-def test_weigh_bare_number():
-    r = W("78.2")
-    assert r.kg == 78.2
-    assert r.note is None
-    assert r.date == "2026-08-27"
-    assert r.at == int(NOW.timestamp())
+def test_weigh_reads_a_bare_number():
+    assert W("78.2").kg == 78.2
 
 
-def test_weigh_with_note():
-    assert W("78.2 post-run, dehydrated").note == "post-run, dehydrated"
+def test_weigh_plain_text_is_the_note():
+    r = W("78.2 post-run")
+    assert (r.kg, r.note) == (78.2, "post-run")
 
 
-def test_weigh_backdated_full_and_short():
-    assert W("78.2 @2026-08-25").date == "2026-08-25"
-    assert W("78.2 @08-25").date == "2026-08-25"
+def test_a_weigh_note_containing_a_time_survives():
+    """This used to lose the 6:50 AND re-stamp the timestamp to 06:50 — two fields
+    corrupted by one entry."""
+    r = W("79.4 weighed at 6:50 before food")
+    assert r.note == "weighed at 6:50 before food"
+    assert datetime.fromtimestamp(r.at).strftime("%H:%M") == NOW.strftime("%H:%M")
 
 
-def test_weigh_explicit_time_sets_at_not_note():
-    r = W("78.2 07:15")
-    assert r.note is None
-    assert datetime.fromtimestamp(r.at, TZ).hour == 7
+def test_a_weigh_note_starting_with_a_number_survives():
+    assert W("80 80 was the goal").note == "80 was the goal"
 
 
-def test_weigh_backdated_without_time_keeps_wall_clock():
-    r = W("78.2 @08-25")
-    got = datetime.fromtimestamp(r.at, TZ)
-    assert (got.month, got.day, got.hour, got.minute) == (8, 25, 19, 40)
+def test_weigh_takes_a_time():
+    r = W("78.2 post-run @07:30")
+    assert datetime.fromtimestamp(r.at).strftime("%H:%M") == "07:30"
 
 
-def test_weigh_backdated_time_uses_that_date():
-    r = W("78.2 @08-25 07:15")
-    got = datetime.fromtimestamp(r.at, TZ)
-    assert (got.year, got.month, got.day, got.hour, got.minute) == (2026, 8, 25, 7, 15)
+def test_weigh_rejects_a_tilde_and_says_what_it_would_have_set():
+    with pytest.raises(ParseError, match="note"):
+        W("78.2 ~post-run")
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "heavy", "0", "-5", "700"])
-def test_weigh_rejects_missing_nonnumeric_and_absurd(bad):
-    with pytest.raises(ParseError):
-        W(bad)
+def test_weigh_rejects_an_implausible_value():
+    with pytest.raises(ParseError, match="plausible weight"):
+        W("900")
 
 
-def test_weigh_rejects_impossible_date():
-    with pytest.raises(ParseError):
-        W("78.2 @02-30")
+def test_weigh_needs_a_leading_number():
+    with pytest.raises(ParseError, match="78.2"):
+        W("heavy")
 
 
-def test_weigh_rejects_impossible_time():
-    with pytest.raises(ParseError):
-        W("78.2 25:00")
+WEIGH_ROWS = [
+    dict(kg=78.2, note="post-run", date="2026-08-20"),
+    dict(kg=79.4, note="weighed at 6:50 before food", date="2026-08-22"),
+    dict(kg=80.0, note="80 was the goal", date="2026-08-22"),
+    dict(kg=81.5, note=None, date="2026-08-27"),
+    dict(kg=77.0, note="felt !light", date="2026-08-27"),
+]
+
+
+@pytest.mark.parametrize("row", WEIGH_ROWS, ids=[str(r["kg"]) for r in WEIGH_ROWS])
+def test_weigh_round_trips(row):
+    got = W(render_weigh(row))
+    assert got.kg == row["kg"]
+    assert (got.note or None) == row["note"]
+    assert got.date == row["date"]
 
 
 # ── food ─────────────────────────────────────────────────────────────────
