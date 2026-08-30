@@ -356,7 +356,7 @@ async def test_recurring_write_reports_the_monthly_equivalent(make_app, db, type
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("s")
-        await type_into(pilot, "120 cloud subscriptions annually")
+        await type_into(pilot, "120 cloud !subscriptions #annually")
         await pilot.press("enter")
         await pilot.pause()
     assert any("10.00/mo" in m for m in seen), f"{seen}"

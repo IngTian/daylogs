@@ -125,7 +125,7 @@ async def test_s_adds_a_recurring_item_and_shows_that_pane(make_app, db, type_in
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         assert money_tab.view.pane == "recurring"
@@ -139,7 +139,7 @@ async def test_annual_recurring_stores_monthly_equivalent(make_app, db):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        app.prompt.value = "120 cloud storage subscriptions annually"
+        app.prompt.value = "120 cloud storage !subscriptions #annually"
         await pilot.press("enter")
         await pilot.pause()
     row = list_recurring(db)[0]
@@ -151,7 +151,7 @@ async def test_r_rolls_recurring_into_the_viewed_month(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("r")
@@ -232,7 +232,7 @@ async def test_x_deletes_a_recurring_row(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("x")
