@@ -281,7 +281,7 @@ def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> 
 
 
 def render_budget(row) -> str:
-    return f"{row['amount']:g} {sigil.escape(row['name'])} !{row['category']}"
+    return f"{row['amount']:.2f} {sigil.escape(row['name'])} !{row['category']}"
 
 
 def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> RecurringInput:
@@ -305,7 +305,7 @@ def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) 
 
 def render_recurring(row) -> str:
     return (
-        f"{row['cost']:g} {sigil.escape(row['name'])} "
+        f"{row['cost']:.2f} {sigil.escape(row['name'])} "
         f"!{row['category']} #{row['cycle']}"
     )
 

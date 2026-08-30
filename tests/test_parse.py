@@ -382,6 +382,8 @@ BUDGET_ROWS = [
     dict(amount=300.0, name="restaurant fund", category="grocery"),
     dict(amount=200.0, name="household staples", category="other"),
     dict(amount=75.0, name="July only line", category="other"),
+    dict(amount=10000.55, name="large budget", category="other"),  # :g would render 10000.5
+    dict(amount=999999.99, name="huge budget", category="other"),  # :g would render 1e+06
 ]
 
 
@@ -454,6 +456,8 @@ RECURRING_ROWS = [
     dict(cost=88.0, name="Insurance billed annually", category="other", cycle="monthly"),
     dict(cost=10.0, name="Annually", category="other", cycle="monthly"),
     dict(cost=60.0, name="grocery box", category="grocery", cycle="monthly"),
+    dict(cost=10000.55, name="large recurring", category="other", cycle="monthly"),  # :g would render 10000.5
+    dict(cost=999999.99, name="huge recurring", category="other", cycle="monthly"),  # :g would render 1e+06
 ]
 
 
