@@ -656,6 +656,55 @@ async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, d
     assert len(rows) == 2, "must have two recurring rows"
     assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
     assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
+
+
+async def test_empty_submit_on_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms an expense edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "25 fresh !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 2, "must have two expense rows"
+    assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
+    assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
+
+
+async def test_empty_submit_on_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a recurring edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "10 Fresh !other")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert len(rows) == 2, "must have two recurring rows"
+    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
+    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
+
+
 async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
     """A line that omits ~note must clear the column."""
     add_expense(db, amount=12.0, description="lunch", category="restaurant",

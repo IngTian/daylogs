@@ -694,6 +694,53 @@ async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, ty
     assert any(r["description"] == "salad" and r["kcal"] == 600 for r in rows)
 
 
+async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a weight edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("w")
+        await type_into(pilot, "80.1 fresh")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_weight(db)
+    assert len(rows) == 2, "must have two weight rows"
+    assert any(r["kg"] == 78.2 and r["note"] == "original" for r in rows)
+    assert any(r["kg"] == 80.1 and r["note"] == "fresh" for r in rows)
+
+
+async def test_empty_submit_on_food_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a food edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    import datetime as dt
+
+    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await type_into(pilot, "salad =600 @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_food(db, date="2026-08-28")
+    assert len(rows) == 2, "must have two food rows"
+    assert any(r["description"] == "oatmeal" and r["kcal"] == 350 for r in rows)
+    assert any(r["description"] == "salad" and r["kcal"] == 600 for r in rows)
+
+
 async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_into):
     """If an edit submission fails to parse, the retry must still update the same
     row, not insert a new one."""
