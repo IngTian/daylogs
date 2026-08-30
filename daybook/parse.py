@@ -1,8 +1,10 @@
 """Pure parsers for the footer prompt grammars.
 
-One rule across all five grammars: the amount comes first; `@date`, `HH:MM`,
-known category slugs, and reserved keywords are consumed wherever they
-appear; whatever remains, in order, is free text.
+Sigil-based grammar: fields are marked with sigils (`!` category, `@` date/time,
+`~` note, `=` kcal, `#` cycle), not scavenged from free text. The amount is
+strictly the first token or absent. Whatever is not sigiled remains as plain
+text, in order. An unsupported sigil for a given grammar is an error, not silently
+discarded.
 
 Nothing here touches the database or the clock — `now` is injected, so every
 case is testable and nothing depends on when the suite runs.
