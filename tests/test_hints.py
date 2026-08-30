@@ -121,3 +121,65 @@ def test_labels_in_source_finds_both_call_shapes():
 def test_labels_in_source_handles_a_multiline_call():
     text = 'self.app.prompt.open(\n    "confirm food", f"{x} {y}"\n)\n'
     assert hints.labels_in_source(text) == {"confirm food"}
+
+
+# ── sigil vocabularies ──────────────────────────────────────────────────────
+def test_expense_offers_categories_for_bang():
+    v = hints.vocab_for(hints.for_label("expense"))
+    assert "grocery" in v["!"]
+
+
+def test_recurring_offers_both_categories_and_cycles():
+    v = hints.vocab_for(hints.for_label("recurring"))
+    assert "subscriptions" in v["!"]
+    assert v["#"] == ("annually", "monthly")
+
+
+def test_weigh_offers_no_vocabulary():
+    assert hints.vocab_for(hints.for_label("weigh")) == {}
+
+
+def test_fix_category_completes_without_a_sigil():
+    """Its whole input is a slug, so the implicit sigil is the empty string."""
+    v = hints.vocab_for(hints.for_label("fix category"))
+    assert "grocery" in v[""]
+
+
+def test_categories_come_from_config_at_runtime(make_cfg):
+    cfg = make_cfg(extra_categories=(("gym", "Gym", ""),))
+    v = hints.vocab_for(hints.for_label("expense"), cfg)
+    assert "gym" in v["!"]
+
+
+def test_every_sigil_named_by_a_hint_is_a_real_sigil():
+    from daybook.sigil import SIGILS
+
+    for h in hints.HINTS:
+        for s in h.sigils:
+            assert s == "" or s in SIGILS, f"{h.label} names {s!r}"
+
+
+def test_a_hint_that_declares_a_sigil_names_it_and_shows_it():
+    """The three-way check. An example that parses is not an example that is right:
+    `12.40 lunch restaurant` parsed fine and filed under `other`."""
+    for h in hints.HINTS:
+        for s in h.sigils:
+            if s == "":  # fix category's whole input is the value; no sigil to show
+                continue
+            assert s in h.grammar, f"{h.label}: accepts {s} but the grammar never names it"
+            assert s in h.example, f"{h.label}: accepts {s} but the example omits it"
+
+
+def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
+    """The other direction, for the grammar-parsed prompts only. `photo path` is
+    exempt: its `~/Downloads/...` is a home-directory tilde, and that prompt is not
+    parsed by the grammar at all."""
+    from daybook import sigil
+
+    for label in PARSERS:
+        h = hints.for_label(label)
+        for tok in sigil.tokenize(h.example):
+            if tok.sigil:
+                assert (
+                    tok.sigil in h.grammar
+                ), f"{h.label}: example uses {tok.sigil}, grammar does not"

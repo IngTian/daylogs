@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 # Both are supported by every tokenize-based grammar; spelled out once here rather
 # than repeated into each subtitle, where it would crowd out the fields.
-WHEN = "@date · HH:MM"
+WHEN = "@date · @HH:MM"
 
 
 @dataclass(frozen=True)
@@ -36,36 +36,44 @@ class Hint:
     label: str
     example: str
     grammar: str
+    sigils: tuple[str, ...] = ()
 
 
 HINTS: tuple[Hint, ...] = (
     # ── body ─────────────────────────────────────────────────────────────
-    Hint("weigh", "78.2", f"kg · note (optional) · {WHEN}"),
-    Hint(
-        "food",
-        "chicken salad 610",
-        f"what you ate · kcal — omit the kcal and Claude estimates it · {WHEN}",
-    ),
-    Hint(
-        "confirm food",
-        "chicken salad 610",
-        "Claude's estimate — fix the kcal if it looks wrong, then enter",
-    ),
-    Hint("photo path", "~/Downloads/lunch.jpg", "a path, or drag the file into the terminal"),
-    Hint("profile", "180 male 1990-01-01", "height · m/f · birthday — any order, partial ok"),
+    Hint("weigh", "78.2 post-run", f"kg · words are the note · {WHEN}"),
+    Hint("food", "chicken salad =610", f"what you ate · =kcal (omit to estimate) · {WHEN}"),
+    Hint("confirm food", "chicken salad =610", "Claude's estimate — fix =kcal, then enter"),
+    # The photo-path example begins with `~`, which the tokeniser would read as a
+    # sigil — but this prompt is not parsed by the grammar (photo.resolve_path takes
+    # the whole line), so it is safe and must be left alone.
+    Hint("photo path", "~/Downloads/lunch.jpg", "a path, or drag the file in"),
+    Hint("profile", "180 male 1990-01-01", "height · m/f · birthday — any order"),
     # ── money ────────────────────────────────────────────────────────────
     Hint(
         "expense",
-        "12.40 lunch restaurant",
-        f"amount · what · category — a negative amount is a refund · {WHEN}",
+        "12.40 lunch !restaurant",
+        f"amount · what · !category · {WHEN} · ~note — negative is a refund",
+        sigils=("!",),
     ),
-    Hint("budget", "500 !grocery", "amount · name (defaults to the category) · !category"),
+    Hint(
+        "budget",
+        "500 !grocery",
+        "amount · name (defaults to the category) · !category",
+        sigils=("!",),
+    ),
     Hint(
         "recurring",
-        "20.99 streaming subscriptions",
-        "amount · name · category · monthly or annually",
+        "20.99 Streaming !subscriptions #monthly",
+        "cost · name · !category · #monthly or #annually",
+        sigils=("!", "#"),
     ),
-    Hint("fix category", "restaurant", "a category — it went to other until you name one"),
+    Hint(
+        "fix category",
+        "restaurant",
+        "a category — it went to other until you name one",
+        sigils=("",),
+    ),
     Hint("filter", "coffee", "text to match in a description · esc clears it"),
     # ── app ──────────────────────────────────────────────────────────────
     Hint("go to date", "2026-06-15", "a date, or 2026-06 for the whole month"),
@@ -112,3 +120,23 @@ def labels_in_source(text: str) -> set[str]:
     (they are string literals at the call sites), so the source is the register.
     """
     return set(_OPEN_CALL.findall(text))
+
+
+def vocab_for(hint: Hint | None, cfg=None) -> dict[str, tuple[str, ...]]:
+    """Which words each of a prompt's sigils accepts.
+
+    Resolved at call time, not frozen into the table: `config.toml` can add
+    categories, so a literal here would go stale the moment someone did.
+    """
+    if hint is None:
+        return {}
+    from daybook import money
+    from daybook.categories import slugs
+
+    out: dict[str, tuple[str, ...]] = {}
+    for s in hint.sigils:
+        if s in ("!", ""):
+            out[s] = tuple(sorted(slugs(cfg)))
+        elif s == "#":
+            out[s] = tuple(sorted(money.CYCLES))
+    return out
