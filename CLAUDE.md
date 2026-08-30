@@ -36,6 +36,7 @@ daybook/
   photo.py    clipboard (osascript) / inbox / path acquisition
   estimate.py photo-or-text → calorie estimate
   summary.py  payload + one claude call + persist
+  export.py   one CSV per table, table list derived from the schema
   markup.py   legacy <num>/<warn> tags → markdown, for reports already stored
   fmt.py      hhmm / human_date — shared by the data and UI layers
   undo.py     in-memory ring buffer of row pre-images (deletes and edits)

@@ -106,3 +106,19 @@ def connect(path: Path | str) -> sqlite3.Connection:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+
+def table_names(conn: sqlite3.Connection) -> list[str]:
+    """The user's tables, in a stable order.
+
+    Asked of the database rather than kept as a list beside `_DDL`, so a table
+    added later cannot be silently left out of an export. `sqlite_%` names are
+    SQLite's own bookkeeping (`sqlite_sequence` and friends) — implementation
+    detail, not anybody's data.
+    """
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    )
+    return [r[0] for r in rows]
