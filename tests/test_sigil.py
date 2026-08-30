@@ -5,7 +5,7 @@ nothing else uses them, and they are cheap to produce here and impossible to
 recover later.
 """
 
-from daybook.sigil import SIGILS, Token, escape, tokenize
+from daybook.sigil import SIGILS, Token, escape, fold_spans, group, token_at, tokenize
 
 
 def test_a_plain_word_is_a_plain_token():
@@ -62,3 +62,90 @@ def test_escape_only_touches_words_that_would_read_as_sigils():
 def test_escape_round_trips_through_tokenize():
     for text in ("buy !milk", r"a \b", "~note", "=610", "plain words"):
         assert " ".join(t.value for t in tokenize(escape(text))) == text
+
+
+# ── ~ spans ─────────────────────────────────────────────────────────────────
+def test_a_spanning_sigil_absorbs_the_plain_tokens_after_it():
+    """`~` is the only field whose value may contain spaces."""
+    folded = fold_spans(tokenize("~receipt in wallet"))
+    assert [(t.sigil, t.value) for t in folded] == [("~", "receipt in wallet")]
+
+
+def test_a_span_stops_at_the_next_sigil():
+    folded = fold_spans(tokenize("~receipt in wallet !grocery"))
+    assert [(t.sigil, t.value) for t in folded] == [
+        ("~", "receipt in wallet"),
+        ("!", "grocery"),
+    ]
+
+
+def test_a_span_keeps_its_own_offsets_across_the_absorbed_tokens():
+    raw = "~receipt in wallet"
+    (tok,) = fold_spans(tokenize(raw))
+    assert (tok.start, tok.end) == (0, len(raw))
+
+
+def test_plain_tokens_before_a_span_are_untouched():
+    folded = fold_spans(tokenize("127 lunch ~on the corner"))
+    assert [(t.sigil, t.value) for t in folded] == [
+        ("", "127"),
+        ("", "lunch"),
+        ("~", "on the corner"),
+    ]
+
+
+def test_a_bare_spanning_sigil_stays_empty():
+    (tok,) = fold_spans(tokenize("~"))
+    assert (tok.sigil, tok.value) == ("~", "")
+
+
+def test_folding_is_a_no_op_without_the_spanning_sigil():
+    toks = tokenize("127 lunch !grocery")
+    assert fold_spans(toks) == toks
+
+
+# ── grouping ────────────────────────────────────────────────────────────────
+def test_group_joins_plain_tokens_in_order_wherever_they_sit():
+    """Interleaving must not reorder the description."""
+    a = group(fold_spans(tokenize("Grocery !grocery Item X")))
+    b = group(fold_spans(tokenize("Grocery Item X !grocery")))
+    assert a.text == b.text == "Grocery Item X"
+
+
+def test_group_collects_each_sigils_values_in_order():
+    g = group(fold_spans(tokenize("!grocery #monthly @08-24 @14:30")))
+    assert g.by_sigil == {"!": ["grocery"], "#": ["monthly"], "@": ["08-24", "14:30"]}
+
+
+def test_group_reports_a_repeated_sigil_rather_than_collapsing_it():
+    """The caller raises; silent last-wins is how you lose an entry you thought
+    you typed correctly."""
+    g = group(fold_spans(tokenize("!grocery !restaurant")))
+    assert g.by_sigil["!"] == ["grocery", "restaurant"]
+
+
+def test_group_of_nothing_is_empty():
+    g = group([])
+    assert g.text == ""
+    assert g.by_sigil == {}
+
+
+# ── cursor ──────────────────────────────────────────────────────────────────
+def test_token_at_finds_the_token_under_the_cursor():
+    toks = tokenize("127 lunch !grocery")
+    assert token_at(toks, 12).value == "grocery"
+
+
+def test_token_at_includes_the_position_just_past_a_token():
+    """Typing puts the cursor after the last character, which is still 'in' it."""
+    toks = tokenize("127 !gro")
+    assert token_at(toks, 8).value == "gro"
+
+
+def test_token_at_returns_none_in_whitespace():
+    toks = tokenize("127 lunch")
+    assert token_at(toks, 3) is None
+
+
+def test_token_at_returns_none_past_the_end():
+    assert token_at(tokenize("127"), 99) is None

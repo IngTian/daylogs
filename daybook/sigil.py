@@ -55,3 +55,61 @@ def tokenize(raw: str) -> list[Token]:
         else:
             tokens.append(Token("", word, start, end))
     return tokens
+
+
+@dataclass(frozen=True)
+class Grouped:
+    text: str                       # plain tokens, joined in the order typed
+    by_sigil: dict[str, list[str]]  # every value seen per sigil, in order
+
+
+def fold_spans(tokens: list[Token], *, spanning: str = "~") -> list[Token]:
+    """Absorb the plain tokens after `spanning` into its value.
+
+    One field has to be allowed to contain spaces — a note is prose. Giving that
+    to exactly one sigil, which runs until the next sigil or the end of the line,
+    keeps every other field a single token and so keeps the grammar decidable.
+    """
+    out: list[Token] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        i += 1
+        if tok.sigil != spanning:
+            out.append(tok)
+            continue
+        parts = [tok.value] if tok.value else []
+        end = tok.end
+        while i < len(tokens) and tokens[i].sigil == "":
+            parts.append(tokens[i].value)
+            end = tokens[i].end
+            i += 1
+        out.append(Token(spanning, " ".join(parts), tok.start, end))
+    return out
+
+
+def group(tokens: list[Token]) -> Grouped:
+    """Split tokens into the plain text and the per-sigil values.
+
+    Repeats are preserved rather than collapsed, so the caller can report "given
+    twice" instead of silently keeping one.
+    """
+    plain: list[str] = []
+    by_sigil: dict[str, list[str]] = {}
+    for tok in tokens:
+        if tok.sigil:
+            by_sigil.setdefault(tok.sigil, []).append(tok.value)
+        elif tok.value:
+            plain.append(tok.value)
+    return Grouped(" ".join(plain), by_sigil)
+
+
+def token_at(tokens: list[Token], cursor: int) -> Token | None:
+    """The token the cursor sits in, counting the position just past its last
+    character — which is where the cursor is while you are still typing it."""
+    for i, tok in enumerate(tokens):
+        if tok.start <= cursor < tok.end:
+            return tok
+        if cursor == tok.end and i == len(tokens) - 1:
+            return tok
+    return None
