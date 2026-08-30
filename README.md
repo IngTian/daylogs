@@ -94,6 +94,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | Key | Does |
 |---|---|
 | `1` `2` `3` | Body / Money / Summary |
+| `←` `→` | previous / next tab — stops at the ends rather than wrapping |
 | `tab` `shift+tab` | next / previous sub-view *within* the tab (Body, Money) |
 | `[` `]` | previous / next period — day on Body, month on Money, report on Summary |
 | `t` | **jump to now** — today, this month, newest report |

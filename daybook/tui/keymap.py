@@ -40,6 +40,15 @@ KEYMAP: tuple[Key, ...] = (
     Key("1", "body", "show_body", "app", "nav", footer=False),
     Key("2", "money", "show_money", "app", "nav", footer=False),
     Key("3", "summary", "show_summary", "app", "nav", footer=False),
+    # Walk the tabs, the way 1/2/3 jump to them. NOT priority — measured, not
+    # assumed: on this Textual version a `cursor_type="row"` DataTable does not
+    # claim left/right, so a plain binding already fires with the table focused,
+    # while a focused Input still gets the keys first and keeps its cursor
+    # movement. With priority=True both fire, so editing a line you typed would
+    # switch tabs *and* leave the cursor stuck. Same trap as printable keys.
+    # footer=False: the footer is already full, and `?` lists them.
+    Key("left", "prev tab", "prev_tab", "app", "nav", footer=False),
+    Key("right", "next tab", "next_tab", "app", "nav", footer=False),
     # priority: measured — an ordinary App binding for tab loses to the Screen's
     # focus-next, so the key would move focus instead of changing sub-view.
     # Priority is safe here because Textual still delivers printable characters

@@ -323,3 +323,205 @@ async def test_a_bad_g_input_keeps_the_prompt_open(make_app):
     assert still_open is True
     assert kept == "nope"
     assert "give a date like" in err
+
+
+# ── left/right walk the tabs (#3) ────────────────────────────────────────
+#
+# A plain App binding, deliberately not `priority=True`. Measured on this Textual
+# version: a `cursor_type="row"` DataTable does not claim left/right, so a plain
+# binding fires with the table focused; and because it is plain, a focused Input
+# still gets the keys first and keeps its cursor movement. A priority binding
+# fires in both places — which reads as working right up until you try to edit a
+# line you typed, and then the cursor will not move. That is the same trap
+# recorded for printable keys in keymap.py.
+
+
+async def test_right_walks_forward_through_the_tabs(make_app):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.scope == "body"
+        await pilot.press("right")
+        await pilot.pause()
+        first = app.scope
+        # Not just the pane switch. The arrows route through show_scope(), whose
+        # other job is focusing the landed-on tab — set TabbedContent.active
+        # directly instead and the scope is right while nothing is focused, so row
+        # navigation and `enter` are dead until you press 1/2/3.
+        focused = app.focused.id if app.focused else None
+        await pilot.press("right")
+        await pilot.pause()
+        second = app.scope
+    assert (first, second) == ("money", "summary")
+    assert focused == "money-table", f"arrowing into Money left focus on {focused!r}"
+
+
+async def test_left_walks_back_through_the_tabs(make_app):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("3")
+        await pilot.pause()
+        assert app.scope == "summary"
+        await pilot.press("left")
+        await pilot.pause()
+        first = app.scope
+        await pilot.press("left")
+        await pilot.pause()
+        second = app.scope
+    assert (first, second) == ("money", "body")
+
+
+async def test_walking_stops_at_both_ends(make_app, db):
+    """Clamped, not wrapped — the same choice `[`/`]` already make at the ends of
+    the data. `1` `2` `3` reach any tab in one keystroke, so wrapping would buy
+    nothing and make it ambiguous where the arrow lands."""
+    from textual.widgets import DataTable
+
+    from daybook.body import add_food
+
+    # The Body food table is filtered by the viewing date, so the clock is pinned:
+    # on an unpinned clock the table is empty, `down` moves nothing, and the cursor
+    # half of this test would be vacuous.
+    for i in range(3):
+        add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
+                 date="2026-08-27", at=1787000000 + i * 3600)
+    app = make_app(now=lambda: NOW.replace(tzinfo=None))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Walk to the far end first, so this test cannot pass merely because the
+        # keys are unbound — it has to see them working before it checks they stop.
+        await pilot.press("right")
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.scope == "summary", f"the arrows did not walk at all: {app.scope}"
+        await pilot.press("right")          # already on the last tab
+        await pilot.pause()
+        at_end = app.scope
+        await pilot.press("left")
+        await pilot.press("left")
+        await pilot.pause()
+        assert app.scope == "body", f"the arrows did not walk back: {app.scope}"
+        # Seeded rows + a moved cursor, because "clamped" must mean "did nothing",
+        # not "re-showed the tab you are on". Re-showing runs reload() ->
+        # _fill_table -> table.clear(), which throws the cursor back to row 0 — the
+        # same defect body_tab._set_estimating exists to avoid. Holding `←` at the
+        # left end is exactly what a user does.
+        table = app.query_one("#body-table", DataTable)
+        table.focus()
+        await pilot.press("down")
+        await pilot.pause()
+        cursor_before = table.cursor_row
+        assert cursor_before > 0, "could not move the cursor — this would prove nothing"
+        await pilot.press("left")           # already on the first tab
+        await pilot.pause()
+        at_start = app.scope
+        cursor_after = table.cursor_row
+    assert cursor_after == cursor_before, (
+        f"a clamped arrow re-showed the tab and reset the cursor {cursor_before} -> {cursor_after}"
+    )
+    assert at_end == "summary", f"right on the last tab moved to {at_end}"
+    assert at_start == "body", f"left on the first tab moved to {at_start}"
+
+
+async def test_arrows_move_the_text_cursor_while_the_prompt_is_open(make_app, type_into):
+    """The reason the binding must not be priority.
+
+    A priority binding fires before the focused widget, so it would switch tabs
+    while you were editing a line — and worse, swallow the key so the cursor never
+    moved. Both halves are asserted: the tab must not change, and the cursor must.
+    """
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("w")
+        await type_into(pilot, "78.2")
+        await pilot.pause()
+        before_pos, before_scope = app.prompt.cursor_position, app.scope
+        await pilot.press("left")
+        await pilot.press("left")
+        await pilot.pause()
+        after_pos, after_scope = app.prompt.cursor_position, app.scope
+        assert app.prompt.is_open, "the prompt closed"
+        value = app.prompt.value
+    assert after_scope == before_scope == "body", (
+        f"the prompt let a tab switch through: {after_scope}"
+    )
+    assert after_pos == before_pos - 2, (
+        f"the arrows were stolen from the prompt: cursor {before_pos} -> {after_pos}"
+    )
+    assert value == "78.2", "the text changed"
+
+
+async def test_the_arrow_order_matches_the_tab_pane_order(make_app):
+    """Pins the coupling the arrows rely on.
+
+    They step through `_TAB_OF`, whose insertion order has to agree with the
+    TabPane order in `compose`. Nothing else forces those two to match, so a pane
+    reordered without touching the dict would make the arrows walk sideways.
+    """
+    from textual.widgets import TabbedContent, TabPane
+
+    from daybook.tui.app import _TAB_OF
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        panes = [p.id for p in app.query_one("#tabs", TabbedContent).query(TabPane)]
+    assert panes == list(_TAB_OF.values()), (
+        f"tab panes are ordered {panes} but the arrows step {list(_TAB_OF.values())}"
+    )
+
+
+async def test_arrows_do_not_walk_tabs_behind_the_help_overlay(make_app):
+    """`?` is a modal screen, and a tab switching behind it would be invisible
+    until you closed it. A plain binding does not fire while a modal has focus,
+    so this holds for free — and it is asserted because it stops holding the
+    moment someone makes these keys priority."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert len(app.screen_stack) == 2, "the help overlay did not open"
+        await pilot.press("right")
+        await pilot.pause()
+        scope, depth = app.scope, len(app.screen_stack)
+    assert scope == "body", f"a tab switched behind the help overlay: {scope}"
+    assert depth == 2, "the arrow dismissed the overlay"
+
+
+async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db):
+    """The measurement behind the plain binding only holds while the table fits.
+
+    DataTable's left/right reach the App binding by raising SkipAction, and it
+    raises that only when `allow_horizontal_scroll` is false — which flips true as
+    soon as the content is wider than the viewport. Measured before the fix: at 80
+    columns a 50-character description gives a virtual width of 84 against a 78-wide
+    viewport, and `→` scrolled the table instead of changing tab, while the same data
+    at 120 columns changed tab. A feature that works or not depending on window width
+    and how long your description is, with no feedback either way.
+
+    `overflow-x: hidden` in app.tcss keeps `allow_horizontal_scroll` false, so the
+    fall-through is unconditional. This pins it at the narrow width the app declares
+    it supports.
+    """
+    from daybook.money import add_expense
+
+    long_desc = "a very long description that keeps going and going past any sane width"
+    for i in range(4):
+        add_expense(db, amount=10 + i, description=long_desc, category="restaurant",
+                    date="2026-08-27")
+    app = make_app(now=lambda: NOW.replace(tzinfo=None))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("2")
+        await pilot.pause()
+        await pilot.press("tab")            # categories -> the expense list
+        await pilot.pause()
+        assert app.query_one("#money").view.pane == "expenses", "not on the expense list"
+        await pilot.press("right")
+        await pilot.pause()
+        forward = app.scope
+        await pilot.press("left")
+        await pilot.pause()
+        back = app.scope
+    assert forward == "summary", f"a wide table swallowed the arrow: stayed on {forward}"
+    assert back == "money", f"a wide table swallowed the arrow going back: {back}"
