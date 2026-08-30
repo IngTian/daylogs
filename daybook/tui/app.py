@@ -39,7 +39,7 @@ from daybook.undo import UndoStack
 log = logging.getLogger(__name__)
 
 _SCOPE_OF = {"tab-body": "body", "tab-money": "money", "tab-summary": "summary"}
-_TAB_OF = {"body": "tab-body", "money": "tab-money", "summary": "tab-summary"}
+_TAB_OF = {"summary": "tab-summary", "body": "tab-body", "money": "tab-money"}
 
 # Every way a prompt entry can be rejected for being malformed rather than
 # broken. These re-open the prompt with the text intact; anything else is a bug
@@ -104,13 +104,13 @@ class DaybookApp(App):
     # ── layout ───────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with TabbedContent(initial="tab-body", id="tabs"):
-            with TabPane("1 Body", id="tab-body"):
-                yield BodyTab(id="body")
-            with TabPane("2 Money", id="tab-money"):
-                yield MoneyTab(id="money")
-            with TabPane("3 Summary", id="tab-summary"):
+        with TabbedContent(initial="tab-summary", id="tabs"):
+            with TabPane("1 Day", id="tab-summary"):
                 yield SummaryTab(id="summary")
+            with TabPane("2 Body", id="tab-body"):
+                yield BodyTab(id="body")
+            with TabPane("3 Money", id="tab-money"):
+                yield MoneyTab(id="money")
         # One bottom-docked container, not two independently docked widgets:
         # docking both made the footer claim the last row and clip the prompt's
         # bottom border.

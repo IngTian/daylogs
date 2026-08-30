@@ -37,9 +37,12 @@ class Key:
 
 KEYMAP: tuple[Key, ...] = (
     # ── app: navigation ──────────────────────────────────────────────────
-    Key("1", "body", "show_body", "app", "nav", footer=False),
-    Key("2", "money", "show_money", "app", "nav", footer=False),
-    Key("3", "summary", "show_summary", "app", "nav", footer=False),
+    # The digits match the visible tab numbers. They dispatch to *named* actions,
+    # not positions, so moving a pane without moving its digit leaves a tab
+    # labelled 3 that 2 jumps to.
+    Key("1", "day", "show_summary", "app", "nav", footer=False),
+    Key("2", "body", "show_body", "app", "nav", footer=False),
+    Key("3", "money", "show_money", "app", "nav", footer=False),
     # Walk the tabs, the way 1/2/3 jump to them. NOT priority — measured, not
     # assumed: on this Textual version a `cursor_type="row"` DataTable does not
     # claim left/right, so a plain binding already fires with the table focused,

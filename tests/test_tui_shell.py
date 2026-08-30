@@ -116,3 +116,37 @@ async def test_subtitle_shows_the_injected_date(make_app):
     async with app.run_test() as pilot:
         await pilot.pause()
         assert "Aug 27" in app.sub_title
+
+
+async def test_the_app_opens_on_the_day_tab(make_app):
+    """Tab 1 is what you see on launch — the whole reason the dashboard moved."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.scope == "summary"
+
+
+async def test_the_digit_keys_match_the_visible_tab_numbers(make_app):
+    """The labels say 1 Day / 2 Body / 3 Money, so the digits must agree. They are
+    bound to named actions rather than positions, so reordering the panes alone
+    would leave `2` jumping to a tab labelled 3."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        seen = {}
+        for digit in ("2", "3", "1"):
+            await pilot.press(digit)
+            await pilot.pause()
+            seen[digit] = app.scope
+    assert seen == {"1": "summary", "2": "body", "3": "money"}
+
+
+async def test_the_pane_labels_are_numbered_in_order(make_app):
+    from textual.widgets import TabbedContent, TabPane
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        panes = app.query_one("#tabs", TabbedContent).query(TabPane)
+        labels = [str(p._title) for p in panes]
+    assert labels == ["1 Day", "2 Body", "3 Money"]

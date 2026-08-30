@@ -24,7 +24,7 @@ def seeded(db):
 
 
 async def money(pilot, app):
-    await pilot.press("2")
+    await pilot.press("3")
     await pilot.pause()
     return app.query_one("#money")
 
