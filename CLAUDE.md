@@ -160,13 +160,14 @@ appended prose where it was convenient rather than editing the map.
   widget only decides when to call it.
 - **A prompt's sigils are data on its `Hint`.** Vocabularies resolve at call time
   because `config.toml` can add categories, so a frozen literal would go stale.
-- **An edit line carries exactly the columns its table displays.** What you can see
-  is what you can edit, which also keeps columns with no visible representation out
-  of reach: food's `source` is provenance the digest reads, `created_at` must
+- **An edit line carries the columns its table displays, plus expense's write-only
+  note.** What you can see is what you can edit. Columns with no visible representation
+  stay out of reach: food's `source` is provenance the digest reads, `created_at` must
   survive, `measured_at` is the tie-breaker `weight_series` uses to pick a day's
-  reading. An edit writes only the fields it parsed. The submitted line is
-  authoritative: drop the note words and the note is cleared; submit unchanged and
-  the note survives.
+  reading. Expense's `~note` is currently write-only (settable, faithfully
+  round-tripped through the edit prefill, displayed nowhere). An edit writes only
+  the fields it parsed. The submitted line is authoritative: drop the note words
+  and the note is cleared; submit unchanged and the note survives.
 - **`update_recurring` is keyed by id, and nothing may edit through
   `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
   nothing and INSERTs a second row; both then look active and the next
@@ -177,10 +178,10 @@ appended prose where it was convenient rather than editing the map.
   → update) without the stack needing to know which. A plain INSERT raised on an
   edit's pre-image.
 - **A comma is a thousands separator, never a decimal point.** `parse.to_amount`
-  strips commas before parsing, so `12,40` is rejected with a suggestion rather
-  than silently becoming 1240. A $12.40 lunch typed as `12,40` would have been
-  recorded as $1,240.00; weights escaped only because 782 kg trips a plausibility
-  check expenses have no equivalent of.
+  rejects a decimal comma before stripping thousands commas, so `12,40` is
+  rejected with a suggestion rather than silently becoming 1240. A $12.40 lunch
+  typed as `12,40` would have been recorded as $1,240.00; weights escaped only
+  because 782 kg trips a plausibility check expenses have no equivalent of.
 - **The app owns prompt-error policy.** Tabs let `ParseError`/`MoneyError`/
   `BodyError`/`PhotoError`/`ViewError` propagate; the app re-opens the prompt
   with the text intact. A tab that catches them discards what the user typed.

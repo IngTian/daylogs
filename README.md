@@ -150,7 +150,8 @@ never more than two keystrokes from anywhere.
 
 Sigils mark the fields, so nothing is ever taken out of your own words:
 
-    !  a category, or a #cycle      tab completes both
+    !  a category                   tab completes
+    #  a cycle                      tab completes
     @  a date and/or a time         @2026-08-24  @08-24  @14:30  @08-24/14:30
     ~  a note (may contain spaces)
     =  calories
@@ -270,9 +271,8 @@ who you are, so the summary can be about you rather than about a table of number
 
 ### Any entry prompt
 
-In the weigh / food / expense / budget / recurring prompts, `@2026-08-25` or
-`@08-25` sets the date and `@13:05` sets the time, wherever you put them in the
-line.
+In the weigh / food / expense prompts, `@2026-08-25` or `@08-25` sets the date
+and `@13:05` sets the time, wherever you put them in the line.
 
 Everywhere: `esc` cancels, `↑` / `↓` walk that prompt's history.
 
