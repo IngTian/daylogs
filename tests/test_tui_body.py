@@ -45,7 +45,7 @@ async def test_f_with_explicit_calories_does_not_call_claude(make_app, db, type_
     app = make_app(runner_json=runner_json)
     async with app.run_test() as pilot:
         await pilot.press("f")
-        await type_into(pilot, "salad 610")
+        await type_into(pilot, "salad =610")
         await pilot.press("enter")
         await pilot.pause()
         today = app.today()
@@ -71,7 +71,7 @@ async def test_f_without_calories_estimates_then_logs_as_estimated(
         await pilot.pause()
         await pilot.pause()
         assert app.prompt.label == "confirm food"
-        assert app.prompt.value == "chicken caesar salad 610"
+        assert app.prompt.value == "chicken caesar salad =610"
         await pilot.press("enter")
         await pilot.pause()
         today = app.today()
@@ -94,7 +94,7 @@ async def test_an_estimate_can_be_corrected_before_accepting(
         await pilot.press("enter")
         await pilot.pause()
         await pilot.pause()
-        app.prompt.value = "salad with chicken 780"
+        app.prompt.value = "salad with chicken =780"
         await pilot.press("enter")
         await pilot.pause()
         today = app.today()

@@ -14,7 +14,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
-from daybook import body, editline, estimate, photo
+from daybook import body, editline, estimate, photo, sigil
 from daybook import horizon as hz
 from daybook.config import load_config, update_config
 from daybook.fmt import hhmm, human_date
@@ -361,7 +361,7 @@ class BodyTab(PanelTab):
         """Show the estimate as an editable line. Correcting it goes through the
         same grammar as typing it, so there is one code path, not two."""
         self._pending = est
-        self.app.prompt.open("confirm food", f"{est.description} {est.kcal}")
+        self.app.prompt.open("confirm food", f"{sigil.escape(est.description)} ={est.kcal}")
 
     # ── prompt handling ──────────────────────────────────────────────────
     def handle_prompt(self, label: str, value: str) -> None:

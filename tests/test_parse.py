@@ -1,3 +1,4 @@
+import datetime as dt
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -13,6 +14,7 @@ from daybook.parse import (
     parse_recurring,
     parse_weigh,
     render_expense,
+    render_food,
     render_weigh,
     resolve_when,
 )
@@ -110,59 +112,67 @@ def test_weigh_round_trips(row):
 
 
 # ── food ─────────────────────────────────────────────────────────────────
-def test_food_trailing_integer_is_calories():
-    r = F("chicken caesar salad 610")
-    assert r.description == "chicken caesar salad"
-    assert r.kcal == 610
+def test_food_with_explicit_kcal():
+    r = F("chicken salad =610")
+    assert (r.description, r.kcal) == ("chicken salad", 610)
 
 
-def test_food_without_calories_returns_none_for_estimation():
-    r = F("chicken caesar salad")
-    assert r.description == "chicken caesar salad"
-    assert r.kcal is None
+def test_food_without_kcal_asks_for_an_estimate():
+    assert F("chicken salad").kcal is None
 
 
-def test_food_leading_number_stays_in_description():
-    r = F("2 eggs")
-    assert r.description == "2 eggs"
-    assert r.kcal is None
+def test_a_description_ending_in_a_number_is_not_a_kcal():
+    """`coffee 2` was undecidable under the trailing-integer rule."""
+    r = F("coffee 2")
+    assert (r.description, r.kcal) == ("coffee 2", None)
 
 
-def test_food_preserves_decimal_formatting_in_a_description():
-    assert F("12.40 oz steak").description == "12.40 oz steak"
+def test_a_description_that_is_only_a_number_is_allowed():
+    """This used to be rejected outright, which made the row uneditable."""
+    r = F("750 =350")
+    assert (r.description, r.kcal) == ("750", 350)
 
 
-def test_food_description_ending_in_number_needs_explicit_calories():
-    r = F("2 eggs 2 slices toast 420")
-    assert r.description == "2 eggs 2 slices toast"
-    assert r.kcal == 420
+def test_food_takes_a_date_and_a_time():
+    r = F("oatmeal =300 @06-15/07:30")
+    assert r.date == "2026-06-15"
+    assert dt.datetime.fromtimestamp(r.at, TZ).strftime("%H:%M") == "07:30"
 
 
-def test_food_backdated_and_timed():
-    r = F("ribeye 910 @08-25 13:05")
-    assert r.description == "ribeye"
-    assert r.kcal == 910
-    assert r.date == "2026-08-25"
-    assert datetime.fromtimestamp(r.at, TZ).hour == 13
+def test_an_implausible_kcal_is_rejected():
+    with pytest.raises(ParseError, match="plausible meal"):
+        F("cake =99999")
 
 
-def test_food_rejects_numeric_only_description():
-    with pytest.raises(ParseError):
-        F("610")
+def test_a_non_numeric_kcal_is_rejected():
+    with pytest.raises(ParseError, match="kcal"):
+        F("cake =lots")
 
 
-def test_food_rejects_empty():
-    with pytest.raises(ParseError):
-        F("   ")
+def test_a_repeated_kcal_is_an_error():
+    with pytest.raises(ParseError, match="twice"):
+        F("cake =100 =200")
 
 
-def test_food_rejects_absurd_calories():
-    with pytest.raises(ParseError):
-        F("salad 99999")
+def test_food_needs_a_description():
+    with pytest.raises(ParseError, match="describe the food"):
+        F("=610")
 
 
-def test_food_zero_calories_is_allowed():
-    assert F("black coffee 0").kcal == 0
+FOOD_ROWS = [
+    dict(description="oatmeal with berries", kcal=350, date="2026-08-20", ate_at=1787223943),
+    dict(description="coffee 2", kcal=5, date="2026-08-20", ate_at=1787223943),
+    dict(description="750", kcal=350, date="2026-08-20", ate_at=1787223943),
+    dict(description="soup !and salad", kcal=400, date="2026-08-20", ate_at=1787223943),
+]
+
+
+@pytest.mark.parametrize("row", FOOD_ROWS, ids=[r["description"][:14] for r in FOOD_ROWS])
+def test_food_round_trips(row):
+    got = F(render_food(row))
+    assert got.description == row["description"]
+    assert got.kcal == row["kcal"]
+    assert got.date == row["date"]
 
 
 # ── expense ──────────────────────────────────────────────────────────────

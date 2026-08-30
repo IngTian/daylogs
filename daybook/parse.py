@@ -16,12 +16,11 @@ from dataclasses import dataclass
 
 from daybook import sigil
 from daybook.categories import FALLBACK_SLUG, get
+from daybook.fmt import hhmm
 
 _DATE_FULL = re.compile(r"^@(\d{4})-(\d{2})-(\d{2})$")
 _DATE_SHORT = re.compile(r"^@(\d{2})-(\d{2})$")
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
-_INT = re.compile(r"^\d+$")
-_ONLY_NUMERIC = re.compile(r"^[\d.,\s]+$")
 # Plausibility limits, exported because the edit grammar in editline.py must agree
 # with this one. They were duplicated in both files and agreed by coincidence; a
 # change in one would have let entry and editing disagree about a valid value.
@@ -235,20 +234,31 @@ def render_weigh(row) -> str:
 
 
 def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodInput:
-    """A trailing bare integer is always calories. To log a description that
-    genuinely ends in a number, supply the calories explicitly."""
-    t = tokenize(raw, now=now)
-    words = list(t.raw_rest)
+    """kcal comes only from `=`. A trailing bare integer used to mean calories,
+    which made `coffee 2` undecidable between a 2 kcal coffee and a description
+    that ends in a number."""
+    toks = _tokens(raw)
+    g = sigil.group(toks)
+    if not g.text:
+        raise ParseError("describe the food, e.g. chicken salad =610")
+    raw_kcal = _single(g, "=", "kcal")
     kcal: int | None = None
-    if len(words) > 1 and _INT.match(words[-1]):
-        kcal = int(words[-1])
-        words = words[:-1]
+    if raw_kcal is not None:
+        if not raw_kcal.isdigit():
+            raise ParseError(f"={raw_kcal}: kcal must be a whole number, e.g. =610")
+        kcal = int(raw_kcal)
         if kcal > MAX_KCAL:
             raise ParseError(f"{kcal} kcal is not a plausible meal")
-    description = " ".join(words).strip()
-    if not description or _ONLY_NUMERIC.match(description):
-        raise ParseError("describe the food, e.g. chicken caesar salad 610")
-    return FoodInput(description=description, kcal=kcal, date=t.date, at=t.at)
+    when = resolve_when(g.by_sigil.get("@", []), now=now)
+    return FoodInput(description=g.text, kcal=kcal, date=when.date, at=when.at)
+
+
+def render_food(row) -> str:
+    return " ".join([
+        sigil.escape(row["description"]),
+        f"={int(row['kcal'])}",
+        f"@{row['date']}/{hhmm(row['ate_at'])}",
+    ])
 
 
 def _tokens(raw: str) -> list[sigil.Token]:
