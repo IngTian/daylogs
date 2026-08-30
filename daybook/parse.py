@@ -135,8 +135,7 @@ def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> Weigh
     if not 0 < kg <= MAX_KG:
         raise ParseError(f"{kg:g} kg is not a plausible weight")
     g = sigil.group(toks[1:])
-    if "~" in g.by_sigil:
-        raise ParseError("a weigh-in's note is just the words — drop the ~")
+    _reject_unsupported(g, frozenset(["@"]), "weigh-in")
     when = resolve_when(g.by_sigil.get("@", []), now=now)
     return WeighInput(kg=kg, note=g.text or None, date=when.date, at=when.at)
 
@@ -160,6 +159,7 @@ def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodIn
     g = sigil.group(toks)
     if not g.text:
         raise ParseError("describe the food, e.g. chicken salad =610")
+    _reject_unsupported(g, frozenset(["@", "="]), "food entry")
     raw_kcal = _single(g, "=", "kcal")
     kcal: int | None = None
     if raw_kcal is not None:
@@ -213,6 +213,22 @@ def _vocab(value: str, allowed, field: str) -> str:
     return low
 
 
+def _reject_unsupported(g: sigil.Grouped, allowed: frozenset[str], entity: str) -> None:
+    """Reject any sigil the entity does not consume.
+
+    The premise is "what you typed is what gets recorded" — silently discarding
+    sigiled input is this slice's own failure mode. `f`/`e` are adjacent and both
+    start with free text, so typing !restaurant on a food line is a live mistake.
+    """
+    used = frozenset(g.by_sigil.keys())
+    unsupported = used - allowed
+    if unsupported:
+        sigil_char = sorted(unsupported)[0]
+        field_name = {"!": "category", "#": "cycle", "~": "note", "=": "kcal", "@": "date/time"}
+        hint = f"a {entity} does not have a {field_name.get(sigil_char, 'field')} — drop {sigil_char}"
+        raise ParseError(hint)
+
+
 def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> ExpenseInput:
     toks = _tokens(raw)
     amount = _leading_amount(toks, "an amount, e.g. 12.40 lunch !restaurant")
@@ -221,6 +237,7 @@ def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) ->
         raise ParseError("amount must be non-zero")
     if not g.text:
         raise ParseError("say what it was, e.g. 12.40 lunch !restaurant")
+    _reject_unsupported(g, frozenset(["!", "@", "~"]), "expense")
     slug = _single(g, "!", "category")
     note = _single(g, "~", "note")
     return ExpenseInput(
@@ -248,6 +265,7 @@ def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> 
     if amount <= 0:
         raise ParseError("a budget needs a positive amount, e.g. 500 !grocery")
     g = sigil.group(toks[1:])
+    _reject_unsupported(g, frozenset(["!"]), "budget")
     slug = _single(g, "!", "category")
     if slug is None:
         raise ParseError("name a category, e.g. 500 !grocery")
@@ -272,6 +290,7 @@ def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) 
     g = sigil.group(toks[1:])
     if not g.text:
         raise ParseError("give it a name, e.g. 20.99 Streaming !subscriptions")
+    _reject_unsupported(g, frozenset(["!", "#"]), "recurring cost")
     slug = _single(g, "!", "category")
     cycle = _single(g, "#", "cycle")
     return RecurringInput(

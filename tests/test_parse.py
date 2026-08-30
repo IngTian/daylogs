@@ -78,6 +78,16 @@ def test_weigh_rejects_a_tilde_and_says_what_it_would_have_set():
         W("78.2 ~post-run")
 
 
+def test_weigh_rejects_unsupported_sigils():
+    """Any sigil a grammar does not consume is an error."""
+    with pytest.raises(ParseError, match="does not have.*kcal"):
+        W("78.2 =610")
+    with pytest.raises(ParseError, match="does not have.*category"):
+        W("78.2 !grocery")
+    with pytest.raises(ParseError, match="does not have.*cycle"):
+        W("78.2 #monthly")
+
+
 def test_weigh_rejects_an_implausible_value():
     with pytest.raises(ParseError, match="plausible weight"):
         W("900")
@@ -159,6 +169,16 @@ def test_a_repeated_kcal_is_an_error():
 def test_food_needs_a_description():
     with pytest.raises(ParseError, match="describe the food"):
         F("=610")
+
+
+def test_food_rejects_unsupported_sigils():
+    """Food accepts @ and =; anything else is an error."""
+    with pytest.raises(ParseError, match="does not have.*category"):
+        F("chicken salad !restaurant =610")
+    with pytest.raises(ParseError, match="does not have.*note"):
+        F("chicken salad ~a note =610")
+    with pytest.raises(ParseError, match="does not have.*cycle"):
+        F("chicken salad #monthly =610")
 
 
 FOOD_ROWS = [
@@ -283,6 +303,14 @@ def test_an_escaped_sigil_stays_in_the_description():
     assert E(r"12.40 \!important thing !grocery").description == "!important thing"
 
 
+def test_expense_rejects_unsupported_sigils():
+    """Expense accepts !, @, and ~; anything else is an error."""
+    with pytest.raises(ParseError, match="does not have.*kcal"):
+        E("12.40 lunch !restaurant =610")
+    with pytest.raises(ParseError, match="does not have.*cycle"):
+        E("12.40 lunch !restaurant #monthly")
+
+
 # ── expense round trip ───────────────────────────────────────────────────
 EXPENSE_ROWS = [
     dict(amount=12.40, description="lunch", category="restaurant", date="2026-08-20", note=None),
@@ -337,6 +365,16 @@ def test_budget_requires_a_positive_amount():
         B("0 !grocery")
     with pytest.raises(ParseError, match="positive"):
         B("-5 !grocery")
+
+
+def test_budget_rejects_unsupported_sigils():
+    """Budget accepts only !; anything else is an error."""
+    with pytest.raises(ParseError, match="does not have.*cycle"):
+        B("500 rent !housing #monthly")
+    with pytest.raises(ParseError, match="does not have.*note"):
+        B("500 rent !housing ~paid by card")
+    with pytest.raises(ParseError, match="does not have.*date"):
+        B("500 rent !housing @2026-01-01")
 
 
 BUDGET_ROWS = [
@@ -398,6 +436,16 @@ def test_recurring_requires_a_name():
 def test_recurring_requires_a_positive_cost():
     with pytest.raises(ParseError, match="positive"):
         R("0 Streaming !subscriptions")
+
+
+def test_recurring_rejects_unsupported_sigils():
+    """Recurring accepts ! and #; anything else is an error."""
+    with pytest.raises(ParseError, match="does not have.*date"):
+        R("88 Insurance !other #monthly @2026-01-01")
+    with pytest.raises(ParseError, match="does not have.*note"):
+        R("88 Insurance !other #monthly ~paid by card")
+    with pytest.raises(ParseError, match="does not have.*kcal"):
+        R("88 Insurance !other #monthly =610")
 
 
 RECURRING_ROWS = [
