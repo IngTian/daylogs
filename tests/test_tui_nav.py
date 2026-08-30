@@ -213,7 +213,7 @@ async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_in
         await pilot.press("2")
         await pilot.pause()
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("r")

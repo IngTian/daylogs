@@ -315,7 +315,7 @@ async def test_expense_write_reports_its_consequence(make_app, seeded, type_into
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("e")
-        await type_into(pilot, "12.40 lunch restaurant")
+        await type_into(pilot, "12.40 lunch !restaurant")
         await pilot.press("enter")
         await pilot.pause()
     assert any("12.40" in m for m in seen)
@@ -330,7 +330,7 @@ async def test_expense_feedback_warns_when_over_budget(make_app, db, type_into):
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("e")
-        await type_into(pilot, "50 dinner restaurant")
+        await type_into(pilot, "50 dinner !restaurant")
         await pilot.press("enter")
         await pilot.pause()
     assert any("⚠" in m for m in seen), f"no over-budget warning: {seen}"
@@ -343,7 +343,7 @@ async def test_budget_write_reports_spent_and_left(make_app, seeded, type_into):
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("b")
-        await type_into(pilot, "500 grocery")
+        await type_into(pilot, "500 !grocery")
         await pilot.press("enter")
         await pilot.pause()
     assert any("spent" in m and "left" in m for m in seen), f"{seen}"
@@ -356,7 +356,7 @@ async def test_recurring_write_reports_the_monthly_equivalent(make_app, db, type
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("s")
-        await type_into(pilot, "120 cloud subscriptions annually")
+        await type_into(pilot, "120 cloud !subscriptions #annually")
         await pilot.press("enter")
         await pilot.pause()
     assert any("10.00/mo" in m for m in seen), f"{seen}"

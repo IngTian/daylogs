@@ -164,7 +164,7 @@ async def test_labelled_food_reports_the_day_total(make_app, db, type_into):
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))
         await pilot.press("f")
-        await type_into(pilot, "salad 610")
+        await type_into(pilot, "salad =610")
         await pilot.press("enter")
         await pilot.pause()
     assert any("610" in m for m in seen)
@@ -184,7 +184,7 @@ async def test_food_feedback_uses_bmr_when_a_profile_exists(
         body = app.query_one("#body")
         body.viewing_date = "2026-08-27"
         await pilot.press("f")
-        await type_into(pilot, "salad 610")
+        await type_into(pilot, "salad =610")
         await pilot.press("enter")
         await pilot.pause()
     assert any("BMR" in m for m in seen), f"expected a BMR comparison: {seen}"

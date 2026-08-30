@@ -14,11 +14,11 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
-from daybook import body, editline, estimate, photo
+from daybook import body, estimate, parse, photo, sigil
 from daybook import horizon as hz
 from daybook.config import load_config, update_config
 from daybook.fmt import hhmm, human_date
-from daybook.parse import parse_food, parse_profile, parse_weigh
+from daybook.parse import ParseError, parse_food, parse_profile, parse_weigh
 from daybook.tui import chart
 from daybook.tui.common import PanelTab
 from daybook.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
@@ -65,6 +65,10 @@ class BodyTab(PanelTab):
 
     def focus_default(self) -> None:
         self.query_one("#body-table", DataTable).focus()
+
+    def cancel_editing(self) -> None:
+        """Drop the armed edit id when a prompt is cancelled."""
+        self._editing = None
 
     def span(self) -> hz.Span:
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
@@ -248,10 +252,10 @@ class BodyTab(PanelTab):
             return
         if self.table_mode == "weight":
             self._editing = ("weight", row["id"])
-            self.app.prompt.open("edit weigh", prefill=editline.render_weight(row))
+            self.app.prompt.open("weigh", prefill=parse.render_weigh(row))
         else:
             self._editing = ("food", row["id"])
-            self.app.prompt.open("edit food", prefill=editline.render_food(row))
+            self.app.prompt.open("food", prefill=parse.render_food(row))
 
     def key_next_subview(self) -> None:
         self.table_mode = "weight" if self.table_mode == "food" else "food"
@@ -361,7 +365,7 @@ class BodyTab(PanelTab):
         """Show the estimate as an editable line. Correcting it goes through the
         same grammar as typing it, so there is one code path, not two."""
         self._pending = est
-        self.app.prompt.open("confirm food", f"{est.description} {est.kcal}")
+        self.app.prompt.open("confirm food", f"{sigil.escape(est.description)} ={est.kcal}")
 
     # ── prompt handling ──────────────────────────────────────────────────
     def handle_prompt(self, label: str, value: str) -> None:
@@ -383,10 +387,6 @@ class BodyTab(PanelTab):
             self._submit_goto(value)
         elif label == "profile":
             self._submit_profile(value)
-        elif label == "edit weigh":
-            self._submit_edit_weight(value)
-        elif label == "edit food":
-            self._submit_edit_food(value)
 
     def _take_editing(self, which: str) -> int | None:
         """The id an open edit prompt belongs to, consumed once.
@@ -400,65 +400,6 @@ class BodyTab(PanelTab):
         self._editing = None
         return row_id
 
-    def _submit_edit_weight(self, value: str) -> None:
-        row_id = self._take_editing("weight")
-        if row_id is None:
-            return
-        before = self.app.conn.execute(
-            "SELECT * FROM weight WHERE id = ?", (row_id,)
-        ).fetchone()
-        if before is None:
-            self.app.notify("that row is gone", timeout=3)
-            return
-        fields = editline.parse_weight(value)
-        # measured_at is not in the grammar and so is never passed — an edit cannot
-        # re-stamp the timestamp that decides which of a day's readings counts.
-        # The pre-image is pushed *after* the write: if the write raises, a pushed
-        # pre-image would sit on the stack for `u` to apply to a row that never
-        # changed. Both tabs do it in this order.
-        body.update_weight(self.app.conn, row_id, **fields)
-        self.app.undo_stack.push("weight", dict(before))
-        after = self.app.conn.execute(
-            "SELECT * FROM weight WHERE id = ?", (row_id,)
-        ).fetchone()
-        self.app.notify(
-            f"{after['kg']:g} kg on {after['date']} · u to undo", timeout=4
-        )
-        self.reload()
-
-    def _submit_edit_food(self, value: str) -> None:
-        row_id = self._take_editing("food")
-        if row_id is None:
-            return
-        before = self.app.conn.execute(
-            "SELECT * FROM food WHERE id = ?", (row_id,)
-        ).fetchone()
-        if before is None:
-            self.app.notify("that row is gone", timeout=3)
-            return
-        fields = editline.parse_food(value)
-        # The grammar carries HH:MM but the column is epoch seconds, so re-deriving
-        # it unconditionally would silently drop the seconds off every edit. Only a
-        # changed minute rewrites it.
-        clock = fields.pop("time", None)
-        if clock is not None:
-            at = body.restamp(
-                before["ate_at"], date=fields.get("date", before["date"]), hhmm=clock
-            )
-            if at is not None:
-                fields["ate_at"] = at
-        # `source` is deliberately absent from the grammar: it is provenance
-        # (labelled vs estimated) that the digest reads, not something an edit of the
-        # description should rewrite. Pre-image after the write — see above.
-        body.update_food(self.app.conn, row_id, **fields)
-        self.app.undo_stack.push("food", dict(before))
-        after = self.app.conn.execute(
-            "SELECT * FROM food WHERE id = ?", (row_id,)
-        ).fetchone()
-        self.app.notify(
-            f"{after['description']} · {after['kcal']:,} kcal · u to undo", timeout=4
-        )
-        self.reload()
 
     def _submit_profile(self, value: str) -> None:
         """Persist to config.toml and reload, so BMR appears on this keystroke.
@@ -494,20 +435,80 @@ class BodyTab(PanelTab):
 
     def _submit_weigh(self, value: str) -> None:
         r = parse_weigh(value, now=self.app.now())
-        body.add_weight(self.app.conn, kg=r.kg, date=r.date, at=r.at, note=r.note)
-        self.viewing_date = r.date
+        row_id = self._take_editing("weight")
+        if row_id is None:
+            body.add_weight(self.app.conn, kg=r.kg, date=r.date, at=r.at, note=r.note)
+            self.viewing_date = r.date
+            self.reload()
+            d7 = body.weight_delta(self.app.conn, end_date=r.date, days=7)
+            trend = "" if d7 is None else f" · {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            self.app.notify(f"{r.kg:g} kg logged{trend}", timeout=4)
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM weight WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        # measured_at is deliberately absent: render_weigh emits no time, so an edit
+        # cannot re-stamp the reading that weight_series uses to pick the day.
+        body.update_weight(self.app.conn, row_id, kg=r.kg, date=r.date, note=r.note or "")
+        self.app.undo_stack.push("weight", dict(before))
+        self.app.notify(f"{r.kg:g} kg on {r.date} · u to undo", timeout=4)
         self.reload()
-        d7 = body.weight_delta(self.app.conn, end_date=r.date, days=7)
-        trend = "" if d7 is None else f" · {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
-        self.app.notify(f"{r.kg:g} kg logged{trend}", timeout=4)
+
+    def _line_sets_a_time(self, value: str) -> bool:
+        r"""Whether the line actually carried an @time.
+
+        Not `"@" in value`: an escaped `\@` inside a description is a plain word, and
+        reading raw text for a sigil is the scavenging this grammar exists to remove.
+        """
+        for tok in sigil.tokenize(value):
+            if tok.sigil == "@" and parse.TIME_RE.match(tok.value.split("/")[-1]):
+                return True
+        return False
 
     def _submit_food(self, value: str) -> None:
         r = parse_food(value, now=self.app.now())
-        if r.kcal is None:
-            self.app.notify("estimating calories…", timeout=3)
-            self._run_text_estimate(r.description)
+        row_id = self._take_editing("food")
+        if row_id is None:
+            if r.kcal is None:
+                self.app.notify("estimating calories…", timeout=3)
+                self._run_text_estimate(r.description)
+                return
+            self._write_food(r, source="labeled")
             return
-        self._write_food(r, source="labeled")
+        before = self.app.conn.execute(
+            "SELECT * FROM food WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        # render_food emits ate_at as @date/time. Only restamp if the user actually
+        # set a time — an escaped \@ in the description is not a time token.
+        if not self._line_sets_a_time(value):
+            at = before["ate_at"]
+        else:
+            before_minute = dt.datetime.fromtimestamp(before["ate_at"]).strftime("%Y-%m-%d %H:%M")
+            parsed_minute = dt.datetime.fromtimestamp(r.at).strftime("%Y-%m-%d %H:%M")
+            if before_minute == parsed_minute:
+                at = before["ate_at"]
+            else:
+                at = body.restamp(before["ate_at"], date=r.date, hhmm=hhmm(r.at))
+                if at is None:
+                    at = before["ate_at"]
+        # `source` is deliberately absent from the grammar: it is provenance
+        # (labelled vs estimated) that the digest reads, not something an edit of the
+        # description should rewrite. Pre-image after the write.
+        if r.kcal is None:
+            raise ParseError("kcal is required — give =kcal or leave the row unchanged")
+        body.update_food(
+            self.app.conn, row_id, description=r.description, kcal=r.kcal,
+            date=r.date, ate_at=at
+        )
+        self.app.undo_stack.push("food", dict(before))
+        self.app.notify(f"{r.description} · {r.kcal:,} kcal · u to undo", timeout=4)
+        self.reload()
 
     def _submit_confirmed_food(self, value: str) -> None:
         r = parse_food(value, now=self.app.now())

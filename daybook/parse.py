@@ -1,8 +1,10 @@
 """Pure parsers for the footer prompt grammars.
 
-One rule across all five grammars: the amount comes first; `@date`, `HH:MM`,
-known category slugs, and reserved keywords are consumed wherever they
-appear; whatever remains, in order, is free text.
+Sigil-based grammar: fields are marked with sigils (`!` category, `@` date/time,
+`~` note, `=` kcal, `#` cycle), not scavenged from free text. The amount is
+strictly the first token or absent. Whatever is not sigiled remains as plain
+text, in order. An unsupported sigil for a given grammar is an error, not silently
+discarded.
 
 Nothing here touches the database or the clock — `now` is injected, so every
 case is testable and nothing depends on when the suite runs.
@@ -14,20 +16,71 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
+from daybook import money, sigil
 from daybook.categories import FALLBACK_SLUG, get
+from daybook.fmt import hhmm
 
-_DATE_FULL = re.compile(r"^@(\d{4})-(\d{2})-(\d{2})$")
-_DATE_SHORT = re.compile(r"^@(\d{2})-(\d{2})$")
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
-_INT = re.compile(r"^\d+$")
-_ONLY_NUMERIC = re.compile(r"^[\d.,\s]+$")
-# Plausibility limits, exported because the edit grammar in editline.py must agree
-# with this one. They were duplicated in both files and agreed by coincidence; a
-# change in one would have let entry and editing disagree about a valid value.
+# Plausibility limits. Once shared with a separate edit grammar; now one grammar.
 MAX_KG = 500.0
 MAX_KCAL = 20000
-# The one time-of-day shape either grammar accepts.
+# The one time-of-day shape the grammar accepts.
 TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_WHEN_FULL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_WHEN_SHORT = re.compile(r"^(\d{2})-(\d{2})$")
+
+
+@dataclass(frozen=True)
+class When:
+    date: str  # ISO
+    at: int    # epoch seconds
+
+
+def resolve_when(values: list[str], *, now: dt.datetime) -> When:
+    """Resolve `@` values by shape, the way parse_profile resolves its fields.
+
+    A token can only be one of four things, so there is no order to remember and
+    nothing to disambiguate. A date and a time may arrive as one combined token or
+    as two separate ones; a second date or a second time is an error rather than
+    last-wins.
+    """
+    date: dt.date | None = None
+    time: dt.time | None = None
+
+    for value in values:
+        for part in value.split("/"):
+            if not part:
+                continue
+            if m := _WHEN_FULL.match(part):
+                if date is not None:
+                    raise ParseError("@ gave a date twice")
+                date = _safe_date(int(m[1]), int(m[2]), int(m[3]))
+            elif m := _WHEN_SHORT.match(part):
+                if date is not None:
+                    raise ParseError("@ gave a date twice")
+                date = _safe_date(now.year, int(m[1]), int(m[2]))
+            elif m := TIME_RE.match(part):
+                if time is not None:
+                    raise ParseError("@ gave a time twice")
+                hh, mm = int(m[1]), int(m[2])
+                if hh > 23 or mm > 59:
+                    raise ParseError(f"@{part} is not a valid time")
+                time = dt.time(hh, mm)
+            else:
+                raise ParseError(
+                    f"@{part}: try @2026-08-24, @08-24, @14:30 or @08-24/14:30"
+                )
+
+    day = date or now.date()
+    if time is not None:
+        when = dt.datetime.combine(day, time, tzinfo=now.tzinfo)
+    elif date is None:
+        when = now
+    else:
+        # Back-dating without a time keeps the current wall-clock time on that
+        # date. Silently collapsing to midnight would misreport a weigh-in.
+        when = dt.datetime.combine(day, now.timetz())
+    return When(date=day.isoformat(), at=int(when.timestamp()))
 
 
 class ParseError(ValueError):
@@ -36,17 +89,6 @@ class ParseError(ValueError):
     The message is shown verbatim in the prompt, so it reads as guidance
     rather than as a stack trace.
     """
-
-
-@dataclass(frozen=True)
-class Tokens:
-    amount: float | None
-    text: str
-    raw_rest: tuple[str, ...]
-    category: str | None
-    keywords: frozenset[str]
-    date: str
-    at: int
 
 
 @dataclass(frozen=True)
@@ -71,6 +113,7 @@ class ExpenseInput:
     description: str
     category: str
     date: str
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,144 +131,193 @@ class RecurringInput:
     cycle: str
 
 
-def tokenize(
-    raw: str,
-    *,
-    now: dt.datetime,
-    known_slugs: frozenset[str] = frozenset(),
-    keywords: frozenset[str] = frozenset(),
-) -> Tokens:
-    parts = raw.split()
-    if not parts:
-        raise ParseError("nothing to log")
-
-    date: dt.date | None = None
-    time: dt.time | None = None
-    category: str | None = None
-    found_keywords: set[str] = set()
-    rest: list[str] = []
-
-    for tok in parts:
-        if m := _DATE_FULL.match(tok):
-            date = _safe_date(int(m[1]), int(m[2]), int(m[3]))
-            continue
-        if m := _DATE_SHORT.match(tok):
-            date = _safe_date(now.year, int(m[1]), int(m[2]))
-            continue
-        if m := TIME_RE.match(tok):
-            hh, mm = int(m[1]), int(m[2])
-            if hh > 23 or mm > 59:
-                raise ParseError(f"{tok} is not a valid time")
-            time = dt.time(hh, mm)
-            continue
-        low = tok.lower()
-        if low in keywords:
-            found_keywords.add(low)
-            continue
-        if category is None and low in known_slugs:
-            category = low
-            continue
-        rest.append(tok)
-
-    raw_rest = tuple(rest)
-    amount: float | None = None
-    if rest and _NUM.match(rest[0]):
-        amount = to_amount(rest[0])
-        rest = rest[1:]
-
-    day = date or now.date()
-    if time is not None:
-        when = dt.datetime.combine(day, time, tzinfo=now.tzinfo)
-    elif date is None:
-        when = now
-    else:
-        # Back-dating without a time keeps the current wall-clock time on that
-        # date. Silently collapsing to midnight would misreport a weigh-in.
-        when = dt.datetime.combine(day, now.timetz())
-
-    return Tokens(
-        amount=amount,
-        text=" ".join(rest).strip(),
-        raw_rest=raw_rest,
-        category=category,
-        keywords=frozenset(found_keywords),
-        date=day.isoformat(),
-        at=int(when.timestamp()),
-    )
-
-
 def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> WeighInput:
-    t = tokenize(raw, now=now)
-    if t.amount is None:
-        raise ParseError("start with a weight, e.g. 78.2")
-    if not 0 < t.amount <= MAX_KG:
-        raise ParseError(f"{t.amount} kg is not a plausible weight")
-    return WeighInput(kg=t.amount, note=t.text or None, date=t.date, at=t.at)
+    toks = _tokens(raw)
+    kg = _leading_amount(toks, "a weight, e.g. 78.2")
+    if not 0 < kg <= MAX_KG:
+        raise ParseError(f"{kg:g} kg is not a plausible weight")
+    g = sigil.group(toks[1:])
+    _reject_unsupported(g, frozenset(["@"]), "weigh-in")
+    when = resolve_when(g.by_sigil.get("@", []), now=now)
+    return WeighInput(kg=kg, note=g.text or None, date=when.date, at=when.at)
+
+
+def render_weigh(row) -> str:
+    """No time in the line: `measured_at` is the tie-breaker weight_series uses to
+    pick a day's reading, and re-deriving it from an HH:MM token would shave the
+    seconds off every edit."""
+    parts = [f"{row['kg']:g}"]
+    if row["note"]:
+        parts.append(sigil.escape(row["note"]))
+    parts.append(f"@{row['date']}")
+    return " ".join(parts)
 
 
 def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodInput:
-    """A trailing bare integer is always calories. To log a description that
-    genuinely ends in a number, supply the calories explicitly."""
-    t = tokenize(raw, now=now)
-    words = list(t.raw_rest)
+    """kcal comes only from `=`. A trailing bare integer used to mean calories,
+    which made `coffee 2` undecidable between a 2 kcal coffee and a description
+    that ends in a number."""
+    toks = _tokens(raw)
+    g = sigil.group(toks)
+    if not g.text:
+        raise ParseError("describe the food, e.g. chicken salad =610")
+    _reject_unsupported(g, frozenset(["@", "="]), "food entry")
+    raw_kcal = _single(g, "=", "kcal")
     kcal: int | None = None
-    if len(words) > 1 and _INT.match(words[-1]):
-        kcal = int(words[-1])
-        words = words[:-1]
+    if raw_kcal is not None:
+        if not raw_kcal.isdigit():
+            raise ParseError(f"={raw_kcal}: kcal must be a whole number, e.g. =610")
+        kcal = int(raw_kcal)
         if kcal > MAX_KCAL:
             raise ParseError(f"{kcal} kcal is not a plausible meal")
-    description = " ".join(words).strip()
-    if not description or _ONLY_NUMERIC.match(description):
-        raise ParseError("describe the food, e.g. chicken caesar salad 610")
-    return FoodInput(description=description, kcal=kcal, date=t.date, at=t.at)
+    when = resolve_when(g.by_sigil.get("@", []), now=now)
+    return FoodInput(description=g.text, kcal=kcal, date=when.date, at=when.at)
+
+
+def render_food(row) -> str:
+    return " ".join([
+        sigil.escape(row["description"]),
+        f"={int(row['kcal'])}",
+        f"@{row['date']}/{hhmm(row['ate_at'])}",
+    ])
+
+
+def _tokens(raw: str) -> list[sigil.Token]:
+    toks = sigil.fold_spans(sigil.tokenize(raw))
+    if not toks:
+        raise ParseError("nothing to log")
+    return toks
+
+
+def _leading_amount(tokens: list[sigil.Token], hint: str) -> float:
+    """The amount is the first token or there is no amount.
+
+    Strictly positional, unlike the old grammar's "first number that survives
+    field extraction". That is what makes a numeric word inside a description safe.
+    """
+    first = tokens[0]
+    if first.sigil or not _NUM.match(first.value):
+        raise ParseError(f"start with {hint}")
+    return to_amount(first.value)
+
+
+def _single(g: sigil.Grouped, sigil_char: str, field: str) -> str | None:
+    values = g.by_sigil.get(sigil_char, [])
+    if len(values) > 1:
+        raise ParseError(f"{sigil_char} gave the {field} twice")
+    return values[0] if values else None
+
+
+def _vocab(value: str, allowed, field: str) -> str:
+    low = value.lower()
+    if low not in allowed:
+        raise ParseError(f"{value!r} is not a {field} — one of {', '.join(sorted(allowed))}")
+    return low
+
+
+def _reject_unsupported(g: sigil.Grouped, allowed: frozenset[str], entity: str) -> None:
+    """Reject any sigil the entity does not consume.
+
+    The premise is "what you typed is what gets recorded" — silently discarding
+    sigiled input is this slice's own failure mode. `f`/`e` are adjacent and both
+    start with free text, so typing !restaurant on a food line is a live mistake.
+    """
+    used = frozenset(g.by_sigil.keys())
+    unsupported = used - allowed
+    if unsupported:
+        sigil_char = sorted(unsupported)[0]
+        special = _NO_SUCH_FIELD.get((entity, sigil_char))
+        if special:
+            raise ParseError(special)
+        field_name = {"!": "category", "#": "cycle", "~": "note", "=": "kcal", "@": "date/time"}
+        field = field_name.get(sigil_char, 'field')
+        hint = f"a {entity} does not have a {field} — drop {sigil_char}"
+        raise ParseError(hint)
+
+
+# Where the generic "does not have a <field>" line would be untrue. A weigh-in
+# does have a note — it is the bare words — so naming the sigil is the whole fix.
+_NO_SUCH_FIELD = {
+    ("weigh-in", "~"): "a weigh-in's note is just the words — drop the ~",
+}
 
 
 def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> ExpenseInput:
-    t = tokenize(raw, now=now, known_slugs=known_slugs)
-    if t.amount is None:
-        raise ParseError("start with an amount, e.g. 12.40 lunch restaurant")
-    if t.amount == 0:
+    toks = _tokens(raw)
+    amount = _leading_amount(toks, "an amount, e.g. 12.40 lunch !restaurant")
+    g = sigil.group(toks[1:])
+    if amount == 0:
         raise ParseError("amount must be non-zero")
-    if not t.text:
-        raise ParseError("say what it was, e.g. 12.40 lunch restaurant")
+    if not g.text:
+        raise ParseError("say what it was, e.g. 12.40 lunch !restaurant")
+    _reject_unsupported(g, frozenset(["!", "@", "~"]), "expense")
+    slug = _single(g, "!", "category")
+    note = _single(g, "~", "note")
     return ExpenseInput(
-        amount=t.amount,
-        description=t.text,
-        category=t.category or FALLBACK_SLUG,
-        date=t.date,
+        amount=amount,
+        description=g.text,
+        category=_vocab(slug, known_slugs, "category") if slug else FALLBACK_SLUG,
+        date=resolve_when(g.by_sigil.get("@", []), now=now).date,
+        note=note or None,
     )
+
+
+def render_expense(row) -> str:
+    """The inverse, for prefilling an edit. `~` renders last because it absorbs the
+    plain tokens after it."""
+    parts = [f"{row['amount']:.2f}", sigil.escape(row["description"]),
+             f"!{row['category']}", f"@{row['date']}"]
+    if row["note"]:
+        parts.append(f"~{sigil.escape(row['note'])}")
+    return " ".join(parts)
 
 
 def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> BudgetInput:
-    t = tokenize(raw, now=now, known_slugs=known_slugs)
-    if t.amount is None or t.amount <= 0:
-        raise ParseError("budget needs a positive amount, e.g. 500 grocery")
-    if t.category is None:
-        raise ParseError("name a known category, e.g. 500 grocery")
-    cat = get(t.category)
+    toks = _tokens(raw)
+    amount = _leading_amount(toks, "a positive amount, e.g. 500 !grocery")
+    if amount <= 0:
+        raise ParseError("a budget needs a positive amount, e.g. 500 !grocery")
+    g = sigil.group(toks[1:])
+    _reject_unsupported(g, frozenset(["!"]), "budget")
+    slug = _single(g, "!", "category")
+    if slug is None:
+        raise ParseError("name a category, e.g. 500 !grocery")
+    category = _vocab(slug, known_slugs, "category")
+    cat = get(category)
     return BudgetInput(
-        amount=t.amount,
-        name=t.text or (cat.display if cat else t.category),
-        category=t.category,
+        amount=amount,
+        name=g.text or (cat.display if cat else category),
+        category=category,
     )
+
+
+def render_budget(row) -> str:
+    return f"{row['amount']:.2f} {sigil.escape(row['name'])} !{row['category']}"
 
 
 def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> RecurringInput:
-    t = tokenize(
-        raw,
-        now=now,
-        known_slugs=known_slugs,
-        keywords=frozenset({"monthly", "annually"}),
-    )
-    if t.amount is None or t.amount <= 0:
-        raise ParseError("recurring needs a positive cost, e.g. 20.99 streaming subscriptions")
-    if not t.text:
-        raise ParseError("give it a name, e.g. 20.99 streaming subscriptions")
+    toks = _tokens(raw)
+    cost = _leading_amount(toks, "a positive cost, e.g. 20.99 Streaming !subscriptions")
+    if cost <= 0:
+        raise ParseError("a recurring cost must be positive")
+    g = sigil.group(toks[1:])
+    if not g.text:
+        raise ParseError("give it a name, e.g. 20.99 Streaming !subscriptions")
+    _reject_unsupported(g, frozenset(["!", "#"]), "recurring cost")
+    slug = _single(g, "!", "category")
+    cycle = _single(g, "#", "cycle")
     return RecurringInput(
-        cost=t.amount,
-        name=t.text,
-        category=t.category or FALLBACK_SLUG,
-        cycle="annually" if "annually" in t.keywords else "monthly",
+        cost=cost,
+        name=g.text,
+        category=_vocab(slug, known_slugs, "category") if slug else FALLBACK_SLUG,
+        cycle=_vocab(cycle, money.CYCLES, "cycle") if cycle else "monthly",
+    )
+
+
+def render_recurring(row) -> str:
+    return (
+        f"{row['cost']:.2f} {sigil.escape(row['name'])} "
+        f"!{row['category']} #{row['cycle']}"
     )
 
 

@@ -1,8 +1,8 @@
 """Date and time strings the user reads.
 
-Two functions, in one place, because they were written three times: `hhmm` in the
-Body tab, in `summary.py` and inline in `editline.py`; `human_date` in the Body tab
-and the Summary tab. Not a DRY point — a correctness one. `human_date` raises
+Two functions, in one place, because they were written multiple times and
+independently: `hhmm` in the Body tab and in `summary.py`; `human_date` in the Body
+tab and the Summary tab. Not a DRY point — a correctness one. `human_date` raises
 `ValueError` on a malformed date, and a malformed date reaching it is exactly how a
 cloned `g` handler crashed the app. One copy means one place to harden.
 

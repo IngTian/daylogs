@@ -139,18 +139,25 @@ never more than two keystrokes from anywhere.
 | Prompt | Type | Result |
 |---|---|---|
 | `weigh ›` | `78.2` | logged now |
-| `weigh ›` | `78.2 post-run` | with a note |
-| `food ›` | `chicken caesar salad 610` | labelled — no LLM call |
-| `food ›` | `chicken caesar salad` | Claude estimates the calories; review and accept or edit |
-| `expense ›` | `12.40 lunch restaurant` | amount, description, category |
-| `expense ›` | `12.40 lunch` | files under `other` and reopens so you can fix it |
-| `expense ›` | `-24.99 returned shoes grocery` | a refund |
-| `budget ›` | `500 grocery` | names the line after the category |
-| `budget ›` | `500 household staples grocery` | explicit name |
-| `recurring ›` | `20.99 streaming subscriptions` | monthly |
-| `recurring ›` | `120 cloud storage subscriptions annually` | monthly equivalent of 10.00 |
-| `profile ›` | `180 male 1990-01-01` | height, sex, birthday — any order |
-| `profile ›` | `181` | just the height; the rest is left alone |
+| `weigh ›` | `78.2 post-run @07:30` | with a note, at a time |
+| `food ›` | `chicken salad =610` | labelled — no LLM call |
+| `food ›` | `chicken salad` | Claude estimates; review and accept |
+| `expense ›` | `12.40 lunch !restaurant` | amount, description, category |
+| `expense ›` | `127 Grocery Item X !grocery ~receipt in wallet` | with a note |
+| `expense ›` | `-24.99 returned shoes !grocery` | a refund |
+| `budget ›` | `500 !grocery` | named after the category |
+| `recurring ›` | `20.99 Streaming !subscriptions #monthly` | monthly |
+
+Sigils mark the fields, so nothing is ever taken out of your own words:
+
+    !  a category                   tab completes
+    #  a cycle                      tab completes
+    @  a date and/or a time         @2026-08-24  @08-24  @14:30  @08-24/14:30
+    ~  a note (may contain spaces)
+    =  calories
+
+Everything unsigiled is the description. The first token is the amount. `\` escapes
+a leading sigil, so `\!important` is just a word.
 
 Every prompt shows what it wants, in three places and no extra screen rows:
 
@@ -179,28 +186,11 @@ decimal point — `12,40` is rejected with a suggestion rather than quietly beco
 `enter` acts on whatever is under the cursor: a weight, food, expense or recurring
 row opens for editing, a category drills in, a group folds.
 
-Editing uses a different, field-separated grammar — and deliberately so:
-
-```
-╭─ edit expense › ──────────────────────────────────────────╮
-│ 12.40 | lunch | restaurant | 2026-08-27                   │
-╰─ amount | what | category | date — drop a field to keep it ╯
-```
-
-Drop a trailing field and it's left alone (`81.5` alone is a quick weight fix);
-Emptying a field clears it where a blank value means something — today that is the
-weigh-in note; every other field is required and rejects an empty segment. Each
-line carries exactly the columns that row's table shows, so what you can see is
-what you can edit.
-
-The reason it isn't the entry grammar: entry is airy on purpose — `12.40 lunch
-restaurant` needs no punctuation because the parser finds the amount, the category
-and the time wherever they sit and calls the rest a description. Rendering a saved
-row *back* into that form lets the free-text field lose a token. An expense
-described "lunch at grocery store" and filed under restaurant came back as
-category `grocery`, description "lunch at store restaurant". A recurring item named
-"Insurance billed annually" lost the word *and* had its cycle overwritten. Two
-fields wrong from one keystroke, silently. Separated fields can't do that.
+Editing prefills the same grammar you used for entry. The submitted line is
+authoritative: drop the note words and the note is cleared; submit unchanged and
+the note survives. Food entries always require `=kcal` — dropping it is rejected
+rather than silently zeroing the calories. Each line carries exactly the columns
+that row's table shows, so what you can see is what you can edit.
 
 `u` undoes an edit as well as a delete.
 
@@ -281,10 +271,8 @@ who you are, so the summary can be about you rather than about a table of number
 
 ### Any entry prompt
 
-In the weigh / food / expense / budget / recurring prompts, `@2026-08-25` or
-`@08-25` sets the date and `13:05` sets the time, wherever you put them in the
-line. The edit prompts don't take those — they have a date and a time field of
-their own.
+In the weigh / food / expense prompts, `@2026-08-25` or `@08-25` sets the date
+and `@13:05` sets the time, wherever you put them in the line.
 
 Everywhere: `esc` cancels, `↑` / `↓` walk that prompt's history.
 
@@ -353,7 +341,7 @@ from cron.
 ## Development
 
 ```bash
-pytest          # 749 tests
+pytest
 ruff check .
 ```
 

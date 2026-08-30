@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daybook import editline
 from daybook.categories import slugs
 from daybook.parse import (
     parse_budget,
@@ -40,15 +39,6 @@ PARSERS = {
     "recurring": parse_recurring,
 }
 
-# Edit prompts use the field-separated grammar in editline.py, not the entry
-# grammar — see that module for why reusing the entry grammar corrupts rows.
-EDIT_PARSERS = {
-    "edit weigh": editline.parse_weight,
-    "edit food": editline.parse_food,
-    "edit expense": editline.parse_expense,
-    "edit recurring": editline.parse_recurring,
-}
-
 NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile"}
 
 
@@ -68,11 +58,12 @@ def test_no_hint_describes_a_prompt_that_does_not_exist():
     opened = set()
     for path in SRC.rglob("*.py"):
         opened |= hints.labels_in_source(path.read_text())
-    # Edit prompts are opened with a computed label in some paths; allow them.
-    stale = sorted(
-        h.label for h in hints.HINTS if h.label not in opened and not h.label.startswith("edit ")
-    )
+    stale = sorted(h.label for h in hints.HINTS if h.label not in opened)
     assert not stale, f"hints for prompts that are never opened: {stale}"
+
+
+def test_no_edit_hints_remain():
+    assert not [h for h in hints.HINTS if h.label.startswith("edit ")]
 
 
 def test_hint_labels_are_unique():
@@ -100,15 +91,10 @@ def test_the_profile_example_parses_too():
     assert p.height_cm and p.sex and p.birthday
 
 
-@pytest.mark.parametrize("label", sorted(EDIT_PARSERS))
-def test_every_edit_example_is_a_line_the_edit_parser_accepts(label):
-    EDIT_PARSERS[label](hints.for_label(label).example)
-
-
 def test_labels_without_a_parser_are_deliberate_not_forgotten():
     """Keeps the parser map honest: a new grammar-backed prompt must be added to
     PARSERS rather than quietly landing in the free-text bucket."""
-    covered = set(PARSERS) | set(EDIT_PARSERS) | NO_PARSER
+    covered = set(PARSERS) | NO_PARSER
     uncovered = sorted({h.label for h in hints.HINTS} - covered)
     assert not uncovered, f"classify these in PARSERS or NO_PARSER: {uncovered}"
 
@@ -121,3 +107,65 @@ def test_labels_in_source_finds_both_call_shapes():
 def test_labels_in_source_handles_a_multiline_call():
     text = 'self.app.prompt.open(\n    "confirm food", f"{x} {y}"\n)\n'
     assert hints.labels_in_source(text) == {"confirm food"}
+
+
+# ── sigil vocabularies ──────────────────────────────────────────────────────
+def test_expense_offers_categories_for_bang():
+    v = hints.vocab_for(hints.for_label("expense"))
+    assert "grocery" in v["!"]
+
+
+def test_recurring_offers_both_categories_and_cycles():
+    v = hints.vocab_for(hints.for_label("recurring"))
+    assert "subscriptions" in v["!"]
+    assert v["#"] == ("annually", "monthly")
+
+
+def test_weigh_offers_no_vocabulary():
+    assert hints.vocab_for(hints.for_label("weigh")) == {}
+
+
+def test_fix_category_completes_without_a_sigil():
+    """Its whole input is a slug, so the implicit sigil is the empty string."""
+    v = hints.vocab_for(hints.for_label("fix category"))
+    assert "grocery" in v[""]
+
+
+def test_categories_come_from_config_at_runtime(make_cfg):
+    cfg = make_cfg(extra_categories=(("gym", "Gym", ""),))
+    v = hints.vocab_for(hints.for_label("expense"), cfg)
+    assert "gym" in v["!"]
+
+
+def test_every_sigil_named_by_a_hint_is_a_real_sigil():
+    from daybook.sigil import SIGILS
+
+    for h in hints.HINTS:
+        for s in h.sigils:
+            assert s == "" or s in SIGILS, f"{h.label} names {s!r}"
+
+
+def test_a_hint_that_declares_a_sigil_names_it_and_shows_it():
+    """The three-way check. An example that parses is not an example that is right:
+    `12.40 lunch restaurant` parsed fine and filed under `other`."""
+    for h in hints.HINTS:
+        for s in h.sigils:
+            if s == "":  # fix category's whole input is the value; no sigil to show
+                continue
+            assert s in h.grammar, f"{h.label}: accepts {s} but the grammar never names it"
+            assert s in h.example, f"{h.label}: accepts {s} but the example omits it"
+
+
+def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
+    """The other direction, for the grammar-parsed prompts only. `photo path` is
+    exempt: its `~/Downloads/...` is a home-directory tilde, and that prompt is not
+    parsed by the grammar at all."""
+    from daybook import sigil
+
+    for label in PARSERS:
+        h = hints.for_label(label)
+        for tok in sigil.tokenize(h.example):
+            if tok.sigil:
+                assert (
+                    tok.sigil in h.grammar
+                ), f"{h.label}: example uses {tok.sigil}, grammar does not"

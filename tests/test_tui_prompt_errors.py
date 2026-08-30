@@ -251,3 +251,104 @@ async def test_fixing_an_error_restores_the_grammar(make_app, db, type_into):
         restored = str(app.prompt.border_subtitle)
     assert "weight" in errored
     assert restored == hints.for_label("weigh").grammar
+
+
+# ── completion ──────────────────────────────────────────────────────────────
+
+
+async def test_tab_completes_a_category(make_app, type_into):
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch !gro")
+        await pilot.press("tab")
+        await pilot.pause()
+        value = app.prompt.value
+    assert value == "12.40 lunch !grocery "
+
+
+async def test_tab_still_changes_sub_view_when_the_prompt_is_closed(make_app):
+    """The binding has to keep its original job."""
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.pause()
+        before = app.query_one("#money").view.pane
+        await pilot.press("tab")
+        await pilot.pause()
+        after = app.query_one("#money").view.pane
+    assert before != after
+
+
+async def test_the_border_shows_candidates_while_in_a_sigil_token(make_app, type_into):
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch !")
+        await pilot.pause()
+        subtitle = str(app.prompt.border_subtitle)
+    assert "grocery" in subtitle
+    assert "restaurant" in subtitle
+
+
+async def test_the_border_returns_to_the_grammar_outside_a_sigil_token(make_app, type_into):
+    from daybook.tui import hints
+
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch !grocery")
+        await pilot.press("tab")
+        await pilot.pause()
+        subtitle = str(app.prompt.border_subtitle)
+    assert subtitle == hints.for_label("expense").grammar
+
+
+async def test_repeated_tabs_cycle_an_ambiguous_prefix(make_app, type_into):
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.press("e")
+        await type_into(pilot, "12.40 x !e")
+        await pilot.press("tab")
+        await pilot.pause()
+        first = app.prompt.value
+        await pilot.press("tab")
+        await pilot.pause()
+        second = app.prompt.value
+    assert first != second
+    assert {first.strip().split("!")[-1], second.strip().split("!")[-1]} == {
+        "education",
+        "entertainment",
+    }
+
+
+async def test_tab_in_a_prompt_with_no_vocabulary_does_nothing(make_app, type_into):
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("w")
+        await type_into(pilot, "78.2 post")
+        await pilot.press("tab")
+        await pilot.pause()
+        value = app.prompt.value
+    assert value == "78.2 post"
+
+
+async def test_completing_mid_line_leaves_the_cursor_after_the_completed_word(make_app, type_into):
+    """The pure engine is tested for this; this proves the widget does not clamp it."""
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("2")
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch !gro")
+        await type_into(pilot, " extra")
+        # cursor is at the end; walk it back into the sigil token
+        app.prompt.cursor_position = len("12.40 lunch !gro")
+        await pilot.press("tab")
+        await pilot.pause()
+        value, cursor = app.prompt.value, app.prompt.cursor_position
+    assert value == "12.40 lunch !grocery extra"
+    assert cursor == len("12.40 lunch !grocery")

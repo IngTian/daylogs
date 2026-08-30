@@ -27,7 +27,7 @@ from daybook.money import MoneyError
 from daybook.moneyview import ViewError
 from daybook.parse import ParseError
 from daybook.photo import PhotoError
-from daybook.tui import keymap
+from daybook.tui import hints, keymap
 from daybook.tui.body_tab import BodyTab
 from daybook.tui.footer import KeyFooter
 from daybook.tui.help import HelpScreen
@@ -189,6 +189,11 @@ class DaybookApp(App):
         three different things without three binding tables.
         """
         if self.prompt.is_open:
+            # `tab` is a priority App binding, so the focused Input never sees it.
+            # Completion therefore has to be driven from here.
+            if key == "tab":
+                vocab = hints.vocab_for(hints.for_label(self.prompt.label), self.cfg)
+                self.prompt.complete_now(vocab)
             return
         entry = keymap.lookup(key, self.scope)
         if entry is None:
@@ -211,6 +216,11 @@ class DaybookApp(App):
             event.stop()
             fn()
             self.refresh_footer()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input is self.prompt:
+            vocab = hints.vocab_for(hints.for_label(self.prompt.label), self.cfg)
+            self.prompt.refresh_candidates(vocab)
 
     # ── app-scope handlers ───────────────────────────────────────────────
     def app_show_body(self) -> None:
@@ -266,6 +276,18 @@ class DaybookApp(App):
         self.refresh_tabs()
 
     # ── prompt plumbing ──────────────────────────────────────────────────
+    def _cancel_editing(self) -> None:
+        """Drop an armed edit id so the next entry does not corrupt that row.
+
+        The edit prompts share their labels with the entry prompts now, so an
+        abandoned edit has to drop its row id here — otherwise the next plain
+        `w` or `e` is consumed as an update of the row you walked away from.
+        """
+        tab = self._active_tab()
+        cancel = getattr(tab, "cancel_editing", None)
+        if cancel is not None:
+            cancel()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle first, close only on success.
 
@@ -279,6 +301,7 @@ class DaybookApp(App):
         label, value = self.prompt.label, event.value.strip()
         tab = self._active_tab()
         if not value:
+            self._cancel_editing()
             self.prompt.close()
             tab.focus_default()
             return
@@ -300,6 +323,7 @@ class DaybookApp(App):
 
     def on_inline_prompt_cancelled(self, event: InlinePrompt.Cancelled) -> None:
         event.stop()
+        self._cancel_editing()
         self._active_tab().focus_default()
 
     # ── confirm ──────────────────────────────────────────────────────────

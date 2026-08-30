@@ -22,7 +22,7 @@ async def test_e_logs_an_expense_with_inferred_category(make_app, db, type_into)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("e")
-        await type_into(pilot, "12.40 lunch restaurant")
+        await type_into(pilot, "12.40 lunch !restaurant")
         await pilot.press("enter")
         await pilot.pause()
     rows = all_expenses(db)
@@ -58,7 +58,7 @@ async def test_fixing_the_category_does_not_loop_forever(make_app, db, type_into
         await type_into(pilot, "12.40 lunch")
         await pilot.press("enter")
         await pilot.pause()
-        app.prompt.value = "12.40 lunch restaurant"
+        app.prompt.value = "12.40 lunch !restaurant"
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open is False
@@ -83,7 +83,7 @@ async def test_refund_is_accepted_as_a_negative_amount(make_app, db):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("e")
-        app.prompt.value = "-24.99 returned shoes entertainment"
+        app.prompt.value = "-24.99 returned shoes !entertainment"
         await pilot.press("enter")
         await pilot.pause()
     assert all_expenses(db)[0]["amount"] == -24.99
@@ -94,7 +94,7 @@ async def test_b_sets_a_budget_line(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("b")
-        await type_into(pilot, "500 grocery")
+        await type_into(pilot, "500 !grocery")
         await pilot.press("enter")
         await pilot.pause()
         month = app.today()[:7]
@@ -125,7 +125,7 @@ async def test_s_adds_a_recurring_item_and_shows_that_pane(make_app, db, type_in
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         assert money_tab.view.pane == "recurring"
@@ -139,7 +139,7 @@ async def test_annual_recurring_stores_monthly_equivalent(make_app, db):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        app.prompt.value = "120 cloud storage subscriptions annually"
+        app.prompt.value = "120 cloud storage !subscriptions #annually"
         await pilot.press("enter")
         await pilot.pause()
     row = list_recurring(db)[0]
@@ -151,7 +151,7 @@ async def test_r_rolls_recurring_into_the_viewed_month(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("r")
@@ -232,7 +232,7 @@ async def test_x_deletes_a_recurring_row(make_app, db, type_into):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("s")
-        await type_into(pilot, "20.99 streaming subscriptions")
+        await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("x")
@@ -506,10 +506,10 @@ async def test_enter_on_an_expense_row_edits_it_in_place(make_app, db, type_into
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.label == "edit expense"
+        assert app.prompt.label == "expense"
         assert "lunch" in app.prompt.value
         app.prompt.value = ""
-        await type_into(pilot, "14.50 | lunch out | grocery")
+        await type_into(pilot, "14.50 lunch out !grocery @2026-08-04")
         await pilot.press("enter")
         await pilot.pause()
     rows = all_expenses(db)
@@ -520,7 +520,7 @@ async def test_enter_on_an_expense_row_edits_it_in_place(make_app, db, type_into
         "lunch out",
         "grocery",
     )
-    assert rows[0]["date"] == "2026-08-04", "an omitted field is left alone"
+    assert rows[0]["date"] == "2026-08-04"
 
 
 async def test_editing_an_expense_preserves_created_at(make_app, db, type_into):
@@ -551,7 +551,7 @@ async def test_undoing_an_expense_edit_restores_it(make_app, db, type_into):
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
-        await type_into(pilot, "99.99 | oops | housing")
+        await type_into(pilot, "99.99 oops !housing @2026-08-04")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("u")
@@ -578,9 +578,9 @@ async def test_enter_on_a_recurring_row_renames_without_duplicating(make_app, db
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.label == "edit recurring"
+        assert app.prompt.label == "recurring"
         app.prompt.value = ""
-        await type_into(pilot, "24.99 | streaming plus | subscriptions | monthly")
+        await type_into(pilot, "24.99 streaming plus !subscriptions #monthly")
         await pilot.press("enter")
         await pilot.pause()
     rows = list_recurring(db)
@@ -607,9 +607,169 @@ async def test_a_colliding_recurring_rename_is_rejected_cleanly(make_app, db, ty
         await pilot.pause()
         assert "Gym" in app.prompt.value, "precondition: editing Gym, not Rent"
         app.prompt.value = ""
-        await type_into(pilot, "40 | Rent | other | monthly")
+        await type_into(pilot, "40 Rent !other #monthly")
         await pilot.press("enter")
         await pilot.pause()
         still_open = app.prompt.is_open
     assert still_open is True, "the prompt keeps the text so the name can be fixed"
     assert len(list_recurring(db)) == 2
+async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms an expense edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row.
+
+    The clock is pinned and the prompt is asserted open, because the expense table
+    filters by month, so an unpinned `now` leaves it empty from Sept 1, `enter`
+    arms nothing, and the test passes with the fix removed.
+    """
+    import datetime as dt
+
+    add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "25 fresh !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 2, "must have two expense rows"
+    assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
+    assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
+
+
+async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a recurring edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "10 Fresh !other")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert len(rows) == 2, "must have two recurring rows"
+    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
+    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
+
+
+async def test_empty_submit_on_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms an expense edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row.
+
+    The clock is pinned and the prompt asserted open: the Money table defaults to
+    MTD, so on an unpinned clock this row falls outside the window from September
+    and `enter` would arm nothing, passing every assertion below for free.
+    """
+    add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "25 fresh !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 2, "must have two expense rows"
+    assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
+    assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
+
+
+async def test_empty_submit_on_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a recurring edit, clears the line, submits empty, then submits a
+    fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
+    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "10 Fresh !other")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert len(rows) == 2, "must have two recurring rows"
+    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
+    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
+
+
+async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
+    """A line that omits ~note must clear the column.
+
+    The clock is pinned because the expense table filters by month, so an unpinned
+    `now` leaves it empty from Sept 1 and the test fails outright.
+    """
+    import datetime as dt
+
+    add_expense(db, amount=12.0, description="lunch", category="restaurant",
+                date="2026-08-28", note="receipt in wallet")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        app.prompt.value = ""
+        await type_into(pilot, "12.00 lunch !restaurant @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "", "omitting ~note must clear the note"
+
+
+async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app, db, type_into):
+    """Submitting the rendered prefill unchanged must keep the note.
+
+    The clock is pinned and the prompt is asserted open, because the expense table
+    filters by month, so an unpinned `now` leaves it empty from Sept 1, the prompt
+    never opens, and the test becomes vacuous.
+    """
+    import datetime as dt
+
+    add_expense(db, amount=12.0, description="lunch", category="restaurant",
+                date="2026-08-28", note="receipt in wallet")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        # The prefill is "12.00 lunch !restaurant @2026-08-28 ~receipt in wallet". Submit unchanged.
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "receipt in wallet"
