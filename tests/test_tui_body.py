@@ -666,12 +666,22 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
 
 async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, type_into):
     """If user arms a food edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    that fresh entry must INSERT, not UPDATE the abandoned row.
+
+    The clock is pinned and the prompt is asserted open, because neither is
+    optional here: the food table filters by the viewing date, so an unpinned
+    `now` leaves it empty on any day but the seeded one, `enter` arms nothing,
+    and every assertion below still passes with the fix removed.
+    """
+    import datetime as dt
+
     add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.press("enter")
         await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("f")
