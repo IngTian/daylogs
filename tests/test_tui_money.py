@@ -506,10 +506,10 @@ async def test_enter_on_an_expense_row_edits_it_in_place(make_app, db, type_into
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.label == "edit expense"
+        assert app.prompt.label == "expense"
         assert "lunch" in app.prompt.value
         app.prompt.value = ""
-        await type_into(pilot, "14.50 | lunch out | grocery")
+        await type_into(pilot, "14.50 lunch out !grocery @2026-08-04")
         await pilot.press("enter")
         await pilot.pause()
     rows = all_expenses(db)
@@ -520,7 +520,7 @@ async def test_enter_on_an_expense_row_edits_it_in_place(make_app, db, type_into
         "lunch out",
         "grocery",
     )
-    assert rows[0]["date"] == "2026-08-04", "an omitted field is left alone"
+    assert rows[0]["date"] == "2026-08-04"
 
 
 async def test_editing_an_expense_preserves_created_at(make_app, db, type_into):
@@ -551,7 +551,7 @@ async def test_undoing_an_expense_edit_restores_it(make_app, db, type_into):
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
-        await type_into(pilot, "99.99 | oops | housing")
+        await type_into(pilot, "99.99 oops !housing @2026-08-04")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("u")
@@ -578,9 +578,9 @@ async def test_enter_on_a_recurring_row_renames_without_duplicating(make_app, db
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.label == "edit recurring"
+        assert app.prompt.label == "recurring"
         app.prompt.value = ""
-        await type_into(pilot, "24.99 | streaming plus | subscriptions | monthly")
+        await type_into(pilot, "24.99 streaming plus !subscriptions #monthly")
         await pilot.press("enter")
         await pilot.pause()
     rows = list_recurring(db)
@@ -607,9 +607,52 @@ async def test_a_colliding_recurring_rename_is_rejected_cleanly(make_app, db, ty
         await pilot.pause()
         assert "Gym" in app.prompt.value, "precondition: editing Gym, not Rent"
         app.prompt.value = ""
-        await type_into(pilot, "40 | Rent | other | monthly")
+        await type_into(pilot, "40 Rent !other #monthly")
         await pilot.press("enter")
         await pilot.pause()
         still_open = app.prompt.is_open
     assert still_open is True, "the prompt keeps the text so the name can be fixed"
     assert len(list_recurring(db)) == 2
+async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms an expense edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "25 fresh !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 2, "must have two expense rows"
+    assert any(r["description"] == "original" and r["amount"] == 12.0 for r in rows)
+    assert any(r["description"] == "fresh" and r["amount"] == 25.0 for r in rows)
+
+
+async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a recurring edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "10 Fresh !other")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert len(rows) == 2, "must have two recurring rows"
+    assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
+    assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)

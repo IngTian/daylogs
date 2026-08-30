@@ -310,7 +310,14 @@ class DaybookApp(App):
 
     def on_inline_prompt_cancelled(self, event: InlinePrompt.Cancelled) -> None:
         event.stop()
-        self._active_tab().focus_default()
+        tab = self._active_tab()
+        # The edit prompts share their labels with the entry prompts now, so an
+        # abandoned edit has to drop its row id here — otherwise the next plain
+        # `w` or `e` is consumed as an update of the row you walked away from.
+        cancel = getattr(tab, "cancel_editing", None)
+        if cancel is not None:
+            cancel()
+        tab.focus_default()
 
     # ── confirm ──────────────────────────────────────────────────────────
     def ask_confirm(self, message: str, callback: Callable[[], None]) -> None:

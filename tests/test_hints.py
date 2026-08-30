@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daybook import editline
 from daybook.categories import slugs
 from daybook.parse import (
     parse_budget,
@@ -40,15 +39,6 @@ PARSERS = {
     "recurring": parse_recurring,
 }
 
-# Edit prompts use the field-separated grammar in editline.py, not the entry
-# grammar — see that module for why reusing the entry grammar corrupts rows.
-EDIT_PARSERS = {
-    "edit weigh": editline.parse_weight,
-    "edit food": editline.parse_food,
-    "edit expense": editline.parse_expense,
-    "edit recurring": editline.parse_recurring,
-}
-
 NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile"}
 
 
@@ -68,11 +58,12 @@ def test_no_hint_describes_a_prompt_that_does_not_exist():
     opened = set()
     for path in SRC.rglob("*.py"):
         opened |= hints.labels_in_source(path.read_text())
-    # Edit prompts are opened with a computed label in some paths; allow them.
-    stale = sorted(
-        h.label for h in hints.HINTS if h.label not in opened and not h.label.startswith("edit ")
-    )
+    stale = sorted(h.label for h in hints.HINTS if h.label not in opened)
     assert not stale, f"hints for prompts that are never opened: {stale}"
+
+
+def test_no_edit_hints_remain():
+    assert not [h for h in hints.HINTS if h.label.startswith("edit ")]
 
 
 def test_hint_labels_are_unique():
@@ -100,15 +91,10 @@ def test_the_profile_example_parses_too():
     assert p.height_cm and p.sex and p.birthday
 
 
-@pytest.mark.parametrize("label", sorted(EDIT_PARSERS))
-def test_every_edit_example_is_a_line_the_edit_parser_accepts(label):
-    EDIT_PARSERS[label](hints.for_label(label).example)
-
-
 def test_labels_without_a_parser_are_deliberate_not_forgotten():
     """Keeps the parser map honest: a new grammar-backed prompt must be added to
     PARSERS rather than quietly landing in the free-text bucket."""
-    covered = set(PARSERS) | set(EDIT_PARSERS) | NO_PARSER
+    covered = set(PARSERS) | NO_PARSER
     uncovered = sorted({h.label for h in hints.HINTS} - covered)
     assert not uncovered, f"classify these in PARSERS or NO_PARSER: {uncovered}"
 

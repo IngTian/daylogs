@@ -19,9 +19,8 @@ from daybook.categories import FALLBACK_SLUG, get
 from daybook.fmt import hhmm
 
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
-# Plausibility limits, exported because the edit grammar in editline.py must agree
-# with this one. They were duplicated in both files and agreed by coincidence; a
-# change in one would have let entry and editing disagree about a valid value.
+# Plausibility limits. Once shared with a second grammar (editline.py); now the
+# only grammar and the only place these appear.
 MAX_KG = 500.0
 MAX_KCAL = 20000
 # The one time-of-day shape either grammar accepts.

@@ -12,7 +12,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
-from daybook import editline, money
+from daybook import money, parse
 from daybook.moneyview import PANES, MoneyView
 from daybook.parse import parse_budget, parse_expense, parse_recurring
 from daybook.tui.common import PanelTab
@@ -84,6 +84,10 @@ class MoneyTab(PanelTab):
 
     def focus_default(self) -> None:
         self.query_one("#money-table", DataTable).focus()
+
+    def cancel_editing(self) -> None:
+        """Drop the armed edit id when a prompt is cancelled."""
+        self._editing = None
 
     def status_hint(self) -> str:
         """The footer's state row: range, active filters, and the sort.
@@ -391,9 +395,9 @@ class MoneyTab(PanelTab):
             return
         self._editing = (which, row_id)
         if which == "expense":
-            self.app.prompt.open("edit expense", prefill=editline.render_expense(row))
+            self.app.prompt.open("expense", prefill=parse.render_expense(row))
         else:
-            self.app.prompt.open("edit recurring", prefill=editline.render_recurring(row))
+            self.app.prompt.open("recurring", prefill=parse.render_recurring(row))
 
     def key_back(self) -> bool:
         return self.view.back()
@@ -459,90 +463,62 @@ class MoneyTab(PanelTab):
         elif label == "go to date":
             self.view.goto(value)
             self.reload()
-        elif label == "edit expense":
-            self._submit_edit("expense", value)
-        elif label == "edit recurring":
-            self._submit_edit("recurring", value)
-
-    def _submit_edit(self, which: str, value: str) -> None:
-        """Apply an edit line to the row the prompt was opened for.
-
-        Only the fields the line actually carried are written, so columns outside
-        the grammar — expense.created_at, recurring.active and note — keep their
-        values. `_editing` is consumed on read: the row could have been deleted
-        between opening the prompt and submitting.
-        """
-        if self._editing is None or self._editing[0] != which:
-            return
-        _, row_id = self._editing
-        self._editing = None
-        before = self.app.conn.execute(
-            f"SELECT * FROM {which} WHERE id = ?", (row_id,)
-        ).fetchone()
-        if before is None:
-            self.app.notify("that row is gone", timeout=3)
-            return
-        cfg = self.app.cfg
-        if which == "expense":
-            fields = editline.parse_expense(value, cfg)
-        else:
-            fields = editline.parse_recurring(value, cfg)
-        # Push the pre-image only once the write has succeeded: a MoneyError from
-        # the write below (a recurring name that collides) would otherwise leave a
-        # bogus entry that `u` applies to a row which never changed.
-        if which == "expense":
-            money.update_expense(self.app.conn, row_id, cfg, **fields)
-        else:
-            money.update_recurring(self.app.conn, row_id, cfg, **fields)
-        self.app.undo_stack.push(which, dict(before))
-        after = self.app.conn.execute(
-            f"SELECT * FROM {which} WHERE id = ?", (row_id,)
-        ).fetchone()
-        # Report the result, not just success: an edit that re-categorised a row
-        # should say so on the same keystroke.
-        if which == "expense":
-            summary = f"{fmt(after['amount'])} {after['description']} → {after['category']}"
-        else:
-            summary = f"{after['name']} · {fmt(after['monthly_cost'])}/mo"
-        self.app.notify(f"{summary} · u to undo", timeout=4)
-        self.reload()
 
     def _submit_expense(self, value: str, *, refiling: bool = False) -> None:
         cfg = self.app.cfg
         r = parse_expense(value, now=self.app.now(), known_slugs=money.slugs(cfg))
-        money.add_expense(
-            self.app.conn,
-            amount=r.amount,
-            description=r.description,
-            category=r.category,
-            date=r.date,
-            note=r.note,
-            cfg=cfg,
+        row_id = self._take_editing("expense")
+        if row_id is None:
+            money.add_expense(
+                self.app.conn,
+                amount=r.amount,
+                description=r.description,
+                category=r.category,
+                date=r.date,
+                note=r.note,
+                cfg=cfg,
+            )
+            # The anchor is a date, not a month: move the span's right edge to the day
+            # just logged so the new row is inside whatever horizon is active.
+            self.view.anchor = max(self.view.anchor, r.date)
+            self.reload()
+
+            s = money.summarize_span(
+                self.app.conn, span=self.view.span(), today=self.app.today(), cfg=cfg
+            )
+            cat = next((c for c in s.by_category if c.category == r.category), None)
+            # Always name the category: confirming *where it was filed* is the most
+            # useful part, and it is the thing most likely to be wrong.
+            if cat is None or cat.budget <= 0:
+                spent = cat.spent if cat else abs(r.amount)
+                tail = f"{r.category} {fmt(spent)} this range · no budget"
+            else:
+                over = " ⚠" if cat.delta < 0 else ""
+                tail = f"{r.category} {fmt(cat.spent)} of {fmt(cat.budget)}{over}"
+            self.app.notify(f"{fmt(r.amount)} {r.description} → {tail}", timeout=5)
+
+            if r.category == "other" and not refiling:
+                # Written, but flagged: an uncategorised row is more likely a typo
+                # than an intent. Re-open prefilled so the fix is one edit, not a hunt
+                # through the table later.
+                self.app.prompt.open("fix category", value)
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM expense WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        # Push the pre-image only once the write has succeeded: a MoneyError would
+        # otherwise leave a bogus entry that `u` applies to a row which never changed.
+        money.update_expense(
+            self.app.conn, row_id, cfg,
+            amount=r.amount, description=r.description, category=r.category,
+            date=r.date, note=r.note
         )
-        # The anchor is a date, not a month: move the span's right edge to the day
-        # just logged so the new row is inside whatever horizon is active.
-        self.view.anchor = max(self.view.anchor, r.date)
+        self.app.undo_stack.push("expense", dict(before))
+        self.app.notify(f"{fmt(r.amount)} {r.description} → {r.category} · u to undo", timeout=4)
         self.reload()
-
-        s = money.summarize_span(
-            self.app.conn, span=self.view.span(), today=self.app.today(), cfg=cfg
-        )
-        cat = next((c for c in s.by_category if c.category == r.category), None)
-        # Always name the category: confirming *where it was filed* is the most
-        # useful part, and it is the thing most likely to be wrong.
-        if cat is None or cat.budget <= 0:
-            spent = cat.spent if cat else abs(r.amount)
-            tail = f"{r.category} {fmt(spent)} this range · no budget"
-        else:
-            over = " ⚠" if cat.delta < 0 else ""
-            tail = f"{r.category} {fmt(cat.spent)} of {fmt(cat.budget)}{over}"
-        self.app.notify(f"{fmt(r.amount)} {r.description} → {tail}", timeout=5)
-
-        if r.category == "other" and not refiling:
-            # Written, but flagged: an uncategorised row is more likely a typo
-            # than an intent. Re-open prefilled so the fix is one edit, not a hunt
-            # through the table later.
-            self.app.prompt.open("fix category", value)
 
     def _submit_budget(self, value: str) -> None:
         cfg = self.app.cfg
@@ -569,21 +545,52 @@ class MoneyTab(PanelTab):
             timeout=5,
         )
 
+    def _take_editing(self, which: str) -> int | None:
+        """The id an open edit prompt belongs to, consumed once.
+
+        Cleared on read so a stale id cannot be reused by the next submission — the
+        row may have been deleted in between.
+        """
+        if self._editing is None or self._editing[0] != which:
+            return None
+        _, row_id = self._editing
+        self._editing = None
+        return row_id
+
     def _submit_recurring(self, value: str) -> None:
         cfg = self.app.cfg
         r = parse_recurring(value, now=self.app.now(), known_slugs=money.slugs(cfg))
-        money.upsert_recurring(
-            self.app.conn,
-            name=r.name,
-            cost=r.cost,
-            cycle=r.cycle,
-            category=r.category,
-            cfg=cfg,
+        row_id = self._take_editing("recurring")
+        if row_id is None:
+            money.upsert_recurring(
+                self.app.conn,
+                name=r.name,
+                cost=r.cost,
+                cycle=r.cycle,
+                category=r.category,
+                cfg=cfg,
+            )
+            self.view.pane = "recurring"
+            self.reload()
+            monthly = money.monthly_equivalent(r.cost, r.cycle)
+            self.app.notify(
+                f"{r.name} · {fmt(r.cost)} {r.cycle} = {fmt(monthly)}/mo · r to roll",
+                timeout=5,
+            )
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM recurring WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            self.app.notify("that row is gone", timeout=3)
+            return
+        # update_recurring is keyed by id, not name (upsert_recurring resolves on
+        # name, so a rename through upsert would INSERT a second row).
+        money.update_recurring(
+            self.app.conn, row_id, cfg,
+            name=r.name, cost=r.cost, cycle=r.cycle, category=r.category
         )
-        self.view.pane = "recurring"
-        self.reload()
+        self.app.undo_stack.push("recurring", dict(before))
         monthly = money.monthly_equivalent(r.cost, r.cycle)
-        self.app.notify(
-            f"{r.name} · {fmt(r.cost)} {r.cycle} = {fmt(monthly)}/mo · r to roll",
-            timeout=5,
-        )
+        self.app.notify(f"{r.name} · {fmt(monthly)}/mo · u to undo", timeout=4)
+        self.reload()

@@ -513,7 +513,7 @@ async def test_enter_on_a_weight_row_opens_it_prefilled(make_app, db):
         await pilot.press("enter")
         await pilot.pause()
         label, value = app.prompt.label, app.prompt.value
-    assert label == "edit weigh"
+    assert label == "weigh"
     assert "78.2" in value and "post-run" in value and "2026-08-27" in value
 
 
@@ -604,9 +604,9 @@ async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, t
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.label == "edit food"
+        assert app.prompt.label == "food"
         app.prompt.value = ""
-        await type_into(pilot, "oatmeal with berries | 400")
+        await type_into(pilot, "oatmeal with berries =400")
         await pilot.press("enter")
         await pilot.pause()
     rows = list_food(db, date="2026-08-28")
@@ -643,3 +643,65 @@ async def test_a_rejected_edit_leaves_nothing_on_the_undo_stack(make_app, db, ty
         popped = app.undo_stack.pop()
     assert popped is None
     assert list_weight(db)[0]["kg"] == 78.2
+async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a weight edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("w")
+        await type_into(pilot, "80.1 fresh")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_weight(db)
+    assert len(rows) == 2, "must have two weight rows"
+    assert any(r["kg"] == 78.2 and r["note"] == "original" for r in rows)
+    assert any(r["kg"] == 80.1 and r["note"] == "fresh" for r in rows)
+
+
+async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, type_into):
+    """If user arms a food edit, presses escape, then submits a fresh entry,
+    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("f")
+        await type_into(pilot, "salad =600 @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_food(db, date="2026-08-28")
+    assert len(rows) == 2, "must have two food rows"
+    assert any(r["description"] == "oatmeal" and r["kcal"] == 350 for r in rows)
+    assert any(r["description"] == "salad" and r["kcal"] == 600 for r in rows)
+
+
+async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_into):
+    """If an edit submission fails to parse, the retry must still update the same
+    row, not insert a new one."""
+    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "heavy")
+        await pilot.press("enter")
+        await pilot.pause()
+        # The prompt is still open with an error. Now submit a valid line.
+        app.prompt.value = ""
+        await type_into(pilot, "80.1 fixed")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_weight(db)
+    assert len(rows) == 1, "must have updated, not inserted"
+    assert rows[0]["kg"] == 80.1 and rows[0]["note"] == "fixed"

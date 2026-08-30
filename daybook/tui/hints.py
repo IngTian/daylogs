@@ -77,29 +77,6 @@ HINTS: tuple[Hint, ...] = (
     Hint("filter", "coffee", "text to match in a description · esc clears it"),
     # ── app ──────────────────────────────────────────────────────────────
     Hint("go to date", "2026-06-15", "a date, or 2026-06 for the whole month"),
-    # ── editing an existing row ──────────────────────────────────────────
-    # A different grammar from entry, and deliberately so: see editline.py. Fields
-    # are separated so nothing can be stolen out of the free-text one.
-    Hint(
-        "edit weigh",
-        "78.2 | post-run | 2026-08-27",
-        "kg | note | date — drop a field to keep it, empty it to clear it",
-    ),
-    Hint(
-        "edit food",
-        "chicken salad | 610 | 2026-08-27 | 13:05",
-        "what | kcal | date | time — drop a field to keep it",
-    ),
-    Hint(
-        "edit expense",
-        "12.40 | lunch | restaurant | 2026-08-27",
-        "amount | what | category | date — drop a field to keep it",
-    ),
-    Hint(
-        "edit recurring",
-        "20.99 | Streaming | subscriptions | monthly",
-        "cost | name | category | monthly or annually",
-    ),
 )
 
 _BY_LABEL = {h.label: h for h in HINTS}
