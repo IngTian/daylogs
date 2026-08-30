@@ -615,14 +615,23 @@ async def test_a_colliding_recurring_rename_is_rejected_cleanly(make_app, db, ty
     assert len(list_recurring(db)) == 2
 async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
     """If user arms an expense edit, presses escape, then submits a fresh entry,
-    that fresh entry must INSERT, not UPDATE the abandoned row."""
+    that fresh entry must INSERT, not UPDATE the abandoned row.
+
+    The clock is pinned and the prompt is asserted open, because the expense table
+    filters by month, so an unpinned `now` leaves it empty from Sept 1, `enter`
+    arms nothing, and the test passes with the fix removed.
+    """
+    import datetime as dt
+
     add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("e")
@@ -706,15 +715,23 @@ async def test_empty_submit_on_recurring_edit_does_not_corrupt_next_entry(make_a
 
 
 async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
-    """A line that omits ~note must clear the column."""
+    """A line that omits ~note must clear the column.
+
+    The clock is pinned because the expense table filters by month, so an unpinned
+    `now` leaves it empty from Sept 1 and the test fails outright.
+    """
+    import datetime as dt
+
     add_expense(db, amount=12.0, description="lunch", category="restaurant",
                 date="2026-08-28", note="receipt in wallet")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
         app.prompt.value = ""
         await type_into(pilot, "12.00 lunch !restaurant @2026-08-28")
         await pilot.press("enter")
@@ -725,15 +742,24 @@ async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
 
 
 async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app, db, type_into):
-    """Submitting the rendered prefill unchanged must keep the note."""
+    """Submitting the rendered prefill unchanged must keep the note.
+
+    The clock is pinned and the prompt is asserted open, because the expense table
+    filters by month, so an unpinned `now` leaves it empty from Sept 1, the prompt
+    never opens, and the test becomes vacuous.
+    """
+    import datetime as dt
+
     add_expense(db, amount=12.0, description="lunch", category="restaurant",
                 date="2026-08-28", note="receipt in wallet")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
         # The prefill is "12.00 lunch !restaurant @2026-08-28 ~receipt in wallet". Submit unchanged.
         await pilot.press("enter")
         await pilot.pause()
