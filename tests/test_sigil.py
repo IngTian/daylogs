@@ -143,8 +143,20 @@ def test_token_at_includes_the_position_just_past_a_token():
 
 
 def test_token_at_returns_none_in_whitespace():
-    toks = tokenize("127 lunch")
-    assert token_at(toks, 3) is None
+    """A position you can be unambiguously *inside* needs a gap wider than one
+    character: index 3 of "127 lunch" is immediately after "127", which counts as
+    inside it."""
+    toks = tokenize("127  lunch")
+    assert token_at(toks, 4) is None
+
+
+def test_token_at_finds_a_token_the_cursor_is_finishing_mid_line():
+    """Completion needs the token under the cursor even when more text follows it.
+    Restricting `cursor == end` to the final token made tab a no-op mid-line."""
+    toks = tokenize("12.40 !gro lunch")
+    tok = token_at(toks, len("12.40 !gro"))
+    assert tok is not None
+    assert (tok.sigil, tok.value) == ("!", "gro")
 
 
 def test_token_at_returns_none_past_the_end():

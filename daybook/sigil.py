@@ -107,9 +107,7 @@ def group(tokens: list[Token]) -> Grouped:
 def token_at(tokens: list[Token], cursor: int) -> Token | None:
     """The token the cursor sits in, counting the position just past its last
     character — which is where the cursor is while you are still typing it."""
-    for i, tok in enumerate(tokens):
-        if tok.start <= cursor < tok.end:
-            return tok
-        if cursor == tok.end and i == len(tokens) - 1:
+    for tok in tokens:
+        if tok.start <= cursor <= tok.end:
             return tok
     return None
