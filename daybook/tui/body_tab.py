@@ -30,6 +30,11 @@ _YLABEL_W = 7
 # Money wants MTD because a budget is a calendar-month thing. The horizon *list* is
 # shared, the starting point is per-tab.
 _DEFAULT_HORIZON = "1m"
+# Shown in the FOOD header and the footer's state row for as long as an estimate is
+# actually running. It replaces a 3-second toast that fired against a call allowed
+# 60 seconds — so it vanished while you were still waiting, indistinguishable from
+# a dropped keypress. Same spacing convention as summary_tab's "generating…".
+_ESTIMATING = "   estimating…"
 
 
 class BodyTab(PanelTab):
@@ -44,6 +49,16 @@ class BodyTab(PanelTab):
         # The row an open edit prompt belongs to. InlinePrompt carries a label and
         # text but no id, so the tab holds the identity between open and submit.
         self._editing: tuple[str, int] | None = None
+        # An estimate is running. Set at the top of the worker and cleared on the two
+        # paths that end one — deliberately NOT in a `finally`, which is the tempting
+        # shape and the wrong one here. `@work(exclusive=True)` only ever cancels this
+        # worker because a replacement is starting, and the replacement sets the flag
+        # itself; a `finally` would clear it in the gap between the two and blink the
+        # indicator off mid-estimate. Same shape as summary_tab's `busy`.
+        self._estimating = False
+        # The FOOD header without the estimate suffix, kept so the suffix can be
+        # painted on and off without recomputing the line or touching the table.
+        self._food_head = ""
 
     def compose(self) -> ComposeResult:
         yield Static(id="weight-head", classes="pane-title")
@@ -67,8 +82,19 @@ class BodyTab(PanelTab):
         self.query_one("#body-table", DataTable).focus()
 
     def cancel_editing(self) -> None:
-        """Drop the armed edit id when a prompt is cancelled."""
+        """Drop everything an abandoned prompt was carrying.
+
+        Not just the edit id. `_pending_photo` says "this inbox file belongs to the
+        row about to be written", and it is consumed — the file is *moved* into
+        `processed/` — by whichever `confirm food` submission comes next. Leave it
+        armed after someone escapes the confirm prompt and the next typed meal, with
+        nothing to do with the photo, eats it: no food row for it, and it vanishes
+        from the inbox count with no message. `_pending` is dropped for the same
+        reason, so a stale estimate cannot supply calories to an unrelated line.
+        """
         self._editing = None
+        self._pending = None
+        self._pending_photo = None
 
     def span(self) -> hz.Span:
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
@@ -78,6 +104,8 @@ class BodyTab(PanelTab):
         parts = [self.horizon]
         if date != self.app.today():
             parts.insert(0, human_date(date))
+        if self._estimating:
+            parts.append(_ESTIMATING.strip())
         return " · ".join(parts)
 
     # ── rendering ────────────────────────────────────────────────────────
@@ -129,10 +157,12 @@ class BodyTab(PanelTab):
 
         label = human_date(date)
         if bmr is None:
-            fhead = f"FOOD   {label}   {kcal:,} kcal in"
+            self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
         else:
-            fhead = f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
-        self.query_one("#food-head", Static).update(fhead)
+            self._food_head = (
+                f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
+            )
+        self._paint_food_head()
 
         self._fill_table(date)
 
@@ -327,12 +357,31 @@ class BodyTab(PanelTab):
 
     def _estimate_photo(self, path, *, from_inbox: bool) -> None:
         self._pending_photo = (path, from_inbox)
-        self.app.notify("estimating from photo…", timeout=3)
         self._run_image_estimate(path)
 
     # ── workers ──────────────────────────────────────────────────────────
+    def _paint_food_head(self) -> None:
+        suffix = _ESTIMATING if self._estimating else ""
+        self.query_one("#food-head", Static).update(self._food_head + suffix)
+
+    def _set_estimating(self, running: bool) -> None:
+        """Repaint only the two places the indicator appears.
+
+        Deliberately not `reload()`. That calls `_fill_table`, which does
+        `table.clear(columns=True)` and so resets the DataTable cursor to row 0 —
+        starting an estimate would throw away whichever food row you had selected.
+        And `reload()` could not show the footer half anyway: the footer is a
+        sibling widget, rewritten only by `App.refresh_footer()`, so without this
+        call `status_hint()`'s suffix never reaches the screen and a footer painted
+        by some other keypress mid-estimate would never be cleared.
+        """
+        self._estimating = running
+        self._paint_food_head()
+        self.app.refresh_footer()
+
     @work(exclusive=True)
     async def _run_image_estimate(self, path) -> None:
+        self._set_estimating(True)
         try:
             est = await estimate.from_image(
                 image_path=path,
@@ -343,12 +392,20 @@ class BodyTab(PanelTab):
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self._pending_photo = None
+            self._set_estimating(False)
             self.app.notify_error(f"photo estimate failed: {e}")
             return
+        self._set_estimating(False)
         self._offer(est)
 
     @work(exclusive=True)
     async def _run_text_estimate(self, description: str) -> None:
+        # A typed estimate supersedes any photo waiting to be confirmed — it shares
+        # the exclusive group, so starting this cancels the image worker, and a
+        # cancelled worker never reaches the `except` that would have released the
+        # photo. Left armed, the file would be consumed by THIS estimate's confirm.
+        self._pending_photo = None
+        self._set_estimating(True)
         try:
             est = await estimate.from_text(
                 description=description,
@@ -357,8 +414,10 @@ class BodyTab(PanelTab):
                 model=self.app.cfg.claude_model,
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+            self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
             return
+        self._set_estimating(False)
         self._offer(est)
 
     def _offer(self, est: estimate.Estimate) -> None:
@@ -473,7 +532,6 @@ class BodyTab(PanelTab):
         row_id = self._take_editing("food")
         if row_id is None:
             if r.kcal is None:
-                self.app.notify("estimating calories…", timeout=3)
                 self._run_text_estimate(r.description)
                 return
             self._write_food(r, source="labeled")

@@ -200,3 +200,50 @@ async def test_autorun_failure_does_not_break_the_app(make_app, db):
         await pilot.pause()
         assert app.is_running is True
     assert get_report(db, "2026-08-26") is None
+
+
+async def test_a_superseded_generate_does_not_leave_the_header_stuck(make_app, db):
+    """Why clearing `busy` outside a `finally` is correct here, not an oversight.
+
+    `generate` is `@work(exclusive=True)`, so a second `r` cancels the first run, and
+    a cancelled worker reaches neither the success nor the failure path —
+    `CancelledError` is a BaseException that `except Exception` does not catch. That
+    looks like a leak, and the tempting fix is a `finally`. It would be wrong: the
+    cancellation only happens *because* a replacement is starting, and the
+    replacement sets `busy` itself, so nothing is ever stuck. A `finally` would
+    instead clear the flag in the gap between the two and blink the header off
+    mid-generation.
+
+    The estimate indicator in body_tab (#2) is built the same way for the same
+    reason.
+    """
+    import asyncio
+
+    upsert_report(db, date="2026-08-20", content="stale")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        calls.append(user_prompt)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)      # cancelled by the second press
+        started.set()
+        await release.wait()
+        return "fresh"
+
+    app = make_app(runner_text=runner)
+    async with app.run_test() as pilot:
+        await go_summary(pilot, app)
+        tab = app.query_one("#summary")
+        await pilot.press("r")
+        await pilot.pause()
+        await pilot.press("r")
+        await started.wait()
+        await pilot.pause()
+        assert tab.busy, "the cancelled run cleared the flag while the second was in flight"
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        assert not tab.busy, "busy outlived the generate that finished"
+        assert "generating" not in tab.status_hint().lower(), tab.status_hint()
