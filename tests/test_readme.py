@@ -58,6 +58,8 @@ def extract_what_you_type_table(text: str) -> list[tuple[str, str]]:
                 rows.append((prompt, example))
         elif line.startswith("Sigils mark") or (rows and not line.startswith("|")):
             break
+    if len(rows) == 0:
+        raise ValueError("No examples found in README table — extraction may have failed")
     return rows
 
 
@@ -67,10 +69,33 @@ def extract_what_you_type_table(text: str) -> list[tuple[str, str]]:
     ids=lambda x: x if isinstance(x, str) else None,
 )
 def test_readme_example_parses(prompt: str, example: str) -> None:
-    """Each example in the README is valid under its prompt's grammar."""
+    """Each example in the README is valid under its prompt's grammar, and where the
+    example uses a sigil, the parsed field carries the expected value.
+
+    This test exists because examples that merely looked right silently corrupted rows.
+    """
     parser = PARSERS.get(prompt)
     if parser is None:
         pytest.skip(f"No parser for {prompt}")
 
     # All parsers take (raw, *, now, known_slugs) as keyword args.
-    parser(example, now=NOW, known_slugs=slugs())
+    result = parser(example, now=NOW, known_slugs=slugs())
+
+    # Assert parsed fields match the sigils present in the example.
+    if "!grocery" in example:
+        assert result.category == "grocery", f"!grocery → category must be 'grocery', got {result.category}"
+    if "!restaurant" in example:
+        assert result.category == "restaurant", f"!restaurant → category must be 'restaurant'"
+    if "!subscriptions" in example:
+        assert result.category == "subscriptions", f"!subscriptions → category must be 'subscriptions'"
+    if "=610" in example:
+        assert result.kcal == 610, "=610 → kcal must be 610"
+    if "#monthly" in example:
+        assert result.cycle == "monthly", "#monthly → cycle must be 'monthly'"
+    if example.startswith("-"):
+        assert result.amount < 0, f"negative amount example → amount must be < 0, got {result.amount}"
+    if "@07:30" in example:
+        # Check that time is parsed (at field is not midnight)
+        import datetime as dt
+        parsed_time = dt.datetime.fromtimestamp(result.at, ZoneInfo("America/Toronto"))
+        assert parsed_time.hour == 7 and parsed_time.minute == 30, "@07:30 → time must be 07:30"
