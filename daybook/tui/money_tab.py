@@ -514,7 +514,7 @@ class MoneyTab(PanelTab):
         money.update_expense(
             self.app.conn, row_id, cfg,
             amount=r.amount, description=r.description, category=r.category,
-            date=r.date, note=r.note
+            date=r.date, note=r.note or ""
         )
         self.app.undo_stack.push("expense", dict(before))
         self.app.notify(f"{fmt(r.amount)} {r.description} → {r.category} · u to undo", timeout=4)

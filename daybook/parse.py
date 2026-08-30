@@ -19,11 +19,10 @@ from daybook.categories import FALLBACK_SLUG, get
 from daybook.fmt import hhmm
 
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
-# Plausibility limits. Once shared with a second grammar (editline.py); now the
-# only grammar and the only place these appear.
+# Plausibility limits. Once shared with a separate edit grammar; now one grammar.
 MAX_KG = 500.0
 MAX_KCAL = 20000
-# The one time-of-day shape either grammar accepts.
+# The one time-of-day shape the grammar accepts.
 TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _WHEN_FULL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _WHEN_SHORT = re.compile(r"^(\d{2})-(\d{2})$")

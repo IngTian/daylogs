@@ -533,7 +533,7 @@ async def test_editing_a_weight_updates_in_place(make_app, db, type_into):
     assert len(rows) == 1, "an edit must not insert a second row"
     assert rows[0]["id"] == original
     assert rows[0]["kg"] == 81.5
-    assert rows[0]["note"] == "post-run", "an omitted field is left alone"
+    assert rows[0]["note"] == "", "what's on the line is authoritative; no note = clear"
 
 
 async def test_editing_a_weight_never_restamps_the_timestamp(make_app, db, type_into):
@@ -705,3 +705,57 @@ async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_
     rows = list_weight(db)
     assert len(rows) == 1, "must have updated, not inserted"
     assert rows[0]["kg"] == 80.1 and rows[0]["note"] == "fixed"
+async def test_editing_a_weight_can_clear_its_note(make_app, db, type_into):
+    """A line that omits the note words must clear the column."""
+    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "78.2 @2026-08-27")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_weight(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "", "omitting note words must clear the note"
+
+
+async def test_editing_a_weight_with_unchanged_prefill_preserves_note(make_app, db, type_into):
+    """Submitting the rendered prefill unchanged must keep the note."""
+    add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
+    app = make_app()
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        # The prefill is "78.2 post-run @2026-08-27". Submit it unchanged.
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_weight(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "post-run"
+
+
+async def test_editing_a_food_with_escaped_at_preserves_timestamp(
+    make_app, db, type_into
+):
+    r"""An escaped \@ inside the description is not a time token — ate_at must not change."""
+    import datetime as dt
+    add_food(
+        db, description="meeting", kcal=300, date="2026-08-28", at=1787223943, source="labeled"
+    )
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, r"\@work meeting =300")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_food(db, date="2026-08-28")
+    assert len(rows) == 1
+    assert rows[0]["description"] == "@work meeting", "the backslash is escape syntax, not content"
+    assert rows[0]["ate_at"] == 1787223943, "escaped @ must not trigger a restamp"

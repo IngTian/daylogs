@@ -452,13 +452,21 @@ class BodyTab(PanelTab):
             return
         # measured_at is deliberately absent: render_weigh emits no time, so an edit
         # cannot re-stamp the reading that weight_series uses to pick the day.
-        fields = {"kg": r.kg, "date": r.date}
-        if r.note is not None:
-            fields["note"] = r.note
-        body.update_weight(self.app.conn, row_id, **fields)
+        body.update_weight(self.app.conn, row_id, kg=r.kg, date=r.date, note=r.note or "")
         self.app.undo_stack.push("weight", dict(before))
         self.app.notify(f"{r.kg:g} kg on {r.date} · u to undo", timeout=4)
         self.reload()
+
+    def _line_sets_a_time(self, value: str) -> bool:
+        r"""Whether the line actually carried an @time.
+
+        Not `"@" in value`: an escaped `\@` inside a description is a plain word, and
+        reading raw text for a sigil is the scavenging this grammar exists to remove.
+        """
+        for tok in sigil.tokenize(value):
+            if tok.sigil == "@" and parse.TIME_RE.match(tok.value.split("/")[-1]):
+                return True
+        return False
 
     def _submit_food(self, value: str) -> None:
         r = parse_food(value, now=self.app.now())
@@ -476,12 +484,11 @@ class BodyTab(PanelTab):
         if before is None:
             self.app.notify("that row is gone", timeout=3)
             return
-        # render_food emits ate_at as @date/time. If the user's line has no @, they
-        # didn't change the timestamp — preserve it. Otherwise restamp when minute changed.
-        if "@" not in value:
+        # render_food emits ate_at as @date/time. Only restamp if the user actually
+        # set a time — an escaped \@ in the description is not a time token.
+        if not self._line_sets_a_time(value):
             at = before["ate_at"]
         else:
-            import datetime as dt
             before_minute = dt.datetime.fromtimestamp(before["ate_at"]).strftime("%Y-%m-%d %H:%M")
             parsed_minute = dt.datetime.fromtimestamp(r.at).strftime("%Y-%m-%d %H:%M")
             if before_minute == parsed_minute:

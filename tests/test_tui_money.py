@@ -656,3 +656,38 @@ async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, d
     assert len(rows) == 2, "must have two recurring rows"
     assert any(r["name"] == "Original" and r["cost"] == 20 for r in rows)
     assert any(r["name"] == "Fresh" and r["cost"] == 10 for r in rows)
+async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
+    """A line that omits ~note must clear the column."""
+    add_expense(db, amount=12.0, description="lunch", category="restaurant",
+                date="2026-08-28", note="receipt in wallet")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "12.00 lunch !restaurant @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "", "omitting ~note must clear the note"
+
+
+async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app, db, type_into):
+    """Submitting the rendered prefill unchanged must keep the note."""
+    add_expense(db, amount=12.0, description="lunch", category="restaurant",
+                date="2026-08-28", note="receipt in wallet")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("enter")
+        await pilot.pause()
+        # The prefill is "12.00 lunch !restaurant @2026-08-28 ~receipt in wallet". Submit unchanged.
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert rows[0]["note"] == "receipt in wallet"
