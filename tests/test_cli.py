@@ -117,3 +117,86 @@ def test_running_a_command_creates_the_schema(tmp_path):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
     assert set(TABLES) <= names
+
+
+# ── day export ────────────────────────────────────────────────────────────
+
+
+def test_export_writes_a_csv_per_table(tmp_path, capsys):
+    import csv
+
+    _seed_weight(kg=78.2)
+    dest = tmp_path / "out"
+    assert main(["export", str(dest)]) == 0
+    cap = capsys.readouterr()
+
+    dirs = list(dest.glob("daybook-export-*"))
+    assert len(dirs) == 1, f"expected one dated directory, got {dirs}"
+    written = sorted(p.name for p in dirs[0].glob("*.csv"))
+    assert written == [
+        "budget.csv", "expense.csv", "food.csv", "recurring.csv", "report.csv", "weight.csv"
+    ], written
+
+    with (dirs[0] / "weight.csv").open(newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) == 1 and rows[0]["kg"] == "78.2"
+
+    assert str(dirs[0]) == cap.out.strip(), (
+        "stdout must be exactly the directory, so $(day export …) is usable"
+    )
+
+
+def test_export_reports_row_counts_on_stderr_not_stdout(tmp_path, capsys):
+    """The path is the machine-readable output; the counts are for the human
+    watching. Mixing them would break `cd "$(day export ~/Drive)"`."""
+    _seed_weight()
+    assert main(["export", str(tmp_path / "out")]) == 0
+    cap = capsys.readouterr()
+    assert "weight" in cap.err and "1" in cap.err, f"no counts on stderr: {cap.err!r}"
+    assert "weight" not in cap.out, f"counts leaked into stdout: {cap.out!r}"
+    assert cap.out.count("\n") == 1, f"stdout should be one line, got {cap.out!r}"
+
+
+def test_export_creates_the_destination_directory(tmp_path):
+    assert main(["export", str(tmp_path / "deep" / "nested")]) == 0
+    assert list((tmp_path / "deep" / "nested").glob("daybook-export-*"))
+
+
+def test_export_is_repeatable_same_day(tmp_path):
+    dest = tmp_path / "e"
+    assert main(["export", str(dest)]) == 0
+    assert main(["export", str(dest)]) == 0
+    assert len(list(dest.glob("daybook-export-*"))) == 1, "a second export made a second directory"
+
+
+def test_export_on_an_empty_database_still_writes_every_header(tmp_path):
+    """Nothing logged yet is not an error, and an empty export that silently wrote
+    no files would look identical to a broken one."""
+    import csv
+
+    dest = tmp_path / "out"
+    assert main(["export", str(dest)]) == 0
+    d = next(iter(dest.glob("daybook-export-*")))
+    files = sorted(d.glob("*.csv"))
+    assert len(files) == 6
+    for f in files:
+        with f.open(newline="") as fh:
+            header = next(csv.reader(fh))
+        assert header, f"{f.name} has no header row"
+
+
+def test_export_reports_an_unusable_destination_without_a_traceback(tmp_path, capsys):
+    """A typo in the path is a user error, not a crash. `summary` already answers
+    those with a message and a non-zero exit; a brand-new command should not be the
+    one that prints fifteen lines of pathlib internals instead.
+
+    (`backup` has the same rough edge and is deliberately left alone here — it is
+    pre-existing, and its exit code is already correct.)
+    """
+    blocker = tmp_path / "a-file-not-a-dir"
+    blocker.write_text("x")
+    assert main(["export", str(blocker)]) == 1
+    cap = capsys.readouterr()
+    assert "Traceback" not in cap.err, f"a traceback reached the user:\n{cap.err}"
+    assert str(blocker) in cap.err, f"the failing path was not named: {cap.err!r}"
+    assert cap.out == "", f"a failed export still printed a path: {cap.out!r}"

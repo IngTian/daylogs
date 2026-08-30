@@ -14,7 +14,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from daybook import __version__, claude, summary
+from daybook import __version__, claude, export, summary
 from daybook.config import load_config
 from daybook.db import connect, ensure_schema
 from daybook.log import setup_logging
@@ -31,6 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_bak = sub.add_parser("backup", help="write a consistent copy of the database")
     p_bak.add_argument("dest", help="destination directory")
+
+    p_exp = sub.add_parser("export", help="write one CSV per table, readable anywhere")
+    p_exp.add_argument("dest", help="destination directory")
 
     return parser
 
@@ -56,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
             return _summary(conn, cfg, args.date)
         if args.cmd == "backup":
             return _backup(conn, Path(args.dest).expanduser())
+        if args.cmd == "export":
+            return _export(conn, Path(args.dest).expanduser())
         return _tui(conn, cfg)
     finally:
         conn.close()
@@ -87,6 +92,28 @@ def _backup(conn, dest: Path) -> int:
     out.unlink(missing_ok=True)
     conn.execute("VACUUM INTO ?", (str(out),))
     print(out)
+    return 0
+
+
+def _export(conn, dest: Path) -> int:
+    """One CSV per table, so the data is readable without daybook.
+
+    stdout is *only* the directory, so `cd "$(day export ~/Drive)"` works; the
+    per-table counts go to stderr, where a human sees them and a script does not
+    have to parse around them.
+    """
+    try:
+        written = export.export_csv(conn, dest)
+    except OSError as e:
+        # A path you cannot write to is a typo, not a crash. `summary` already
+        # answers user error with a message and a non-zero exit; printing pathlib's
+        # traceback instead would just be the newest command being the rudest.
+        print(f"cannot export to {dest}: {e.strerror or e}", file=sys.stderr)
+        return 1
+    counts = export.row_counts(conn)
+    for path in written:
+        print(f"{path.name:16} {counts[path.stem]:>7} rows", file=sys.stderr)
+    print(written[0].parent if written else dest)
     return 0
 
 

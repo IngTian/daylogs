@@ -66,6 +66,7 @@ day                            # the TUI
 day summary                    # generate yesterday's summary, print to stdout
 day summary --date 2026-08-20  # a specific day
 day backup ~/Drive/daybook     # consistent DB copy (cron-friendly)
+day export ~/Drive/daybook     # one CSV per table, readable anywhere
 day --version
 ```
 
@@ -338,6 +339,18 @@ one file. daybook is read-heavy, so the write cost is noise.
 corruption as faithfully as it replicates a write. `day backup <dir>` writes a
 consistent copy via `VACUUM INTO`; point it somewhere else you own and run it
 from cron.
+
+**And get it out.** A backup only daybook can open is a weaker promise than a file
+anything can read, so `day export <dir>` writes one CSV per table into a dated
+subdirectory — `weight`, `food`, `expense`, `recurring`, `budget`, `report`, with
+the schema's own column names as headers. The table list comes from the database
+rather than a hand-kept list, so nothing is silently left out. It prints the
+directory on stdout and per-table row counts on stderr, so `cd "$(day export
+~/Drive/daybook)"` works and cron logs stay readable.
+
+CSV, because every table is flat and "open it in a spreadsheet" is the point. The
+one cost: CSV cannot tell an empty note from an absent one — both come out blank.
+It is an export, not an import; loading it back in is not supported.
 
 ## Development
 
