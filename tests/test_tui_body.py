@@ -595,9 +595,12 @@ async def test_a_bad_edit_keeps_the_text_and_changes_nothing(make_app, db, type_
 async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, type_into):
     """`source` (labelled vs estimated) is provenance the digest reads; editing a
     description must not rewrite it."""
+    import datetime as dt
+
     add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1787223943,
              source="estimated")
-    app = make_app()
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.press("enter")
         await pilot.pause()
