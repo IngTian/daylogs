@@ -96,11 +96,24 @@ Screen {
     padding: 0 1;
 }
 
-/* 1fr so the table absorbs the leftover height instead of leaving a void */
+/* 1fr so the table absorbs the leftover height instead of leaving a void.
+ *
+ * overflow-x: hidden is load-bearing, not cosmetic. DataTable's left/right fall
+ * through to the App binding only by raising SkipAction, and it raises that only
+ * when `allow_horizontal_scroll` is false — which flips to true the moment the
+ * table's content is wider than its viewport. Without this, `←`/`→` walk the tabs
+ * on a wide terminal and silently scroll the table instead on a narrow one, or
+ * with one long description: measured, at 80 columns a 50-character description
+ * makes virtual width 84 against a 78-wide viewport and the arrows stop switching
+ * tabs. Trading arrow-key horizontal scrolling for tab navigation is the deliberate
+ * choice of #3; the full text of a clipped row is still reachable with `enter`,
+ * which prefills it. A test seeds an over-wide row and asserts the arrows still walk.
+ */
 DataTable {
     height: 1fr;
     min-height: 6;
     margin: 0 1;
+    overflow-x: hidden;
 }
 
 #summary-body {

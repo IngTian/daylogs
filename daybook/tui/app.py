@@ -232,6 +232,28 @@ class DaybookApp(App):
     def app_show_summary(self) -> None:
         self.show_scope("summary")
 
+    def _step_tab(self, delta: int) -> None:
+        """Move one tab along, clamped at both ends.
+
+        Clamped rather than wrapped, matching what `[`/`]` already do at the ends
+        of the data: `1` `2` `3` reach any tab in a single keystroke, so wrapping
+        would buy nothing and make it ambiguous where an arrow lands.
+
+        The order comes from `_TAB_OF`, which already has to agree with the
+        TabPane order in `compose` — a test pins that rather than a fourth list
+        being kept in step by hand.
+        """
+        order = tuple(_TAB_OF)
+        target = order.index(self.scope) + delta
+        if 0 <= target < len(order):
+            self.show_scope(order[target])
+
+    def app_prev_tab(self) -> None:
+        self._step_tab(-1)
+
+    def app_next_tab(self) -> None:
+        self._step_tab(1)
+
     def app_help(self) -> None:
         self.push_screen(HelpScreen())
 

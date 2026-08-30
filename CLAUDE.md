@@ -60,12 +60,17 @@ appended prose where it was convenient rather than editing the map.
   Never hand-write a key hint — that is how a footer starts describing keys that
   aren't bound. Tests enforce no duplicate `(key, scope)` and no tab key
   shadowing an app key.
-- **Two measured facts are encoded in `Key` flags; don't "simplify" them away.**
-  `priority=True` on `tab`/`shift+tab` because an ordinary App binding loses to
-  the Screen's focus-next. `bind=False` on `enter` because a focused DataTable
-  converts it to `RowSelected` before any binding sees it. Priority on a
-  printable key would steal `/`, `+`, `-` and `enter` from the prompt — verified,
-  and it breaks entry outright.
+- **Measured facts are encoded in `Key` flags; don't "simplify" them away — in
+  either direction.** `priority=True` on `tab`/`shift+tab` because an ordinary App
+  binding loses to the Screen's focus-next. `bind=False` on `enter` because a
+  focused DataTable converts it to `RowSelected` before any binding sees it.
+  Priority on a printable key would steal `/`, `+`, `-` and `enter` from the
+  prompt — verified, and it breaks entry outright. And `left`/`right` are
+  deliberately **not** priority: a `cursor_type="row"` DataTable does not claim
+  them, so a plain binding already fires with the table focused, while a focused
+  Input keeps its cursor movement. Making them priority breaks arrow keys inside a
+  line you are typing *and* lets tabs switch behind the `?` overlay — two tests
+  fail on it, which is the intended tripwire.
 - **`MoneyView` is the only Money tab state.** Horizon, pane, sort, filters and
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand
