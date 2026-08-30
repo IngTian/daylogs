@@ -57,7 +57,7 @@ def test_a_weigh_note_containing_a_time_survives():
     corrupted by one entry."""
     r = W("79.4 weighed at 6:50 before food")
     assert r.note == "weighed at 6:50 before food"
-    assert datetime.fromtimestamp(r.at).strftime("%H:%M") == NOW.strftime("%H:%M")
+    assert datetime.fromtimestamp(r.at, TZ).strftime("%H:%M") == NOW.strftime("%H:%M")
 
 
 def test_a_weigh_note_starting_with_a_number_survives():
@@ -66,7 +66,7 @@ def test_a_weigh_note_starting_with_a_number_survives():
 
 def test_weigh_takes_a_time():
     r = W("78.2 post-run @07:30")
-    assert datetime.fromtimestamp(r.at).strftime("%H:%M") == "07:30"
+    assert datetime.fromtimestamp(r.at, TZ).strftime("%H:%M") == "07:30"
 
 
 def test_weigh_rejects_a_tilde_and_says_what_it_would_have_set():
@@ -82,6 +82,14 @@ def test_weigh_rejects_an_implausible_value():
 def test_weigh_needs_a_leading_number():
     with pytest.raises(ParseError, match="78.2"):
         W("heavy")
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "0", "-5"])
+def test_weigh_rejects_empty_and_nonpositive(bad):
+    """The guard is `0 < kg <= MAX_KG`; testing only 900 leaves its lower bound and the
+    empty line unasserted."""
+    with pytest.raises(ParseError):
+        W(bad)
 
 
 WEIGH_ROWS = [
@@ -464,25 +472,25 @@ def test_when_accepts_a_month_day_in_the_current_year():
 def test_when_accepts_a_time_and_keeps_todays_date():
     w = resolve_when(["07:30"], now=NOW)
     assert w.date == NOW.date().isoformat()
-    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+    assert datetime.fromtimestamp(w.at, TZ).strftime("%H:%M") == "07:30"
 
 
 def test_when_accepts_a_combined_date_and_time():
     w = resolve_when(["06-15/07:30"], now=NOW)
     assert w.date == "2026-06-15"
-    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+    assert datetime.fromtimestamp(w.at, TZ).strftime("%H:%M") == "07:30"
 
 
 def test_a_date_and_a_time_may_arrive_as_two_tokens():
     w = resolve_when(["06-15", "07:30"], now=NOW)
     assert w.date == "2026-06-15"
-    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+    assert datetime.fromtimestamp(w.at, TZ).strftime("%H:%M") == "07:30"
 
 
 def test_back_dating_without_a_time_keeps_the_wall_clock():
     """Collapsing to midnight would misreport a weigh-in."""
     w = resolve_when(["06-15"], now=NOW)
-    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == NOW.strftime("%H:%M")
+    assert datetime.fromtimestamp(w.at, TZ).strftime("%H:%M") == NOW.strftime("%H:%M")
 
 
 def test_two_dates_is_an_error():
