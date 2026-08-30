@@ -340,7 +340,7 @@ from cron.
 ## Development
 
 ```bash
-pytest          # 819 tests
+pytest
 ruff check .
 ```
 
