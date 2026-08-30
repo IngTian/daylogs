@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 from textual.message import Message
 from textual.widgets import Input
 
+from daybook.complete import complete
 from daybook.tui import hints
 
 _HISTORY = 50
@@ -34,6 +35,8 @@ class InlinePrompt(Input):
         self.error = ""
         self._history: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=_HISTORY))
         self._idx = 0
+        self._cycle = 0
+        self._cycle_from: tuple[str, str, int] | None = None
 
     @property
     def is_open(self) -> bool:
@@ -44,6 +47,8 @@ class InlinePrompt(Input):
         self.value = prefill
         self.display = True
         self._idx = len(self._history[label])
+        self._cycle = 0
+        self._cycle_from = None
         self.clear_error()
         self.focus()
 
@@ -86,6 +91,48 @@ class InlinePrompt(Input):
     def remember(self, label: str, text: str) -> None:
         if text:
             self._history[label].append(text)
+
+    def show_candidates(self, candidates: list[str]) -> None:
+        """Candidates take the grammar's slot while the cursor is in a completable
+        token. Reusing that slot is why completion costs no screen space and needs
+        no overlay."""
+        self.border_subtitle = " ".join(candidates) if candidates else "no match"
+
+    def complete_now(self, vocab: dict[str, tuple[str, ...]]) -> None:
+        """Apply one tab press. Repeated presses on an untouched token cycle.
+
+        Cycling replays the line the first press started from, rather than
+        re-completing the line that press produced. It has to: the first press
+        overwrites the typed prefix with a whole candidate, so re-deriving the
+        prefix would match only that candidate and tab would stand still on it.
+        """
+        if self._cycle_from is not None and self._cycle_from[0] == self.value:
+            _, line, cursor = self._cycle_from
+            self._cycle += 1
+        else:
+            line, cursor, self._cycle = self.value, self.cursor_position, 0
+        result = complete(line, cursor, vocab, cycle=self._cycle)
+        if result is None:
+            self._cycle_from = None
+            return
+        self.value = result.text
+        self.cursor_position = result.cursor
+        # Armed only while there is somewhere else to go. Any keystroke moves
+        # `value` off the remembered text, so a session drops itself.
+        self._cycle_from = (result.text, line, cursor) if len(result.candidates) > 1 else None
+        self.refresh_candidates(vocab)
+
+    def refresh_candidates(self, vocab: dict[str, tuple[str, ...]]) -> None:
+        """Called on every change: show candidates in a sigil token, the grammar
+        elsewhere."""
+        if self.error:
+            return
+        result = complete(self.value, self.cursor_position, vocab)
+        if result is None:
+            hint = hints.for_label(self.label)
+            self.border_subtitle = hint.grammar if hint else ""
+        else:
+            self.show_candidates(list(result.candidates))
 
     def on_key(self, event) -> None:
         if event.key == "escape":
