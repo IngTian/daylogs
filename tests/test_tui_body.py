@@ -617,6 +617,33 @@ async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, t
     assert rows[0]["ate_at"] == 1787223943, "an unchanged minute keeps the seconds"
 
 
+async def test_dropping_kcal_on_food_edit_is_rejected(make_app, db, type_into):
+    """Dropping =kcal on an edit must be rejected, not silently written as 0.
+
+    Kcal is the row's substance, not optional metadata. render_food always emits
+    =kcal, so this only fires when someone deliberately deletes it. Silently
+    writing 0 or keeping the old value are both worse than rejecting. Routing an
+    edit into the Claude estimator is a deliberate follow-up, not this fix.
+    """
+    import datetime as dt
+
+    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1, source="labeled")
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "oatmeal @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+        still_open = app.prompt.is_open
+    assert still_open is True, "dropping =kcal must be rejected"
+    rows = list_food(db, date="2026-08-28")
+    assert len(rows) == 1
+    assert rows[0]["kcal"] == 350, "the original kcal must remain unchanged"
+
+
 async def test_enter_on_an_empty_table_does_not_crash(make_app):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:

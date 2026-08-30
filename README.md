@@ -187,8 +187,9 @@ row opens for editing, a category drills in, a group folds.
 
 Editing prefills the same grammar you used for entry. The submitted line is
 authoritative: drop the note words and the note is cleared; submit unchanged and
-the note survives. Each line carries exactly the columns that row's table shows,
-so what you can see is what you can edit.
+the note survives. Food entries always require `=kcal` — dropping it is rejected
+rather than silently zeroing the calories. Each line carries exactly the columns
+that row's table shows, so what you can see is what you can edit.
 
 `u` undoes an edit as well as a delete.
 

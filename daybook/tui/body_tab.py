@@ -18,7 +18,7 @@ from daybook import body, estimate, parse, photo, sigil
 from daybook import horizon as hz
 from daybook.config import load_config, update_config
 from daybook.fmt import hhmm, human_date
-from daybook.parse import parse_food, parse_profile, parse_weigh
+from daybook.parse import ParseError, parse_food, parse_profile, parse_weigh
 from daybook.tui import chart
 from daybook.tui.common import PanelTab
 from daybook.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
@@ -500,12 +500,14 @@ class BodyTab(PanelTab):
         # `source` is deliberately absent from the grammar: it is provenance
         # (labelled vs estimated) that the digest reads, not something an edit of the
         # description should rewrite. Pre-image after the write.
+        if r.kcal is None:
+            raise ParseError("kcal is required — give =kcal or leave the row unchanged")
         body.update_food(
-            self.app.conn, row_id, description=r.description, kcal=r.kcal or 0,
+            self.app.conn, row_id, description=r.description, kcal=r.kcal,
             date=r.date, ate_at=at
         )
         self.app.undo_stack.push("food", dict(before))
-        self.app.notify(f"{r.description} · {r.kcal or 0:,} kcal · u to undo", timeout=4)
+        self.app.notify(f"{r.description} · {r.kcal:,} kcal · u to undo", timeout=4)
         self.reload()
 
     def _submit_confirmed_food(self, value: str) -> None:
