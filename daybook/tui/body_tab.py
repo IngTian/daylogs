@@ -30,6 +30,11 @@ _YLABEL_W = 7
 # Money wants MTD because a budget is a calendar-month thing. The horizon *list* is
 # shared, the starting point is per-tab.
 _DEFAULT_HORIZON = "1m"
+# Shown in the FOOD header and the footer's state row for as long as an estimate is
+# actually running. It replaces a 3-second toast that fired against a call allowed
+# 60 seconds — so it vanished while you were still waiting, indistinguishable from
+# a dropped keypress. Same spacing convention as summary_tab's "generating…".
+_ESTIMATING = "   estimating…"
 
 
 class BodyTab(PanelTab):
@@ -44,6 +49,13 @@ class BodyTab(PanelTab):
         # The row an open edit prompt belongs to. InlinePrompt carries a label and
         # text but no id, so the tab holds the identity between open and submit.
         self._editing: tuple[str, int] | None = None
+        # An estimate is running. Set at the top of the worker and cleared on the two
+        # paths that end one — deliberately NOT in a `finally`, which is the tempting
+        # shape and the wrong one here. `@work(exclusive=True)` only ever cancels this
+        # worker because a replacement is starting, and the replacement sets the flag
+        # itself; a `finally` would clear it in the gap between the two and blink the
+        # indicator off mid-estimate. Same shape as summary_tab's `busy`.
+        self._estimating = False
 
     def compose(self) -> ComposeResult:
         yield Static(id="weight-head", classes="pane-title")
@@ -78,6 +90,8 @@ class BodyTab(PanelTab):
         parts = [self.horizon]
         if date != self.app.today():
             parts.insert(0, human_date(date))
+        if self._estimating:
+            parts.append(_ESTIMATING.strip())
         return " · ".join(parts)
 
     # ── rendering ────────────────────────────────────────────────────────
@@ -132,6 +146,8 @@ class BodyTab(PanelTab):
             fhead = f"FOOD   {label}   {kcal:,} kcal in"
         else:
             fhead = f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
+        if self._estimating:
+            fhead += _ESTIMATING
         self.query_one("#food-head", Static).update(fhead)
 
         self._fill_table(date)
@@ -327,12 +343,16 @@ class BodyTab(PanelTab):
 
     def _estimate_photo(self, path, *, from_inbox: bool) -> None:
         self._pending_photo = (path, from_inbox)
-        self.app.notify("estimating from photo…", timeout=3)
         self._run_image_estimate(path)
 
     # ── workers ──────────────────────────────────────────────────────────
+    def _set_estimating(self, running: bool) -> None:
+        self._estimating = running
+        self.reload()
+
     @work(exclusive=True)
     async def _run_image_estimate(self, path) -> None:
+        self._set_estimating(True)
         try:
             est = await estimate.from_image(
                 image_path=path,
@@ -343,12 +363,15 @@ class BodyTab(PanelTab):
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self._pending_photo = None
+            self._set_estimating(False)
             self.app.notify_error(f"photo estimate failed: {e}")
             return
+        self._set_estimating(False)
         self._offer(est)
 
     @work(exclusive=True)
     async def _run_text_estimate(self, description: str) -> None:
+        self._set_estimating(True)
         try:
             est = await estimate.from_text(
                 description=description,
@@ -357,8 +380,10 @@ class BodyTab(PanelTab):
                 model=self.app.cfg.claude_model,
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+            self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
             return
+        self._set_estimating(False)
         self._offer(est)
 
     def _offer(self, est: estimate.Estimate) -> None:
@@ -473,7 +498,6 @@ class BodyTab(PanelTab):
         row_id = self._take_editing("food")
         if row_id is None:
             if r.kcal is None:
-                self.app.notify("estimating calories…", timeout=3)
                 self._run_text_estimate(r.description)
                 return
             self._write_food(r, source="labeled")

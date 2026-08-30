@@ -40,7 +40,7 @@ async def test_f_with_explicit_calories_does_not_call_claude(make_app, db, type_
 
     async def runner_json(**kw):
         called.append(kw)
-        return {"description": "x", "kcal": 1}
+        return Estimate(description="x", kcal=1)
 
     app = make_app(runner_json=runner_json)
     async with app.run_test() as pilot:
@@ -843,3 +843,306 @@ async def test_editing_a_food_with_escaped_at_preserves_timestamp(
     assert len(rows) == 1
     assert rows[0]["description"] == "@work meeting", "the backslash is escape syntax, not content"
     assert rows[0]["ate_at"] == 1787223943, "escaped @ must not trigger a restamp"
+
+
+# ── the estimate progress indicator (#2) ─────────────────────────────────
+#
+# The estimate is one opaque subprocess call of up to `estimate_timeout_sec`
+# (60 by default). Before this, the only feedback was a 3-second toast, so the
+# remaining 57 seconds looked identical to a dropped keypress.
+#
+# The prompt is CLOSED for the whole wait (on_input_submitted closes on
+# success), so the indicator cannot live in its border subtitle — it goes where
+# summary_tab already puts "generating…": the panel header and the footer's
+# state row.
+
+
+def _gate():
+    """A runner that blocks until released, so a test can observe mid-flight."""
+    import asyncio
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def runner(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="gated meal", kcal=500)
+
+    return runner, started, release
+
+
+def _food_head(app) -> str:
+    from textual.widgets import Static
+
+    return str(app.query_one("#food-head", Static).content)
+
+
+async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
+    make_app, db, type_into, monkeypatch
+):
+    runner, started, release = _gate()
+
+    async def gated_from_text(**kw):
+        return await runner(**kw)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated_from_text)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        mid = _food_head(app)
+        assert app.prompt.is_open is False, "the prompt should be closed during the wait"
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = _food_head(app)
+    assert "estimating" in mid.lower(), f"no indicator mid-flight: {mid!r}"
+    assert "estimating" not in after.lower(), f"indicator outlived the call: {after!r}"
+
+
+async def test_the_footer_state_row_shows_estimating_while_in_flight(
+    make_app, db, type_into, monkeypatch
+):
+    runner, started, release = _gate()
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", runner)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        mid = app.query_one("#body").status_hint()
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = app.query_one("#body").status_hint()
+    assert "estimating" in mid.lower(), f"footer silent mid-flight: {mid!r}"
+    assert "estimating" not in after.lower(), f"footer still busy after: {after!r}"
+
+
+async def test_the_indicator_clears_when_the_estimate_fails(
+    make_app, db, type_into, monkeypatch
+):
+    from daybook.claude import ClaudeError
+
+    async def boom(**kw):
+        raise ClaudeError("no claude")
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", boom)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        head = _food_head(app)
+    assert "estimating" not in head.lower(), f"indicator survived a failure: {head!r}"
+
+
+async def test_the_indicator_clears_when_the_estimate_times_out(
+    make_app, db, type_into, monkeypatch
+):
+    """A timeout reaches the tab as ClaudeError from claude._run's wait_for, so it
+    is the same exit as a failure — asserted separately because the issue names
+    timeout as its own case."""
+    from daybook.claude import ClaudeError
+
+    async def timed_out(**kw):
+        raise ClaudeError("claude -p (json) timed out after 60s")
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", timed_out)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        head = _food_head(app)
+    assert "estimating" not in head.lower(), f"indicator survived a timeout: {head!r}"
+
+
+async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicator(
+    make_app, db, type_into, monkeypatch
+):
+    """The race a boolean flag gets wrong.
+
+    `@work(exclusive=True)` cancels the first worker when the second starts. With
+    a bool, the cancelled worker's cleanup clears the flag while its replacement
+    is still running, so the screen goes quiet mid-call. An in-flight counter
+    goes 1 -> 2 -> 1 and stays truthy.
+    """
+    import asyncio
+
+    started = asyncio.Event()
+    release_second = asyncio.Event()
+    calls = []
+
+    async def two_stage(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)          # first call: cancelled, never returns
+        started.set()
+        await release_second.wait()
+        return Estimate(description="second", kcal=400)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", two_stage)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("f")
+        await type_into(pilot, "first stew")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await type_into(pilot, "second stew")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        await pilot.pause()
+        mid = _food_head(app)
+        release_second.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = _food_head(app)
+    assert len(calls) == 2, f"expected two estimate calls, got {len(calls)}"
+    assert "estimating" in mid.lower(), (
+        f"the cancelled worker cleared the indicator while the second was in flight: {mid!r}"
+    )
+    assert "estimating" not in after.lower(), f"indicator outlived the second call: {after!r}"
+
+
+async def test_the_photo_estimate_shows_the_same_indicator(
+    make_app, db, tmp_path, monkeypatch
+):
+    import asyncio
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def gated(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="ribeye", kcal=910)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("p")
+        await started.wait()
+        await pilot.pause()
+        mid = _food_head(app)
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = _food_head(app)
+    assert "estimating" in mid.lower(), f"no indicator during a photo estimate: {mid!r}"
+    assert "estimating" not in after.lower(), f"indicator outlived the photo call: {after!r}"
+
+
+async def test_no_three_second_toast_is_fired_for_an_estimate(
+    make_app, db, type_into, monkeypatch
+):
+    """The defect itself: a toast whose lifetime is unrelated to the work. The
+    indicator replaces it, so firing both would be redundant noise."""
+    import asyncio
+
+    started, release = asyncio.Event(), asyncio.Event()
+    toasts = []
+
+    async def gated(**kw):
+        started.set()
+        await release.wait()
+        return Estimate(description="x", kcal=1)
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
+    app = make_app()
+    async with app.run_test() as pilot:
+        app.notify = lambda msg, **kw: toasts.append((msg, kw.get("timeout")))  # type: ignore[method-assign]
+        await pilot.press("f")
+        await type_into(pilot, "mystery stew")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        release.set()
+        await pilot.pause()
+    assert not [t for t in toasts if "estimat" in t[0].lower()], (
+        f"an estimate toast was still fired: {toasts}"
+    )
+
+
+async def test_only_one_estimate_runs_at_a_time(
+    make_app, db, tmp_path, type_into, monkeypatch
+):
+    """The invariant that makes a plain flag safe.
+
+    Clearing the flag only on the two ending paths is correct *because* a cancelled
+    estimate always has a replacement that sets the flag again. That holds only while
+    BOTH workers sit in the same exclusive group — `@work`'s group defaults to
+    "default", so a photo estimate and a text estimate cancel each other today. Give
+    either its own group and the two could run at once, whereupon whichever finished
+    first would clear the flag out from under the other and this design would need a
+    count instead.
+
+    So this fires a photo estimate and then a text one: same-method presses would
+    cancel each other whatever the group is, and would prove nothing.
+    """
+    import asyncio
+
+    live = 0
+    peak = 0
+    text_started = asyncio.Event()
+    release = asyncio.Event()
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    async def image_call(**kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        try:
+            await asyncio.sleep(3600)          # expects to be cancelled by the text one
+            return Estimate(description="photo", kcal=900)
+        finally:
+            live -= 1
+
+    async def text_call(**kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        try:
+            text_started.set()
+            await release.wait()
+            return Estimate(description="typed", kcal=100)
+        finally:
+            live -= 1
+
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", image_call)
+    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", text_call)
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.press("p")                  # photo estimate starts, blocks
+        await pilot.pause()
+        await pilot.press("f")                  # text estimate should cancel it
+        await type_into(pilot, "typed meal")
+        await pilot.press("enter")
+        await text_started.wait()
+        await pilot.pause()
+        release.set()
+        await pilot.pause()
+    assert peak == 1, (
+        f"{peak} estimates were live at once — the photo and text workers no longer "
+        "share an exclusive group, so a flag is not enough; use a count"
+    )
