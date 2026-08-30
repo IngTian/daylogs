@@ -12,6 +12,7 @@ from daybook.parse import (
     parse_profile,
     parse_recurring,
     parse_weigh,
+    resolve_when,
 )
 
 TZ = ZoneInfo("America/Toronto")
@@ -353,3 +354,66 @@ def test_a_grouped_thousands_amount_with_several_groups_works():
 def test_a_decimal_comma_in_a_weight_is_rejected_too():
     with pytest.raises(ParseError, match="use a dot for decimals"):
         W("78,2")
+
+
+# ── @ shape resolution ──────────────────────────────────────────────────────
+def test_when_defaults_to_now():
+    w = resolve_when([], now=NOW)
+    assert w.date == NOW.date().isoformat()
+
+
+def test_when_accepts_a_full_date():
+    assert resolve_when(["2026-06-15"], now=NOW).date == "2026-06-15"
+
+
+def test_when_accepts_a_month_day_in_the_current_year():
+    assert resolve_when(["06-15"], now=NOW).date == "2026-06-15"
+
+
+def test_when_accepts_a_time_and_keeps_todays_date():
+    w = resolve_when(["07:30"], now=NOW)
+    assert w.date == NOW.date().isoformat()
+    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+
+
+def test_when_accepts_a_combined_date_and_time():
+    w = resolve_when(["06-15/07:30"], now=NOW)
+    assert w.date == "2026-06-15"
+    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+
+
+def test_a_date_and_a_time_may_arrive_as_two_tokens():
+    w = resolve_when(["06-15", "07:30"], now=NOW)
+    assert w.date == "2026-06-15"
+    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == "07:30"
+
+
+def test_back_dating_without_a_time_keeps_the_wall_clock():
+    """Collapsing to midnight would misreport a weigh-in."""
+    w = resolve_when(["06-15"], now=NOW)
+    assert datetime.fromtimestamp(w.at).strftime("%H:%M") == NOW.strftime("%H:%M")
+
+
+def test_two_dates_is_an_error():
+    with pytest.raises(ParseError, match="date twice"):
+        resolve_when(["06-15", "07-20"], now=NOW)
+
+
+def test_two_times_is_an_error():
+    with pytest.raises(ParseError, match="time twice"):
+        resolve_when(["07:30", "08:30"], now=NOW)
+
+
+def test_an_unparseable_when_names_the_shapes():
+    with pytest.raises(ParseError, match="@2026-08-24"):
+        resolve_when(["june"], now=NOW)
+
+
+def test_an_impossible_date_is_rejected():
+    with pytest.raises(ParseError, match="not a real date"):
+        resolve_when(["02-31"], now=NOW)
+
+
+def test_an_impossible_time_is_rejected():
+    with pytest.raises(ParseError, match="not a valid time"):
+        resolve_when(["25:00"], now=NOW)

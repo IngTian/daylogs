@@ -28,6 +28,61 @@ MAX_KG = 500.0
 MAX_KCAL = 20000
 # The one time-of-day shape either grammar accepts.
 TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_WHEN_FULL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_WHEN_SHORT = re.compile(r"^(\d{2})-(\d{2})$")
+
+
+@dataclass(frozen=True)
+class When:
+    date: str  # ISO
+    at: int    # epoch seconds
+
+
+def resolve_when(values: list[str], *, now: dt.datetime) -> When:
+    """Resolve `@` values by shape, the way parse_profile resolves its fields.
+
+    A token can only be one of four things, so there is no order to remember and
+    nothing to disambiguate. A date and a time may arrive as one combined token or
+    as two separate ones; a second date or a second time is an error rather than
+    last-wins.
+    """
+    date: dt.date | None = None
+    time: dt.time | None = None
+
+    for value in values:
+        for part in value.split("/"):
+            if not part:
+                continue
+            if m := _WHEN_FULL.match(part):
+                if date is not None:
+                    raise ParseError("@ gave a date twice")
+                date = _safe_date(int(m[1]), int(m[2]), int(m[3]))
+            elif m := _WHEN_SHORT.match(part):
+                if date is not None:
+                    raise ParseError("@ gave a date twice")
+                date = _safe_date(now.year, int(m[1]), int(m[2]))
+            elif m := TIME_RE.match(part):
+                if time is not None:
+                    raise ParseError("@ gave a time twice")
+                hh, mm = int(m[1]), int(m[2])
+                if hh > 23 or mm > 59:
+                    raise ParseError(f"@{part} is not a valid time")
+                time = dt.time(hh, mm)
+            else:
+                raise ParseError(
+                    f"@{part}: try @2026-08-24, @08-24, @14:30 or @08-24/14:30"
+                )
+
+    day = date or now.date()
+    if time is not None:
+        when = dt.datetime.combine(day, time, tzinfo=now.tzinfo)
+    elif date is None:
+        when = now
+    else:
+        # Back-dating without a time keeps the current wall-clock time on that
+        # date. Silently collapsing to midnight would misreport a weigh-in.
+        when = dt.datetime.combine(day, now.timetz())
+    return When(date=day.isoformat(), at=int(when.timestamp()))
 
 
 class ParseError(ValueError):
