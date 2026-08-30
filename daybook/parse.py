@@ -14,6 +14,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
+from daybook import sigil
 from daybook.categories import FALLBACK_SLUG, get
 
 _DATE_FULL = re.compile(r"^@(\d{4})-(\d{2})-(\d{2})$")
@@ -126,6 +127,7 @@ class ExpenseInput:
     description: str
     category: str
     date: str
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -235,20 +237,66 @@ def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodIn
     return FoodInput(description=description, kcal=kcal, date=t.date, at=t.at)
 
 
+def _tokens(raw: str) -> list[sigil.Token]:
+    toks = sigil.fold_spans(sigil.tokenize(raw))
+    if not toks:
+        raise ParseError("nothing to log")
+    return toks
+
+
+def _leading_amount(tokens: list[sigil.Token], hint: str) -> float:
+    """The amount is the first token or there is no amount.
+
+    Strictly positional, unlike the old grammar's "first number that survives
+    field extraction". That is what makes a numeric word inside a description safe.
+    """
+    first = tokens[0]
+    if first.sigil or not _NUM.match(first.value):
+        raise ParseError(f"start with {hint}")
+    return to_amount(first.value)
+
+
+def _single(g: sigil.Grouped, sigil_char: str, field: str) -> str | None:
+    values = g.by_sigil.get(sigil_char, [])
+    if len(values) > 1:
+        raise ParseError(f"{sigil_char} gave the {field} twice")
+    return values[0] if values else None
+
+
+def _vocab(value: str, allowed, field: str) -> str:
+    low = value.lower()
+    if low not in allowed:
+        raise ParseError(f"{value!r} is not a {field} — one of {', '.join(sorted(allowed))}")
+    return low
+
+
 def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> ExpenseInput:
-    t = tokenize(raw, now=now, known_slugs=known_slugs)
-    if t.amount is None:
-        raise ParseError("start with an amount, e.g. 12.40 lunch restaurant")
-    if t.amount == 0:
+    toks = _tokens(raw)
+    amount = _leading_amount(toks, "an amount, e.g. 12.40 lunch !restaurant")
+    g = sigil.group(toks[1:])
+    if amount == 0:
         raise ParseError("amount must be non-zero")
-    if not t.text:
-        raise ParseError("say what it was, e.g. 12.40 lunch restaurant")
+    if not g.text:
+        raise ParseError("say what it was, e.g. 12.40 lunch !restaurant")
+    slug = _single(g, "!", "category")
+    note = _single(g, "~", "note")
     return ExpenseInput(
-        amount=t.amount,
-        description=t.text,
-        category=t.category or FALLBACK_SLUG,
-        date=t.date,
+        amount=amount,
+        description=g.text,
+        category=_vocab(slug, known_slugs, "category") if slug else FALLBACK_SLUG,
+        date=resolve_when(g.by_sigil.get("@", []), now=now).date,
+        note=note or None,
     )
+
+
+def render_expense(row) -> str:
+    """The inverse, for prefilling an edit. `~` renders last because it absorbs the
+    plain tokens after it."""
+    parts = [f"{row['amount']:.2f}", sigil.escape(row["description"]),
+             f"!{row['category']}", f"@{row['date']}"]
+    if row["note"]:
+        parts.append(f"~{sigil.escape(row['note'])}")
+    return " ".join(parts)
 
 
 def parse_budget(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> BudgetInput:

@@ -22,7 +22,7 @@ async def test_e_logs_an_expense_with_inferred_category(make_app, db, type_into)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("e")
-        await type_into(pilot, "12.40 lunch restaurant")
+        await type_into(pilot, "12.40 lunch !restaurant")
         await pilot.press("enter")
         await pilot.pause()
     rows = all_expenses(db)
@@ -58,7 +58,7 @@ async def test_fixing_the_category_does_not_loop_forever(make_app, db, type_into
         await type_into(pilot, "12.40 lunch")
         await pilot.press("enter")
         await pilot.pause()
-        app.prompt.value = "12.40 lunch restaurant"
+        app.prompt.value = "12.40 lunch !restaurant"
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open is False
@@ -83,7 +83,7 @@ async def test_refund_is_accepted_as_a_negative_amount(make_app, db):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("e")
-        app.prompt.value = "-24.99 returned shoes entertainment"
+        app.prompt.value = "-24.99 returned shoes !entertainment"
         await pilot.press("enter")
         await pilot.pause()
     assert all_expenses(db)[0]["amount"] == -24.99

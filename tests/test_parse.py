@@ -12,6 +12,7 @@ from daybook.parse import (
     parse_profile,
     parse_recurring,
     parse_weigh,
+    render_expense,
     resolve_when,
 )
 
@@ -149,55 +150,137 @@ def test_food_zero_calories_is_allowed():
 
 
 # ── expense ──────────────────────────────────────────────────────────────
-def test_expense_amount_description_default_category():
-    r = E("12.40 lunch")
-    assert (r.amount, r.description, r.category, r.date) == (
-        12.40,
-        "lunch",
-        "other",
-        "2026-08-27",
-    )
-
-
-def test_expense_trailing_slug_becomes_category():
-    r = E("12.40 lunch restaurant")
+def test_expense_reads_amount_description_and_category():
+    r = E("12.40 lunch !restaurant")
     assert (r.amount, r.description, r.category) == (12.40, "lunch", "restaurant")
 
 
-def test_expense_slug_anywhere_is_consumed():
-    r = E("84.10 grocery weekly shop")
-    assert (r.amount, r.description, r.category) == (84.10, "weekly shop", "grocery")
+def test_the_amount_is_strictly_the_first_token():
+    """Not "the first number found anywhere" — strictly first. That is what makes a
+    numeric word inside a description safe."""
+    r = E("127 750 shelf !grocery")
+    assert r.amount == 127.0
+    assert r.description == "750 shelf"
 
 
-def test_expense_only_the_first_slug_is_consumed():
-    r = E("12.40 grocery restaurant run")
+def test_a_missing_amount_names_a_valid_line():
+    with pytest.raises(ParseError, match="12.40"):
+        E("lunch !restaurant")
+
+
+def test_plain_tokens_join_in_order_wherever_the_sigil_sits():
+    assert E("127 Grocery !grocery Item X").description == "Grocery Item X"
+    assert E("127 Grocery Item X !grocery").description == "Grocery Item X"
+
+
+def test_a_description_containing_a_category_word_survives():
+    """The headline bug: this used to store category=grocery and description
+    "lunch at store restaurant"."""
+    r = E("84.10 lunch at grocery store !restaurant")
+    assert r.category == "restaurant"
+    assert r.description == "lunch at grocery store"
+
+
+def test_a_description_containing_a_time_survives():
+    """`19:30` used to be consumed as the time of day."""
+    r = E("60 dinner 19:30 reservation !restaurant")
+    assert r.description == "dinner 19:30 reservation"
+
+
+def test_a_description_that_is_a_category_word_survives():
+    r = E("40 Restaurant Depot supplies !grocery")
     assert r.category == "grocery"
-    assert "restaurant" in r.description
+    assert r.description == "Restaurant Depot supplies"
 
 
-def test_expense_backdated():
-    assert E("84.10 weekly shop grocery @08-25").date == "2026-08-25"
+def test_no_category_falls_back_to_other():
+    """The escape hatch: record now, classify later. money_tab re-opens the prompt
+    labelled `fix category`."""
+    assert E("12.40 lunch").category == "other"
 
 
-def test_expense_negative_is_a_refund():
-    r = E("-24.99 returned shoes entertainment")
-    assert r.amount == -24.99
-    assert r.description == "returned shoes"
+def test_an_unknown_category_names_the_valid_ones():
+    with pytest.raises(ParseError, match="grocery"):
+        E("12.40 lunch !pizza")
 
 
-def test_expense_currency_symbol_and_commas_tolerated():
-    assert E("$1,240.50 rent housing").amount == 1240.50
+def test_a_repeated_category_is_an_error():
+    with pytest.raises(ParseError, match="twice"):
+        E("12.40 lunch !grocery !restaurant")
 
 
-@pytest.mark.parametrize("bad", ["", "lunch", "0 lunch", "12.40", "12.40 grocery"])
-def test_expense_rejects_bad_input(bad):
-    with pytest.raises(ParseError):
-        E(bad)
+def test_a_note_may_contain_spaces():
+    r = E("127 shelf !grocery ~receipt in wallet")
+    assert r.note == "receipt in wallet"
+    assert r.description == "shelf"
 
 
-def test_expense_rejects_more_than_two_decimal_places():
-    with pytest.raises(ParseError):
-        E("12.4056 lunch")
+def test_a_note_stops_at_the_next_sigil():
+    r = E("127 shelf ~receipt in wallet !grocery")
+    assert (r.note, r.category, r.description) == ("receipt in wallet", "grocery", "shelf")
+
+
+def test_no_note_is_none():
+    assert E("12.40 lunch !restaurant").note is None
+
+
+def test_a_date_may_be_given():
+    assert E("12.40 lunch !restaurant @2026-06-15").date == "2026-06-15"
+
+
+def test_a_negative_amount_is_a_refund():
+    assert E("-24.99 returned shoes !grocery").amount == -24.99
+
+
+def test_a_zero_amount_is_rejected():
+    with pytest.raises(ParseError, match="non-zero"):
+        E("0 lunch !restaurant")
+
+
+def test_a_missing_description_is_rejected():
+    with pytest.raises(ParseError, match="say what it was"):
+        E("12.40 !restaurant")
+
+
+def test_a_formatted_amount_is_accepted():
+    assert E("$1,240.50 rent !housing").amount == 1240.50
+
+
+def test_a_decimal_comma_is_still_rejected():
+    with pytest.raises(ParseError, match="use a dot for decimals"):
+        E("12,40 lunch !restaurant")
+
+
+def test_an_escaped_sigil_stays_in_the_description():
+    assert E(r"12.40 \!important thing !grocery").description == "!important thing"
+
+
+# ── expense round trip ───────────────────────────────────────────────────
+EXPENSE_ROWS = [
+    dict(amount=12.40, description="lunch", category="restaurant", date="2026-08-20", note=None),
+    dict(amount=84.10, description="lunch at grocery store", category="restaurant",
+         date="2026-08-20", note=None),
+    dict(amount=40.0, description="Restaurant Depot supplies", category="grocery",
+         date="2026-08-20", note=None),
+    dict(amount=60.0, description="dinner 19:30 reservation", category="restaurant",
+         date="2026-08-20", note=None),
+    dict(amount=-24.99, description="returned shoes", category="grocery",
+         date="2026-01-02", note=None),
+    dict(amount=127.0, description="750", category="grocery", date="2026-08-20",
+         note="receipt in wallet"),
+    dict(amount=9.0, description="buy !milk", category="grocery", date="2026-08-20",
+         note="on the !corner"),
+    dict(amount=5.0, description="50% off bin", category="other", date="2026-08-20", note=None),
+]
+
+
+@pytest.mark.parametrize("row", EXPENSE_ROWS, ids=[r["description"][:18] for r in EXPENSE_ROWS])
+def test_expense_round_trips(row):
+    """parse(render(row)) == row. This is the property that lets one grammar serve
+    both entry and editing."""
+    got = E(render_expense(row))
+    for field in ("amount", "description", "category", "date", "note"):
+        assert getattr(got, field) == row[field], field
 
 
 # ── budget ───────────────────────────────────────────────────────────────

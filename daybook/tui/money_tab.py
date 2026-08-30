@@ -516,6 +516,7 @@ class MoneyTab(PanelTab):
             description=r.description,
             category=r.category,
             date=r.date,
+            note=r.note,
             cfg=cfg,
         )
         # The anchor is a date, not a month: move the span's right edge to the day
