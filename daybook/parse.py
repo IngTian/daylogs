@@ -14,12 +14,10 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
-from daybook import sigil
+from daybook import money, sigil
 from daybook.categories import FALLBACK_SLUG, get
 from daybook.fmt import hhmm
 
-_DATE_FULL = re.compile(r"^@(\d{4})-(\d{2})-(\d{2})$")
-_DATE_SHORT = re.compile(r"^@(\d{2})-(\d{2})$")
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
 # Plausibility limits, exported because the edit grammar in editline.py must agree
 # with this one. They were duplicated in both files and agreed by coincidence; a
@@ -94,17 +92,6 @@ class ParseError(ValueError):
 
 
 @dataclass(frozen=True)
-class Tokens:
-    amount: float | None
-    text: str
-    raw_rest: tuple[str, ...]
-    category: str | None
-    keywords: frozenset[str]
-    date: str
-    at: int
-
-
-@dataclass(frozen=True)
 class WeighInput:
     kg: float
     note: str | None
@@ -142,72 +129,6 @@ class RecurringInput:
     name: str
     category: str
     cycle: str
-
-
-def tokenize(
-    raw: str,
-    *,
-    now: dt.datetime,
-    known_slugs: frozenset[str] = frozenset(),
-    keywords: frozenset[str] = frozenset(),
-) -> Tokens:
-    parts = raw.split()
-    if not parts:
-        raise ParseError("nothing to log")
-
-    date: dt.date | None = None
-    time: dt.time | None = None
-    category: str | None = None
-    found_keywords: set[str] = set()
-    rest: list[str] = []
-
-    for tok in parts:
-        if m := _DATE_FULL.match(tok):
-            date = _safe_date(int(m[1]), int(m[2]), int(m[3]))
-            continue
-        if m := _DATE_SHORT.match(tok):
-            date = _safe_date(now.year, int(m[1]), int(m[2]))
-            continue
-        if m := TIME_RE.match(tok):
-            hh, mm = int(m[1]), int(m[2])
-            if hh > 23 or mm > 59:
-                raise ParseError(f"{tok} is not a valid time")
-            time = dt.time(hh, mm)
-            continue
-        low = tok.lower()
-        if low in keywords:
-            found_keywords.add(low)
-            continue
-        if category is None and low in known_slugs:
-            category = low
-            continue
-        rest.append(tok)
-
-    raw_rest = tuple(rest)
-    amount: float | None = None
-    if rest and _NUM.match(rest[0]):
-        amount = to_amount(rest[0])
-        rest = rest[1:]
-
-    day = date or now.date()
-    if time is not None:
-        when = dt.datetime.combine(day, time, tzinfo=now.tzinfo)
-    elif date is None:
-        when = now
-    else:
-        # Back-dating without a time keeps the current wall-clock time on that
-        # date. Silently collapsing to midnight would misreport a weigh-in.
-        when = dt.datetime.combine(day, now.timetz())
-
-    return Tokens(
-        amount=amount,
-        text=" ".join(rest).strip(),
-        raw_rest=raw_rest,
-        category=category,
-        keywords=frozenset(found_keywords),
-        date=day.isoformat(),
-        at=int(when.timestamp()),
-    )
 
 
 def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> WeighInput:
@@ -346,21 +267,27 @@ def render_budget(row) -> str:
 
 
 def parse_recurring(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> RecurringInput:
-    t = tokenize(
-        raw,
-        now=now,
-        known_slugs=known_slugs,
-        keywords=frozenset({"monthly", "annually"}),
-    )
-    if t.amount is None or t.amount <= 0:
-        raise ParseError("recurring needs a positive cost, e.g. 20.99 streaming subscriptions")
-    if not t.text:
-        raise ParseError("give it a name, e.g. 20.99 streaming subscriptions")
+    toks = _tokens(raw)
+    cost = _leading_amount(toks, "a positive cost, e.g. 20.99 Streaming !subscriptions")
+    if cost <= 0:
+        raise ParseError("a recurring cost must be positive")
+    g = sigil.group(toks[1:])
+    if not g.text:
+        raise ParseError("give it a name, e.g. 20.99 Streaming !subscriptions")
+    slug = _single(g, "!", "category")
+    cycle = _single(g, "#", "cycle")
     return RecurringInput(
-        cost=t.amount,
-        name=t.text,
-        category=t.category or FALLBACK_SLUG,
-        cycle="annually" if "annually" in t.keywords else "monthly",
+        cost=cost,
+        name=g.text,
+        category=_vocab(slug, known_slugs, "category") if slug else FALLBACK_SLUG,
+        cycle=_vocab(cycle, money.CYCLES, "cycle") if cycle else "monthly",
+    )
+
+
+def render_recurring(row) -> str:
+    return (
+        f"{row['cost']:g} {sigil.escape(row['name'])} "
+        f"!{row['category']} #{row['cycle']}"
     )
 
 

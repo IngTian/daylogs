@@ -16,6 +16,7 @@ from daybook.parse import (
     render_budget,
     render_expense,
     render_food,
+    render_recurring,
     render_weigh,
     resolve_when,
 )
@@ -353,38 +354,66 @@ def test_budget_round_trips(row):
 
 
 # ── recurring ────────────────────────────────────────────────────────────
-def test_recurring_defaults_to_monthly():
-    r = R("20.99 streaming subscriptions")
-    assert (r.cost, r.name, r.category, r.cycle) == (
-        20.99,
-        "streaming",
-        "subscriptions",
-        "monthly",
-    )
+def test_recurring_reads_cost_name_category_and_cycle():
+    r = R("20.99 Streaming !subscriptions #monthly")
+    assert (r.cost, r.name, r.category, r.cycle) == (20.99, "Streaming", "subscriptions", "monthly")
 
 
-def test_recurring_annual_keyword_consumed_not_in_name():
-    r = R("99 cloud storage subscriptions annually")
-    assert (r.cost, r.name, r.cycle) == (99.0, "cloud storage", "annually")
+def test_the_cycle_defaults_to_monthly():
+    assert R("20.99 Streaming !subscriptions").cycle == "monthly"
 
 
-def test_recurring_explicit_monthly_keyword_consumed():
-    r = R("20.99 streaming subscriptions monthly")
-    assert (r.name, r.cycle) == ("streaming", "monthly")
+def test_a_name_containing_a_cycle_keyword_survives():
+    """The worst case of the old grammar: the keyword was eaten out of the name AND
+    it overwrote the cycle, and because the write path upserted by name the mangled
+    result INSERTED a second row."""
+    r = R("88 Insurance billed annually !other #monthly")
+    assert r.name == "Insurance billed annually"
+    assert r.cycle == "monthly"
 
 
-def test_recurring_without_category_falls_back_to_other():
-    assert R("20.99 mystery thing").category == "other"
+def test_a_name_that_is_only_a_cycle_keyword_survives():
+    assert R("10 Annually !other").name == "Annually"
 
 
-def test_recurring_requires_name():
-    with pytest.raises(ParseError):
-        R("20.99 subscriptions")
+def test_a_name_containing_a_category_word_survives():
+    r = R("60 grocery box !grocery")
+    assert (r.name, r.category) == ("grocery box", "grocery")
 
 
-def test_recurring_requires_positive_cost():
-    with pytest.raises(ParseError):
-        R("-5 streaming subscriptions")
+def test_an_unknown_cycle_names_the_valid_ones():
+    with pytest.raises(ParseError, match="monthly"):
+        R("9.99 Streaming !subscriptions #weekly")
+
+
+def test_the_cycle_is_case_insensitive():
+    assert R("9.99 S !subscriptions #Monthly").cycle == "monthly"
+
+
+def test_recurring_requires_a_name():
+    with pytest.raises(ParseError, match="give it a name"):
+        R("20.99 !subscriptions")
+
+
+def test_recurring_requires_a_positive_cost():
+    with pytest.raises(ParseError, match="positive"):
+        R("0 Streaming !subscriptions")
+
+
+RECURRING_ROWS = [
+    dict(cost=20.99, name="Streaming", category="subscriptions", cycle="monthly"),
+    dict(cost=120.0, name="Transit Pass", category="transport", cycle="annually"),
+    dict(cost=88.0, name="Insurance billed annually", category="other", cycle="monthly"),
+    dict(cost=10.0, name="Annually", category="other", cycle="monthly"),
+    dict(cost=60.0, name="grocery box", category="grocery", cycle="monthly"),
+]
+
+
+@pytest.mark.parametrize("row", RECURRING_ROWS, ids=[r["name"][:14] for r in RECURRING_ROWS])
+def test_recurring_round_trips(row):
+    got = R(render_recurring(row))
+    for field in ("cost", "name", "category", "cycle"):
+        assert getattr(got, field) == row[field], field
 
 
 # ── profile ──────────────────────────────────────────────────────────────
