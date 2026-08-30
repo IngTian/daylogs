@@ -226,9 +226,20 @@ def _reject_unsupported(g: sigil.Grouped, allowed: frozenset[str], entity: str) 
     unsupported = used - allowed
     if unsupported:
         sigil_char = sorted(unsupported)[0]
+        special = _NO_SUCH_FIELD.get((entity, sigil_char))
+        if special:
+            raise ParseError(special)
         field_name = {"!": "category", "#": "cycle", "~": "note", "=": "kcal", "@": "date/time"}
-        hint = f"a {entity} does not have a {field_name.get(sigil_char, 'field')} — drop {sigil_char}"
+        field = field_name.get(sigil_char, 'field')
+        hint = f"a {entity} does not have a {field} — drop {sigil_char}"
         raise ParseError(hint)
+
+
+# Where the generic "does not have a <field>" line would be untrue. A weigh-in
+# does have a note — it is the bare words — so naming the sigil is the whole fix.
+_NO_SUCH_FIELD = {
+    ("weigh-in", "~"): "a weigh-in's note is just the words — drop the ~",
+}
 
 
 def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) -> ExpenseInput:

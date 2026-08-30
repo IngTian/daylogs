@@ -456,8 +456,10 @@ RECURRING_ROWS = [
     dict(cost=88.0, name="Insurance billed annually", category="other", cycle="monthly"),
     dict(cost=10.0, name="Annually", category="other", cycle="monthly"),
     dict(cost=60.0, name="grocery box", category="grocery", cycle="monthly"),
-    dict(cost=10000.55, name="large recurring", category="other", cycle="monthly"),  # :g would render 10000.5
-    dict(cost=999999.99, name="huge recurring", category="other", cycle="monthly"),  # :g would render 1e+06
+    # :g would render 10000.5
+    dict(cost=10000.55, name="large recurring", category="other", cycle="monthly"),
+    # :g would render 1e+06
+    dict(cost=999999.99, name="huge recurring", category="other", cycle="monthly"),
 ]
 
 

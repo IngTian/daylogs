@@ -83,17 +83,20 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
 
     # Assert parsed fields match the sigils present in the example.
     if "!grocery" in example:
-        assert result.category == "grocery", f"!grocery → category must be 'grocery', got {result.category}"
+        msg = f"!grocery → category must be 'grocery', got {result.category}"
+        assert result.category == "grocery", msg
     if "!restaurant" in example:
-        assert result.category == "restaurant", f"!restaurant → category must be 'restaurant'"
+        assert result.category == "restaurant", "!restaurant → category must be 'restaurant'"
     if "!subscriptions" in example:
-        assert result.category == "subscriptions", f"!subscriptions → category must be 'subscriptions'"
+        msg = "!subscriptions → category must be 'subscriptions'"
+        assert result.category == "subscriptions", msg
     if "=610" in example:
         assert result.kcal == 610, "=610 → kcal must be 610"
     if "#monthly" in example:
         assert result.cycle == "monthly", "#monthly → cycle must be 'monthly'"
     if example.startswith("-"):
-        assert result.amount < 0, f"negative amount example → amount must be < 0, got {result.amount}"
+        msg = f"negative amount example → amount must be < 0, got {result.amount}"
+        assert result.amount < 0, msg
     if "@07:30" in example:
         # Check that time is parsed (at field is not midnight)
         import datetime as dt
