@@ -23,7 +23,8 @@ One command. One process. No server, no browser, no ports.
 
   Money: spent 1,200 of 1,500 budget, tracking well for the month.
 
- r regenerate · [ ] browse   t now · g go to   ↵ edit · q quit
+ Thu Aug 27
+ r regenerate · u undo   ? keys   [ prev · ] next · t today · g go to date · q quit
 ```
 
 ## What it is, and what it isn't
@@ -90,7 +91,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | `1` `2` `3` | Day / Body / Money |
 | `←` `→` | previous / next tab — stops at the ends rather than wrapping |
 | `tab` `shift+tab` | next / previous sub-view *within* the tab (Body, Money) |
-| `[` `]` | previous / next period — day on Body, month on Money, report on Summary |
+| `[` `]` | previous / next period — report on Day, day on Body, month on Money |
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
 | `+` `-` | widen / narrow the time horizon (Body, Money): `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
