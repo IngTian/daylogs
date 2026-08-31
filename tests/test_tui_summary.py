@@ -287,9 +287,16 @@ async def test_the_body_panel_names_the_key_when_there_is_no_weight(make_app, db
 
 async def test_the_body_panel_names_the_key_when_there_is_no_profile(make_app, db):
     """No height/sex/birthday means no BMR, so intake has no baseline to sit against.
-    The Body tab already answers this by naming `h`; so does this."""
-    from daybook.body import add_food
+    The Body tab already answers this by naming `h`; so does this.
 
+    The weight seed is load-bearing, not decoration: `body.compute_bmr` returns None
+    on a missing weight *before* it consults the profile, so a seed with no weight
+    passes this assertion with a complete profile too — covering nothing it names.
+    With a weight logged, the absent profile is the only remaining cause.
+    """
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
     add_food(db, description="eggs", kcal=400, source="labeled",
              date="2026-08-30", at=1788010000)
     app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
