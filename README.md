@@ -28,21 +28,26 @@ The design rule: **anything that doesn't survive daily use doesn't ship.**
 ## Install
 
 ```bash
-uv tool install git+https://github.com/IngTian/daylogs
+uv tool install daylogs
 ```
 
-or, equivalently, `pipx install git+https://github.com/IngTian/daylogs`. Either
-one puts `day` on your `PATH` in its own isolated environment — no environment to
-activate, nothing added to whatever Python you use for other work. If you have
-neither tool, `uv` installs in one line:
+or, equivalently, `pipx install daylogs`. Either one puts `day` on your `PATH` in
+its own isolated environment — no environment to activate, nothing added to
+whatever Python you use for other work. If you have neither tool, `uv` installs in
+one line:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Upgrade with `uv tool upgrade daylogs`, remove with `uv tool uninstall
-daylogs`. Working on daylogs itself is a different setup — see
-[Development](#development).
+Upgrade with `uv tool upgrade daylogs`, remove with `uv tool uninstall daylogs`.
+To run an unreleased `main` instead of the published version:
+
+```bash
+uv tool install git+https://github.com/IngTian/daylogs
+```
+
+Working on daylogs itself is a different setup — see [Development](#development).
 
 **Requirements.** Python 3.12+ and any terminal with truecolour. macOS and Linux;
 not tested on Windows.
