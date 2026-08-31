@@ -1,6 +1,14 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+# This file used to carry its own `go_summary` that pressed "3" — the digit the
+# Summary tab had before the Day tab took the lead. Every test here still passed,
+# because pressing "3" lands on Money while `query_one("#summary")` returns the
+# widget whatever tab is active; only the one test that presses a *key* noticed,
+# and it hung forever waiting for a generate that `r` had rolled recurring
+# instead. Aliasing the shared helper keeps one definition of where tab 1 is.
+from helpers import go_day as go_summary
+
 from daybook.summary import get_report, target_date, upsert_report
 
 TZ = ZoneInfo("America/Toronto")
@@ -13,12 +21,6 @@ def _body(app):
     md = app.query_one("#summary-body", Markdown)
     empty = app.query_one("#summary-empty", Static)
     return f"{md.source}\n{empty.content}"
-
-
-async def go_summary(pilot, app):
-    await pilot.press("3")
-    await pilot.pause()
-    return app.query_one("#summary")
 
 
 async def test_shows_the_newest_report_on_open(make_app, db):
