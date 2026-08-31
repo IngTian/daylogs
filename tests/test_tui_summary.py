@@ -458,3 +458,23 @@ async def test_generating_shows_on_the_summary_header_only(make_app, db):
         f"the TODAY header claims to be generating, but the figures are not: {day!r}"
     )
     assert "generating" not in after.lower(), "the indicator outlived the run"
+
+
+async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
+    """The app declares support down to 80 columns, where the two panels stack."""
+    from daybook.body import add_weight
+    from daybook.money import add_expense, upsert_budget, upsert_recurring
+
+    add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
+    upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
+    add_expense(db, amount=1284.5, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        body_panel = _panel(app, "body")
+        money_panel = _panel(app, "money")
+    assert "71.2 kg" in body_panel, f"clipped at 80 columns: {body_panel!r}"
+    assert "1,284.50" in money_panel, f"clipped at 80 columns: {money_panel!r}"
+    for line in (body_panel + "\n" + money_panel).splitlines():
+        assert len(line) <= 76, f"line too wide for a stacked panel: {line!r}"
