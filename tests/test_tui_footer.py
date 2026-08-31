@@ -1,3 +1,4 @@
+from helpers import go_day
 from textual.content import Content
 
 from daybook.tui import keymap as km
@@ -303,7 +304,7 @@ async def test_the_footer_never_advertises_a_key_nothing_handles(make_app):
     names dead keys has the same defect as a hand-written one."""
     app = make_app()
     async with app.run_test(size=(160, 30)) as pilot:
-        await pilot.pause()
+        await go_day(pilot, app)      # say which tab, don't lean on where it opens
         keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
     assert "regenerate" in keys
     assert "next view" not in keys
@@ -313,7 +314,7 @@ async def test_the_footer_never_advertises_a_key_nothing_handles(make_app):
 async def test_the_footer_still_advertises_keys_the_tab_does_handle(make_app):
     app = make_app()
     async with app.run_test(size=(160, 30)) as pilot:
-        await pilot.pause()
+        await go_day(pilot, app)      # say which tab, don't lean on where it opens
         keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
     for expected in ("prev", "next", "today", "quit", "keys"):
         assert expected in keys, f"{expected!r} missing from the Summary footer"

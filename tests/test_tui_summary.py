@@ -450,9 +450,13 @@ async def test_generating_shows_on_the_summary_header_only(make_app, db):
     app = make_app(runner_text=runner,
                    now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
     async with app.run_test(size=(120, 34)) as pilot:
-        await pilot.pause()
+        # Say which tab: `r` is "regenerate" only in the summary scope — on Money it
+        # rolls recurring items, the generate never starts, and a bare
+        # `started.wait()` then blocks forever instead of failing. Both halves of
+        # that matter, so the wait is bounded as well.
+        await go_summary(pilot, app)
         await pilot.press("r")
-        await started.wait()
+        await asyncio.wait_for(started.wait(), 5)
         await pilot.pause()
         day = str(app.query_one("#day-head", Static).content)
         summ = str(app.query_one("#summary-head", Static).content)
