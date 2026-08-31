@@ -1,7 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from helpers import all_expenses, go_body
+from helpers import all_expenses, go_body, go_day, go_money
 
 from daybook.summary import upsert_report
 
@@ -143,10 +143,10 @@ async def test_brackets_step_a_day_on_body_and_a_month_on_money(make_app):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await pilot.pause()
+        await go_body(pilot, app)
         await pilot.press("left_square_bracket")
         assert app.query_one("#body").viewing_date == "2026-08-26"
-        await pilot.press("3")
-        await pilot.pause()
+        await go_money(pilot, app)
         await pilot.press("left_square_bracket")
         assert app.query_one("#money").view.anchor == "2026-07-27"
 
@@ -214,8 +214,7 @@ async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_in
 
     app = make_app(now=lambda: NOW, runner_text=runner)
     async with app.run_test() as pilot:
-        await pilot.press("2")
-        await pilot.pause()
+        await go_money(pilot, app)
         await pilot.press("s")
         await type_into(pilot, "20.99 streaming !subscriptions")
         await pilot.press("enter")
@@ -223,8 +222,7 @@ async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_in
         await pilot.press("r")
         await pilot.pause()
         assert len(list_budget(db, month="2026-08")) == 1
-        await pilot.press("3")
-        await pilot.pause()
+        await go_day(pilot, app)
         await pilot.press("r")
         await pilot.pause()
         await pilot.pause()
@@ -235,6 +233,7 @@ async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_in
 async def test_keys_are_inert_while_the_prompt_is_open(make_app):
     app = make_app()
     async with app.run_test() as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.press("t")
         await pilot.press("2")
@@ -250,8 +249,7 @@ async def test_typing_a_refund_into_the_prompt_is_not_eaten_by_the_minus_key(
     
     app = make_app()
     async with app.run_test() as pilot:
-        await pilot.press("2")
-        await pilot.pause()
+        await go_money(pilot, app)
         await pilot.press("e")
         await type_into(pilot, "-24.99 refund grocery")
         assert app.prompt.value == "-24.99 refund grocery"
@@ -277,6 +275,7 @@ async def test_g_with_a_bare_month_does_not_poison_the_tab(make_app):
     copies still appended `-01`. The next keypress then crashed the app."""
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("g")
         await pilot.pause()
         for ch in "2026-06":
@@ -297,7 +296,7 @@ async def test_all_three_tabs_resolve_g_the_same_way(make_app):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         results = {}
-        for key, tab_id in (("1", "#body"), ("2", "#money")):
+        for key, tab_id in (("2", "#body"), ("3", "#money")):
             await pilot.press(key)
             await pilot.pause()
             await pilot.press("g")
@@ -386,11 +385,15 @@ async def test_walking_stops_at_both_ends(make_app, db):
     from daybook.body import add_food
     from daybook.money import add_expense
 
-    # Seed both body and money tables for cursor movement tests
+    # The cursor half of this test runs on Money — the right-hand end of the strip,
+    # where the clamped `→` fires. Money opens on its categories pane, which shows
+    # one row per category, so the categories have to differ: three expenses all
+    # filed under "restaurant" collapse to a single row and `down` moves nothing.
+    cats = ("restaurant", "grocery", "transport")
     for i in range(3):
         add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
                  date="2026-08-27", at=1787000000 + i * 3600)
-        add_expense(db, amount=10.0 + i, description=f"expense{i}", category="restaurant",
+        add_expense(db, amount=10.0 + i, description=f"expense{i}", category=cats[i],
                     date="2026-08-27")
     app = make_app(now=lambda: NOW.replace(tzinfo=None))
     async with app.run_test() as pilot:

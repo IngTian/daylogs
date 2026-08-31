@@ -451,6 +451,7 @@ async def test_energy_panel_names_the_key_not_the_config_file(make_app):
 async def test_h_sets_the_profile_and_bmr_appears_at_once(make_app, db, type_into, tmp_path):
     app = make_app()
     async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
         add_weight(db, kg=80.0, date="2026-08-28", at=1)
         await pilot.press("h")
         await type_into(pilot, "182 male 1995-06-15")
@@ -467,6 +468,7 @@ async def test_h_sets_the_profile_and_bmr_appears_at_once(make_app, db, type_int
 async def test_profile_prompt_prefills_with_what_is_already_set(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("h")
         await type_into(pilot, "182 male 1995-06-15")
         await pilot.press("enter")
@@ -480,6 +482,7 @@ async def test_profile_prompt_prefills_with_what_is_already_set(make_app, type_i
 async def test_a_partial_profile_keeps_the_other_fields(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("h")
         await type_into(pilot, "182 male 1995-06-15")
         await pilot.press("enter")
@@ -497,6 +500,7 @@ async def test_a_partial_profile_keeps_the_other_fields(make_app, type_into):
 async def test_a_bad_profile_line_keeps_the_text_and_writes_nothing(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("h")
         await type_into(pilot, "purple")
         await pilot.press("enter")
@@ -535,6 +539,7 @@ async def test_enter_on_a_weight_row_opens_it_prefilled(make_app, db):
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")          # weight sub-view
         await pilot.pause()
         await pilot.press("enter")
@@ -549,6 +554,7 @@ async def test_editing_a_weight_updates_in_place(make_app, db, type_into):
     original = list_weight(db)[0]["id"]
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -585,6 +591,7 @@ async def test_undoing_an_edit_restores_rather_than_duplicates(make_app, db, typ
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -605,6 +612,7 @@ async def test_a_bad_edit_keeps_the_text_and_changes_nothing(make_app, db, type_
     add_weight(db, kg=78.2, date="2026-08-27", at=1)
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -629,6 +637,7 @@ async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, t
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.label == "food"
@@ -703,6 +712,7 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -733,6 +743,7 @@ async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, ty
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
@@ -754,6 +765,7 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -779,6 +791,7 @@ async def test_empty_submit_on_food_edit_does_not_corrupt_next_entry(make_app, d
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
@@ -801,6 +814,7 @@ async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -821,6 +835,7 @@ async def test_editing_a_weight_can_clear_its_note(make_app, db, type_into):
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -1365,6 +1380,7 @@ async def test_escaping_a_photo_confirm_does_not_let_the_next_meal_eat_the_photo
 
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")
         await pilot.pause()
         await pilot.pause()
@@ -1419,6 +1435,7 @@ async def test_a_superseded_photo_estimate_does_not_let_the_next_meal_eat_the_ph
 
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("p")                  # photo estimate starts, hangs
         await pilot.pause()
         await pilot.press("f")                  # supersedes it
