@@ -103,7 +103,10 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 `t` and `g` are why `[` / `]` stepping one period at a time is fine: you're
 never more than two keystrokes from anywhere.
 
-**Body — `1`**
+**Day — `1`** · `r` regenerates the daily read. `[` `]` browse earlier ones; the
+figures above them are always today's.
+
+**Body — `2`**
 
 | Key | Does |
 |---|---|
@@ -114,7 +117,7 @@ never more than two keystrokes from anywhere.
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
 
-**Money — `2`**
+**Money — `3`**
 
 | Key | Does |
 |---|---|
@@ -127,8 +130,6 @@ never more than two keystrokes from anywhere.
 | `G` | group the expense list by category |
 | `enter` | drill into a category, fold a group, or edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
-
-**Summary — `3`** · `r` regenerates.
 
 ### What you type
 
