@@ -1,4 +1,15 @@
-"""Tab 3 — the daily summary: render, generate, browse.
+"""Tab 1, the Day tab — today's figures above the daily read.
+
+Two panels of today's numbers, BODY beside MONEY, over the generated summary,
+which is browsable and regeneratable. Every figure comes from body.py or
+money.py; the panels lay out and never compute. The two halves carry different
+dates on purpose — the figures are always today, the read is dated by the day it
+describes — which is why each has its own header.
+
+The class is still `SummaryTab` and the widget id still `#summary`: the tab id is
+what the keymap's `show_summary` action and the `summary` key scope are named
+after, so renaming it is a rename across the keymap, the footer and the tests
+rather than a docstring fix.
 
 Generation runs in a worker because `claude -p` takes seconds; everything else
 in the app is microseconds and runs on the event loop.

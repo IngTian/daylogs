@@ -1,4 +1,4 @@
-"""Tab 1 — weight and food for one day.
+"""Tab 2 — weight and food for one day.
 
 Holds no arithmetic. Weight deltas come from body.weight_delta, the day's calorie
 total from body.day_kcal, BMR from body.compute_bmr, and the plot from chart.py.
