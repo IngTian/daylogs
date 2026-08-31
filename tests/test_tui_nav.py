@@ -231,12 +231,20 @@ async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_in
 
 # ── guards ───────────────────────────────────────────────────────────────
 async def test_keys_are_inert_while_the_prompt_is_open(make_app):
+    """`3`, deliberately — not the digit for the tab this test is already on.
+
+    The test runs on Body, so pressing `2` here would leave the tab put whether
+    show_scope's prompt guard works or not, and the assertion could not fail. `3`
+    is the one digit that moves somewhere, so a tab that stays on Body is evidence
+    of the guard rather than of arithmetic. Same for `t` and `w`: both do something
+    on Body, so an open prompt swallowing them is observable.
+    """
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.press("w")
         await pilot.press("t")
-        await pilot.press("2")
+        await pilot.press("3")
         assert app.active_tab_id == "tab-body"
         assert app.prompt.is_open is True
 
@@ -291,12 +299,27 @@ async def test_g_with_a_bare_month_does_not_poison_the_tab(make_app):
     assert prompt_open is False
 
 
-async def test_all_three_tabs_resolve_g_the_same_way(make_app):
-    """The rule lives in one function precisely so these cannot drift again."""
+async def test_all_three_tabs_resolve_g_the_same_way(make_app, db):
+    """The rule lives in one function precisely so these cannot drift again.
+
+    Day has to be seeded to take part at all: `SummaryTab.handle_prompt` refuses a
+    date it has no report for, notifies, and leaves `viewing_date` alone — so
+    without a report at the resolved date the tab would look like it disagreed with
+    the other two about what `2026-06` means, when really it had declined to move.
+    The second, newer report is what stops the Day leg being vacuous: the tab opens
+    on the newest report, so `g` has to travel to reach June rather than being
+    parked there already. That is asserted below, not assumed.
+    """
+    upsert_report(db, date="2026-06-30", content="june")
+    upsert_report(db, date="2026-08-26", content="august")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#summary").viewing_date == "2026-08-26", (
+            "Day did not open on the newest report, so its leg of this test proves nothing"
+        )
         results = {}
-        for key, tab_id in (("2", "#body"), ("3", "#money")):
+        for key, tab_id in (("1", "#summary"), ("2", "#body"), ("3", "#money")):
             await pilot.press(key)
             await pilot.pause()
             await pilot.press("g")
@@ -306,6 +329,7 @@ async def test_all_three_tabs_resolve_g_the_same_way(make_app):
             await pilot.pause()
             tab = app.query_one(tab_id)
             results[tab_id] = getattr(tab, "viewing_date", None) or tab.view.anchor
+    assert results["#summary"] == "2026-06-30"
     assert results["#body"] == "2026-06-30"
     assert results["#money"] == "2026-06-30"
 
