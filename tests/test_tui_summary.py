@@ -463,7 +463,7 @@ async def test_generating_shows_on_the_summary_header_only(make_app, db):
 async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
     """The app declares support down to 80 columns, where the two panels stack."""
     from daybook.body import add_weight
-    from daybook.money import add_expense, upsert_budget, upsert_recurring
+    from daybook.money import add_expense, upsert_recurring
 
     add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
     upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
