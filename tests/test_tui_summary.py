@@ -249,3 +249,69 @@ async def test_a_superseded_generate_does_not_leave_the_header_stuck(make_app, d
         await pilot.pause()
         assert not tab.busy, "busy outlived the generate that finished"
         assert "generating" not in tab.status_hint().lower(), tab.status_hint()
+
+
+def _panel(app, which):
+    from textual.widgets import Static
+
+    return str(app.query_one(f"#day-{which}-body", Static).content)
+
+
+async def test_the_body_panel_shows_weight_energy_and_meals(make_app, db):
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
+    add_weight(db, kg=71.5, date="2026-08-24", at=1787400000, note="")
+    add_food(db, description="eggs", kcal=400, source="labeled",
+             date="2026-08-30", at=1788010000)
+    add_food(db, description="salad", kcal=610, source="labeled",
+             date="2026-08-30", at=1788020000)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "71.2 kg" in panel
+    assert "▼0.3" in panel, f"no 7-day delta: {panel!r}"
+    assert "1,010" in panel, f"no intake total: {panel!r}"
+    assert "2 meals" in panel
+
+
+async def test_the_body_panel_names_the_key_when_there_is_no_weight(make_app, db):
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "0.0 kg" not in panel, "an absent weight must not render as zero"
+    assert "press w" in panel, f"the empty state does not name its key: {panel!r}"
+
+
+async def test_the_body_panel_names_the_key_when_there_is_no_profile(make_app, db):
+    """No height/sex/birthday means no BMR, so intake has no baseline to sit against.
+    The Body tab already answers this by naming `h`; so does this."""
+    from daybook.body import add_food
+
+    add_food(db, description="eggs", kcal=400, source="labeled",
+             date="2026-08-30", at=1788010000)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "press h" in panel, f"no BMR and no prompt to fix it: {panel!r}"
+    assert "400" in panel, "intake should still show without a baseline"
+
+
+async def test_the_body_panel_shows_net_against_bmr_when_the_profile_is_set(
+    make_app, db, make_cfg
+):
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
+    add_food(db, description="eggs", kcal=2000, source="labeled",
+             date="2026-08-30", at=1788010000)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1990-01-01")
+    app = make_app(cfg=cfg, now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "BMR" in panel
+    assert "net" in panel

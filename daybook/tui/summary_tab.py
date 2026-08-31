@@ -10,24 +10,33 @@ import datetime as dt
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
+from daybook import body, summary
 from daybook import horizon as hz
-from daybook import summary
 from daybook.fmt import human_date
 from daybook.markup import to_markdown
+from daybook.tui.common import PanelTab
 
 _EMPTY = "no summary yet — press r"
 
 
-class SummaryTab(Vertical):
+class SummaryTab(PanelTab):
     def __init__(self, **kw) -> None:
         super().__init__(**kw)
         self.viewing_date: str | None = None
         self.busy = False
 
     def compose(self) -> ComposeResult:
+        yield Static(id="day-head", classes="pane-title")
+        with Horizontal(classes="panel-row"):
+            with Vertical(classes="panel", id="panel-day-body"):
+                yield Static("BODY", classes="panel-title")
+                yield Static(id="day-body-body", classes="panel-body")
+            with Vertical(classes="panel", id="panel-day-money"):
+                yield Static("MONEY", classes="panel-title")
+                yield Static(id="day-money-body", classes="panel-body")
         yield Static(id="summary-head", classes="pane-title")
         with VerticalScroll(id="summary-scroll"):
             # A real Markdown widget, so `## Body` renders as a heading instead of
@@ -39,9 +48,46 @@ class SummaryTab(Vertical):
     def focus_default(self) -> None:
         return None
 
+    def _body_panel(self, conn, cfg, *, date: str) -> str:
+        """Today's body figures. Every value comes from body.py — this only lays out.
+
+        Aligned in a value column like the Body tab's ENERGY panel, so the two read
+        as the same app.
+        """
+        lines: list[str] = []
+        latest = body.latest_weight(conn, on_or_before=date)
+        if latest is None:
+            # Name the key, not the file: an empty panel with no way out is how the
+            # Body tab's energy block stayed blank.
+            lines.append("  weight          —   press w on Body")
+            kg = None
+        else:
+            kg = latest["kg"]
+            d7 = body.weight_delta(conn, end_date=date, days=7)
+            trend = "" if d7 is None else f"  {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            lines.append(f"  weight    {kg:>7,.1f} kg{trend}")
+
+        kcal = body.day_kcal(conn, date=date)
+        bmr = body.compute_bmr(cfg, kg, today=date)
+        if bmr is None:
+            lines.append(f"  in        {kcal:>7,} kcal")
+            lines.append("  BMR             —   press h on Body")
+        else:
+            lines.append(f"  in        {kcal:>7,} / {bmr:,} BMR")
+            lines.append(f"  net       {kcal - bmr:>+7,} kcal")
+
+        meals = len(body.list_food(conn, date=date))
+        lines.append(f"  logged    {meals:>7} meal{'' if meals == 1 else 's'}")
+        return "\n".join(lines)
+
     # ── rendering ────────────────────────────────────────────────────────
     def reload(self) -> None:
         conn = self.app.conn
+        today = self.app.today()
+        self.query_one("#day-head", Static).update(f"TODAY   {human_date(today)}")
+        self.query_one("#day-body-body", Static).update(
+            self._body_panel(self.app.conn, self.app.cfg, date=today)
+        )
         row = (
             summary.get_report(conn, self.viewing_date)
             if self.viewing_date
