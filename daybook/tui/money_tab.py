@@ -1,4 +1,4 @@
-"""Tab 2 — expenses, budgets and recurring items over any range.
+"""Tab 3 — expenses, budgets and recurring items over any range.
 
 Expenses only: no income, no balance, no projection. Every number comes from
 money.summarize_span and money.query_expenses; all view state lives in one

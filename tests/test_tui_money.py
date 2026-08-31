@@ -1,6 +1,6 @@
 import datetime as dt
 
-from helpers import all_expenses
+from helpers import all_expenses, go_money
 
 from daybook.money import (
     add_expense,
@@ -9,12 +9,6 @@ from daybook.money import (
     upsert_budget,
     upsert_recurring,
 )
-
-
-async def go_money(pilot, app):
-    await pilot.press("2")
-    await pilot.pause()
-    return app.query_one("#money")
 
 
 async def test_e_logs_an_expense_with_inferred_category(make_app, db, type_into):
@@ -197,7 +191,12 @@ async def test_tab_cycles_sub_panes(make_app):
 
 async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
     app = make_app()
-    today = dt.date.today().isoformat()
+    # `app.today()`, not `dt.date.today()`: the app's clock is pinned to
+    # cfg.timezone while `dt.date.today()` follows the process TZ. The two straddle
+    # midnight for part of every day, and then the seeded row falls outside the MTD
+    # span, the expense pane is empty, and `x` has no row to delete. Reproduce with
+    # `TZ=UTC pytest` any Toronto evening.
+    today = app.today()
     add_expense(
         db, amount=12.40, description="lunch", category="restaurant", date=today
     )
@@ -216,9 +215,9 @@ async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
 
 
 async def test_x_on_the_categories_pane_explains_itself(make_app, db):
-    today = dt.date.today().isoformat()
-    add_expense(db, amount=1.0, description="x", category="grocery", date=today)
     app = make_app()
+    today = app.today()          # the app's clock, not the process TZ — see above
+    add_expense(db, amount=1.0, description="x", category="grocery", date=today)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("x")
@@ -243,7 +242,11 @@ async def test_x_deletes_a_recurring_row(make_app, db, type_into):
 
 async def test_header_shows_spend_against_budget(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    # The month variant of the trap above: on a month's last day after 20:00 Toronto,
+    # `dt.date.today()` under `TZ=UTC` is already the 1st of the next month, so the
+    # budget and the expense land in a month the app is not showing and the header
+    # reads `spent 0.00`. Reproduce with `TZ=UTC pytest` on any month-end evening.
+    month = app.today()[:7]
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=500)
     add_expense(
         db, amount=412.0, description="shop", category="grocery", date=f"{month}-10"
@@ -259,7 +262,7 @@ async def test_header_shows_spend_against_budget(make_app, db):
 
 async def test_header_says_over_when_past_budget(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
         db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"
@@ -274,7 +277,7 @@ async def test_header_says_over_when_past_budget(make_app, db):
 
 async def test_burn_bar_shows_percentage_and_calendar_progress(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=100)
     add_expense(
         db, amount=50.0, description="shop", category="grocery", date=f"{month}-02"
@@ -291,7 +294,7 @@ async def test_burn_bar_shows_percentage_and_calendar_progress(make_app, db):
 
 async def test_over_budget_category_is_flagged_in_the_table(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
         db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"

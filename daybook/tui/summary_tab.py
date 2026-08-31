@@ -1,4 +1,15 @@
-"""Tab 3 — the daily summary: render, generate, browse.
+"""Tab 1, the Day tab — today's figures above the daily read.
+
+Two panels of today's numbers, BODY beside MONEY, over the generated summary,
+which is browsable and regeneratable. Every figure comes from body.py or
+money.py; the panels lay out and never compute. The two halves carry different
+dates on purpose — the figures are always today, the read is dated by the day it
+describes — which is why each has its own header.
+
+The class is still `SummaryTab` and the widget id still `#summary`: the tab id is
+what the keymap's `show_summary` action and the `summary` key scope are named
+after, so renaming it is a rename across the keymap, the footer and the tests
+rather than a docstring fix.
 
 Generation runs in a worker because `claude -p` takes seconds; everything else
 in the app is microseconds and runs on the event loop.
@@ -10,24 +21,33 @@ import datetime as dt
 
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
+from daybook import body, money, summary
 from daybook import horizon as hz
-from daybook import summary
 from daybook.fmt import human_date
 from daybook.markup import to_markdown
+from daybook.tui.common import PanelTab
 
 _EMPTY = "no summary yet — press r"
 
 
-class SummaryTab(Vertical):
+class SummaryTab(PanelTab):
     def __init__(self, **kw) -> None:
         super().__init__(**kw)
         self.viewing_date: str | None = None
         self.busy = False
 
     def compose(self) -> ComposeResult:
+        yield Static(id="day-head", classes="pane-title")
+        with Horizontal(classes="panel-row"):
+            with Vertical(classes="panel", id="panel-day-body"):
+                yield Static("BODY", classes="panel-title")
+                yield Static(id="day-body-body", classes="panel-body")
+            with Vertical(classes="panel", id="panel-day-money"):
+                yield Static("MONEY", classes="panel-title")
+                yield Static(id="day-money-body", classes="panel-body")
         yield Static(id="summary-head", classes="pane-title")
         with VerticalScroll(id="summary-scroll"):
             # A real Markdown widget, so `## Body` renders as a heading instead of
@@ -39,9 +59,79 @@ class SummaryTab(Vertical):
     def focus_default(self) -> None:
         return None
 
+    def _body_panel(self, conn, cfg, *, date: str) -> str:
+        """Today's body figures. Every value comes from body.py — this only lays out.
+
+        Aligned in a value column like the Body tab's ENERGY panel, so the two read
+        as the same app.
+        """
+        lines: list[str] = []
+        latest = body.latest_weight(conn, on_or_before=date)
+        if latest is None:
+            # Name the key, not the file: an empty panel with no way out is how the
+            # Body tab's energy block stayed blank.
+            lines.append("  weight          —   press w on Body")
+            kg = None
+        else:
+            kg = latest["kg"]
+            d7 = body.weight_delta(conn, end_date=date, days=7)
+            trend = "" if d7 is None else f"  {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            lines.append(f"  weight    {kg:>7,.1f} kg{trend}")
+
+        kcal = body.day_kcal(conn, date=date)
+        bmr = body.compute_bmr(cfg, kg, today=date)
+        if bmr is None:
+            lines.append(f"  in        {kcal:>7,} kcal")
+            lines.append("  BMR             —   press h on Body")
+        else:
+            lines.append(f"  in        {kcal:>7,} / {bmr:,} BMR")
+            lines.append(f"  net       {kcal - bmr:>+7,} kcal")
+
+        meals = len(body.list_food(conn, date=date))
+        lines.append(f"  logged    {meals:>7} meal{'' if meals == 1 else 's'}")
+        return "\n".join(lines)
+
+    def _money_panel(self, conn, cfg, *, date: str) -> str:
+        """This month's spend against its budget. One summarize_month call.
+
+        The burn line only means something for a month in progress — 84% on day 27
+        of 31 is fine and the same number on day 12 is not — so it is omitted for a
+        past month rather than shown misleadingly.
+        """
+        month = date[:7]
+        s = money.summarize_month(conn, month=month, today=date, cfg=cfg)
+        lines: list[str] = [f"  spent   {s.total_spent:>10,.2f}"]
+
+        pending, _ = money.pending_roll(conn, month=month)
+        if s.total_budget <= 0:
+            # Name the key that fixes it. A zero budget is true and useless.
+            if pending == 0:
+                lines.append("  budget          —   press b on Money")
+            else:
+                lines.append(f"  budget          —   press r on Money ({pending} to roll)")
+        else:
+            lines[0] = f"  spent   {s.total_spent:>10,.2f} of {s.total_budget:,.2f}"
+            lines.append(f"  left    {s.remaining:>10,.2f}")
+            if month == self.app.today()[:7]:
+                pct = round(s.total_spent / s.total_budget * 100)
+                lines.append(f"  burn    {pct:>9}% on day {s.day_of_month}/{s.days_in_month}")
+
+        if s.over_budget:
+            names = ", ".join(c.category for c in s.over_budget[:2])
+            lines.append(f"  over      {names}  ⚠")
+        return "\n".join(lines)
+
     # ── rendering ────────────────────────────────────────────────────────
     def reload(self) -> None:
         conn = self.app.conn
+        today = self.app.today()
+        self.query_one("#day-head", Static).update(f"TODAY   {human_date(today)}")
+        self.query_one("#day-body-body", Static).update(
+            self._body_panel(self.app.conn, self.app.cfg, date=today)
+        )
+        self.query_one("#day-money-body", Static).update(
+            self._money_panel(self.app.conn, self.app.cfg, date=today)
+        )
         row = (
             summary.get_report(conn, self.viewing_date)
             if self.viewing_date

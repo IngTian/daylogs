@@ -1,6 +1,14 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+# This file used to carry its own `go_summary` that pressed "3" — the digit the
+# Summary tab had before the Day tab took the lead. Every test here still passed,
+# because pressing "3" lands on Money while `query_one("#summary")` returns the
+# widget whatever tab is active; only the one test that presses a *key* noticed,
+# and it hung forever waiting for a generate that `r` had rolled recurring
+# instead. Aliasing the shared helper keeps one definition of where tab 1 is.
+from helpers import go_day as go_summary
+
 from daybook.summary import get_report, target_date, upsert_report
 
 TZ = ZoneInfo("America/Toronto")
@@ -13,12 +21,6 @@ def _body(app):
     md = app.query_one("#summary-body", Markdown)
     empty = app.query_one("#summary-empty", Static)
     return f"{md.source}\n{empty.content}"
-
-
-async def go_summary(pilot, app):
-    await pilot.press("3")
-    await pilot.pause()
-    return app.query_one("#summary")
 
 
 async def test_shows_the_newest_report_on_open(make_app, db):
@@ -247,3 +249,243 @@ async def test_a_superseded_generate_does_not_leave_the_header_stuck(make_app, d
         await pilot.pause()
         assert not tab.busy, "busy outlived the generate that finished"
         assert "generating" not in tab.status_hint().lower(), tab.status_hint()
+
+
+def _panel(app, which):
+    from textual.widgets import Static
+
+    return str(app.query_one(f"#day-{which}-body", Static).content)
+
+
+async def test_the_body_panel_shows_weight_energy_and_meals(make_app, db):
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
+    add_weight(db, kg=71.5, date="2026-08-24", at=1787400000, note="")
+    add_food(db, description="eggs", kcal=400, source="labeled",
+             date="2026-08-30", at=1788010000)
+    add_food(db, description="salad", kcal=610, source="labeled",
+             date="2026-08-30", at=1788020000)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "71.2 kg" in panel
+    assert "▼0.3" in panel, f"no 7-day delta: {panel!r}"
+    assert "1,010" in panel, f"no intake total: {panel!r}"
+    assert "2 meals" in panel
+
+
+async def test_the_body_panel_names_the_key_when_there_is_no_weight(make_app, db):
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "0.0 kg" not in panel, "an absent weight must not render as zero"
+    assert "press w" in panel, f"the empty state does not name its key: {panel!r}"
+
+
+async def test_the_body_panel_names_the_key_when_there_is_no_profile(make_app, db):
+    """No height/sex/birthday means no BMR, so intake has no baseline to sit against.
+    The Body tab already answers this by naming `h`; so does this.
+
+    The weight seed is load-bearing, not decoration: `body.compute_bmr` returns None
+    on a missing weight *before* it consults the profile, so a seed with no weight
+    passes this assertion with a complete profile too — covering nothing it names.
+    With a weight logged, the absent profile is the only remaining cause.
+    """
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
+    add_food(db, description="eggs", kcal=400, source="labeled",
+             date="2026-08-30", at=1788010000)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "press h" in panel, f"no BMR and no prompt to fix it: {panel!r}"
+    assert "400" in panel, "intake should still show without a baseline"
+
+
+async def test_the_body_panel_shows_net_against_bmr_when_the_profile_is_set(
+    make_app, db, make_cfg
+):
+    from daybook.body import add_food, add_weight
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
+    add_food(db, description="eggs", kcal=2000, source="labeled",
+             date="2026-08-30", at=1788010000)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1990-01-01")
+    app = make_app(cfg=cfg, now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "body")
+    assert "BMR" in panel
+    assert "net" in panel
+
+
+async def test_the_money_panel_shows_spend_burn_and_what_is_left(make_app, db):
+    from daybook.money import add_expense, upsert_budget
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=500.0, source="manual")
+    add_expense(db, amount=120.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "120.00" in panel
+    assert "500.00" in panel, f"the budget is not shown: {panel!r}"
+    assert "380.00" in panel, f"what is left is not shown: {panel!r}"
+    assert "30/31" in panel, f"the burn is not shown against elapsed days: {panel!r}"
+
+
+async def test_the_money_panel_flags_an_overrun_with_the_glyph(make_app, db):
+    """Colour is never the only signal in this app, so the glyph is asserted."""
+    from daybook.money import add_expense, upsert_budget
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=100.0, source="manual")
+    add_expense(db, amount=250.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "⚠" in panel, f"an overrun with no glyph: {panel!r}"
+    assert "grocery" in panel
+
+
+async def test_the_money_panel_names_the_roll_key_when_recurring_items_exist(make_app, db):
+    """"0.00 budget" is true, useless, and reads as stale data. When recurring
+    items exist, name `r` which rolls them."""
+    from daybook.money import add_expense, upsert_recurring
+
+    upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
+    add_expense(db, amount=42.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "42.00" in panel
+    assert "press r" in panel, f"recurring exists but r not named: {panel!r}"
+    assert "1 to roll" in panel, f"count not shown: {panel!r}"
+    assert "0.00 of" not in panel, "an absent budget must not render as zero"
+
+
+async def test_the_money_panel_names_the_add_key_when_no_recurring_items_exist(make_app, db):
+    """When no recurring items exist, `r` does nothing — name `b` which adds a line."""
+    from daybook.money import add_expense
+
+    add_expense(db, amount=42.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "42.00" in panel
+    assert "press b" in panel, f"no recurring and b not named: {panel!r}"
+    assert "press r" not in panel, f"no recurring but r named anyway: {panel!r}"
+
+
+async def test_the_two_headers_name_their_own_dates(make_app, db):
+    """The panels are today; the prose is the day it describes. Both said plainly."""
+    from textual.widgets import Static
+
+    from daybook.body import add_weight
+
+    add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
+    upsert_report(db, date="2026-08-29", content="yesterday's read")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        day = str(app.query_one("#day-head", Static).content)
+        summ = str(app.query_one("#summary-head", Static).content)
+    assert "Aug 30" in day, f"the TODAY header does not name today: {day!r}"
+    assert "Aug 29" in summ, f"the SUMMARY header does not name its report: {summ!r}"
+    assert "Aug 29" not in day and "Aug 30" not in summ, (
+        f"the headers have blurred the two dates: {day!r} / {summ!r}"
+    )
+
+
+async def test_browsing_reports_leaves_the_panels_alone(make_app, db):
+    """`[` moves the prose. The panels are "now" and do not travel."""
+    from textual.widgets import Static
+
+    from daybook.body import add_weight
+
+    add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
+    upsert_report(db, date="2026-08-29", content="newer")
+    upsert_report(db, date="2026-08-28", content="older")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        before = _panel(app, "body")
+        day_before = str(app.query_one("#day-head", Static).content)
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        summ = str(app.query_one("#summary-head", Static).content)
+        after = _panel(app, "body")
+        day_after = str(app.query_one("#day-head", Static).content)
+    assert "Aug 28" in summ, f"browsing did not move the prose: {summ!r}"
+    assert after == before, "browsing changed the panel values"
+    assert day_after == day_before, "browsing changed the TODAY header"
+
+
+async def test_generating_shows_on_the_summary_header_only(make_app, db):
+    import asyncio
+
+    from textual.widgets import Static
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        started.set()
+        await release.wait()
+        return "fresh"
+
+    upsert_report(db, date="2026-08-29", content="old")
+    app = make_app(runner_text=runner,
+                   now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        # Say which tab: `r` is "regenerate" only in the summary scope — on Money it
+        # rolls recurring items, the generate never starts, and a bare
+        # `started.wait()` then blocks forever instead of failing. Both halves of
+        # that matter, so the wait is bounded as well.
+        await go_summary(pilot, app)
+        await pilot.press("r")
+        await asyncio.wait_for(started.wait(), 5)
+        await pilot.pause()
+        day = str(app.query_one("#day-head", Static).content)
+        summ = str(app.query_one("#summary-head", Static).content)
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = str(app.query_one("#summary-head", Static).content)
+    assert "generating" in summ.lower(), f"no progress on the summary header: {summ!r}"
+    assert "generating" not in day.lower(), (
+        f"the TODAY header claims to be generating, but the figures are not: {day!r}"
+    )
+    assert "generating" not in after.lower(), "the indicator outlived the run"
+
+
+async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
+    """The app declares support down to 80 columns, where the two panels stack."""
+    from daybook.body import add_weight
+    from daybook.money import add_expense, upsert_recurring
+
+    add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
+    upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
+    add_expense(db, amount=1284.5, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(80, 40)) as pilot:
+        await pilot.pause()
+        body_panel = _panel(app, "body")
+        money_panel = _panel(app, "money")
+    assert "71.2 kg" in body_panel, f"clipped at 80 columns: {body_panel!r}"
+    assert "1,284.50" in money_panel, f"clipped at 80 columns: {money_panel!r}"
+    for line in (body_panel + "\n" + money_panel).splitlines():
+        assert len(line) <= 76, f"line too wide for a stacked panel: {line!r}"
