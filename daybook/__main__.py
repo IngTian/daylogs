@@ -35,8 +35,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp = sub.add_parser("export", help="write one CSV per table, readable anywhere")
     p_exp.add_argument("dest", help="destination directory")
 
-    sub.add_parser("moo", help="🐄")
-
     return parser
 
 
@@ -63,8 +61,6 @@ def main(argv: list[str] | None = None) -> int:
             return _backup(conn, Path(args.dest).expanduser())
         if args.cmd == "export":
             return _export(conn, Path(args.dest).expanduser())
-        if args.cmd == "moo":
-            return _moo()
         return _tui(conn, cfg)
     finally:
         conn.close()
@@ -118,12 +114,6 @@ def _export(conn, dest: Path) -> int:
     for path in written:
         print(f"{path.name:16} {counts[path.stem]:>7} rows", file=sys.stderr)
     print(written[0].parent if written else dest)
-    return 0
-
-
-def _moo() -> int:
-    """🐄"""
-    print("moo")
     return 0
 
 

@@ -30,7 +30,7 @@ from daybook.fmt import human_date
 from daybook.markup import to_markdown
 from daybook.tui.common import PanelTab
 
-_EMPTY = "no summary yet — press r  🐄"
+_EMPTY = "no summary yet — press r"
 
 
 class SummaryTab(PanelTab):

@@ -6,7 +6,7 @@ spend — plus one short daily read of all of it, written by Claude.
 One command. One process. No server, no browser, no ports.
 
 ```
- 🐄                                    daybook — Fri Aug 28
+ ⭘                                     daybook — Fri Aug 28
  1 Day  2 Body  3 Money
 ╸━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  TODAY   Fri Aug 28
