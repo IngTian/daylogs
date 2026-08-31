@@ -358,7 +358,7 @@ async def test_right_walks_forward_through_the_tabs(make_app):
         await pilot.press("right")
         await pilot.pause()
         second = app.scope
-    assert (first, second) == ("money", "summary")
+    assert (first, second) == ("money", "money"), "right from money is clamped at the end"
     assert focused == "money-table", f"arrowing into Money left focus on {focused!r}"
 
 
@@ -384,13 +384,14 @@ async def test_walking_stops_at_both_ends(make_app, db):
     from textual.widgets import DataTable
 
     from daybook.body import add_food
+    from daybook.money import add_expense
 
-    # The Body food table is filtered by the viewing date, so the clock is pinned:
-    # on an unpinned clock the table is empty, `down` moves nothing, and the cursor
-    # half of this test would be vacuous.
+    # Seed both body and money tables for cursor movement tests
     for i in range(3):
         add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
                  date="2026-08-27", at=1787000000 + i * 3600)
+        add_expense(db, amount=10.0 + i, description=f"expense{i}", category="restaurant",
+                    date="2026-08-27")
     app = make_app(now=lambda: NOW.replace(tzinfo=None))
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -532,11 +533,11 @@ async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db
         await pilot.press("tab")            # categories -> the expense list
         await pilot.pause()
         assert app.query_one("#money").view.pane == "expenses", "not on the expense list"
-        await pilot.press("right")
-        await pilot.pause()
-        forward = app.scope
         await pilot.press("left")
         await pilot.pause()
+        forward = app.scope
+        await pilot.press("right")
+        await pilot.pause()
         back = app.scope
-    assert forward == "summary", f"a wide table swallowed the arrow: stayed on {forward}"
+    assert forward == "body", f"a wide table swallowed the arrow: stayed on {forward}"
     assert back == "money", f"a wide table swallowed the arrow going back: {back}"

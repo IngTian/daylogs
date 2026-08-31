@@ -178,6 +178,7 @@ async def test_opening_a_prompt_shows_label_example_and_grammar(make_app):
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("h")
         await pilot.pause()
         title = str(app.prompt.border_title)
@@ -194,6 +195,7 @@ async def test_the_grammar_survives_typing_but_the_example_does_not(make_app, ty
     you still want halfway through a line."""
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.pause()
         before = str(app.prompt.border_subtitle)
@@ -209,6 +211,7 @@ async def test_the_grammar_survives_typing_but_the_example_does_not(make_app, ty
 async def test_each_prompt_shows_its_own_grammar_not_the_previous_one(make_app):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await pilot.pause()
         weigh = str(app.prompt.border_subtitle)
@@ -227,6 +230,7 @@ async def test_closing_the_prompt_clears_every_slot(make_app, db, type_into):
     the burn bar that kept the previous month's numbers."""
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2")
         await pilot.press("enter")
@@ -245,6 +249,7 @@ async def test_fixing_an_error_restores_the_grammar(make_app, db, type_into):
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "heavy")
         await pilot.press("enter")
@@ -337,6 +342,7 @@ async def test_repeated_tabs_cycle_an_ambiguous_prefix(make_app, type_into):
 async def test_tab_in_a_prompt_with_no_vocabulary_does_nothing(make_app, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("w")
         await type_into(pilot, "78.2 post")
         await pilot.press("tab")
