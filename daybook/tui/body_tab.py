@@ -206,7 +206,7 @@ class BodyTab(PanelTab):
         lines.append("")
         lines.append(f"  over {span.horizon}")
         if avg is None:
-            lines.append("    no food logged in this window")
+            lines.append("    (moo) no food logged in this window")
         else:
             lines.append(f"    avg in    {avg:>7,} kcal  ({len(logged)} days logged)")
             if bmr is not None:

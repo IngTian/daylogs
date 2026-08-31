@@ -61,3 +61,17 @@ def test_auto_colour_is_deterministic_and_in_palette():
 
 def test_slugs_works_with_no_config_at_all():
     assert "grocery" in slugs(None)
+
+
+def test_ui_signal_colors_are_palette_members():
+    """The GOOD/BAD/WARN constants in widgets.py and write/view in footer.py
+    must stay synchronized with PALETTE. They drifted to literals once; this
+    test stops it happening again."""
+    from daybook.tui.footer import _KIND_STYLE
+    from daybook.tui.widgets import BAD, GOOD, WARN
+
+    assert GOOD in PALETTE, f"GOOD {GOOD} not in PALETTE"
+    assert BAD in PALETTE, f"BAD {BAD} not in PALETTE"
+    assert WARN in PALETTE, f"WARN {WARN} not in PALETTE"
+    assert _KIND_STYLE["write"] in PALETTE, f"write {_KIND_STYLE['write']} not in PALETTE"
+    assert _KIND_STYLE["view"] in PALETTE, f"view {_KIND_STYLE['view']} not in PALETTE"

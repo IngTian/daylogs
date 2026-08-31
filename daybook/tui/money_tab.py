@@ -205,7 +205,7 @@ class MoneyTab(PanelTab):
             for line, c in zip(budget_lines, budgeted, strict=True)
         ]
         self.query_one("#budget-body", Static).update(
-            "\n".join(budget_lines) if budget_lines else "  no budget lines yet — press b"
+            "\n".join(budget_lines) if budget_lines else "  (moo) no budget lines yet — press b"
         )
 
         ranked = sorted(spent, key=lambda c: c.spent, reverse=True)

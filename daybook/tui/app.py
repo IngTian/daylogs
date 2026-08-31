@@ -120,6 +120,7 @@ class DaybookApp(App):
 
     def on_mount(self) -> None:
         self.sub_title = self.now().strftime("%a %b %d")
+        self.query_one(Header).icon = "🐄"
         self.refresh_tabs()
         self._active_tab().focus_default()
         self.refresh_footer()

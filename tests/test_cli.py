@@ -200,3 +200,12 @@ def test_export_reports_an_unusable_destination_without_a_traceback(tmp_path, ca
     assert "Traceback" not in cap.err, f"a traceback reached the user:\n{cap.err}"
     assert str(blocker) in cap.err, f"the failing path was not named: {cap.err!r}"
     assert cap.out == "", f"a failed export still printed a path: {cap.out!r}"
+
+
+# ── day moo ───────────────────────────────────────────────────────────────
+
+
+def test_moo_prints_moo_and_exits_zero(capsys):
+    """The one place where being silly costs nothing."""
+    assert main(["moo"]) == 0
+    assert capsys.readouterr().out.strip() == "moo"

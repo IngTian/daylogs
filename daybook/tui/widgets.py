@@ -21,9 +21,9 @@ _NO_SHARE = "—"
 # resolve to #ff0000 and #008000, which are respectively harsh and nearly
 # unreadable on this app's dark warm-earth background. These are the same three
 # hues already used for the restaurant, education and grocery categories.
-GOOD = "#79a888"
-BAD = "#c47864"
-WARN = "#d4a574"
+GOOD = "#63af7b"
+BAD = "#cc5131"
+WARN = "#dc9142"
 FAINT = "dim"
 
 

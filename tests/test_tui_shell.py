@@ -141,3 +141,14 @@ async def test_the_pane_labels_are_numbered_in_order(make_app):
         panes = tabs_widget.query(TabPane)
         labels = [str(tabs_widget.get_tab(p.id).label) for p in panes]
     assert labels == ["1 Day", "2 Body", "3 Money"]
+
+
+async def test_header_icon_is_a_cow(make_app):
+    """The icon sits top-left and adds personality without breaking layout."""
+    from textual.widgets import Header
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        header = app.query_one(Header)
+    assert header.icon == "🐄"
