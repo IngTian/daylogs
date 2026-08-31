@@ -191,7 +191,12 @@ async def test_tab_cycles_sub_panes(make_app):
 
 async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
     app = make_app()
-    today = dt.date.today().isoformat()
+    # `app.today()`, not `dt.date.today()`: the app's clock is pinned to
+    # cfg.timezone while `dt.date.today()` follows the process TZ. The two straddle
+    # midnight for part of every day, and then the seeded row falls outside the MTD
+    # span, the expense pane is empty, and `x` has no row to delete. Reproduce with
+    # `TZ=UTC pytest` any Toronto evening.
+    today = app.today()
     add_expense(
         db, amount=12.40, description="lunch", category="restaurant", date=today
     )
@@ -210,9 +215,9 @@ async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
 
 
 async def test_x_on_the_categories_pane_explains_itself(make_app, db):
-    today = dt.date.today().isoformat()
-    add_expense(db, amount=1.0, description="x", category="grocery", date=today)
     app = make_app()
+    today = app.today()          # the app's clock, not the process TZ — see above
+    add_expense(db, amount=1.0, description="x", category="grocery", date=today)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         await pilot.press("x")
