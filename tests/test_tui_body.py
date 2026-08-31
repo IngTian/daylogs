@@ -860,6 +860,7 @@ async def test_editing_a_food_with_escaped_at_preserves_timestamp(
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -988,6 +989,7 @@ async def test_the_rendered_footer_shows_and_then_clears_the_indicator(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("f")
         await type_into(pilot, "mystery stew")
         await pilot.press("enter")
@@ -1042,6 +1044,7 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
         await pilot.pause()
         table = app.query_one("#body-table", DataTable)
         table.focus()
@@ -1243,6 +1246,7 @@ async def test_no_three_second_toast_is_fired_for_a_photo_estimate(
     monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
         app.notify = lambda msg, **kw: toasts.append((msg, kw.get("timeout")))  # type: ignore[method-assign]
         await pilot.press("p")
         await started.wait()

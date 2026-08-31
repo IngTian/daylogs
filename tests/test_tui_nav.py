@@ -367,14 +367,14 @@ async def test_left_walks_back_through_the_tabs(make_app):
     async with app.run_test() as pilot:
         await pilot.press("3")
         await pilot.pause()
-        assert app.scope == "summary"
+        assert app.scope == "money"
         await pilot.press("left")
         await pilot.pause()
         first = app.scope
         await pilot.press("left")
         await pilot.pause()
         second = app.scope
-    assert (first, second) == ("money", "body")
+    assert (first, second) == ("body", "summary")
 
 
 async def test_walking_stops_at_both_ends(make_app, db):
