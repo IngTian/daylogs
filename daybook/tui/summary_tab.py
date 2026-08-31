@@ -93,8 +93,11 @@ class SummaryTab(PanelTab):
 
         pending, _ = money.pending_roll(conn, month=month)
         if s.total_budget <= 0:
-            # Name the key. A zero budget is true and useless.
-            lines.append(f"  budget          —   press r on Money ({pending} to roll)")
+            # Name the key that fixes it. A zero budget is true and useless.
+            if pending == 0:
+                lines.append("  budget          —   press b on Money")
+            else:
+                lines.append(f"  budget          —   press r on Money ({pending} to roll)")
         else:
             lines[0] = f"  spent   {s.total_spent:>10,.2f} of {s.total_budget:,.2f}"
             lines.append(f"  left    {s.remaining:>10,.2f}")

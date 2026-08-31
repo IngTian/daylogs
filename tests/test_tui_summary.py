@@ -350,9 +350,26 @@ async def test_the_money_panel_flags_an_overrun_with_the_glyph(make_app, db):
     assert "grocery" in panel
 
 
-async def test_the_money_panel_names_the_roll_key_when_no_budget_exists(make_app, db):
-    """"0.00 budget" is true, useless, and reads as stale data. The Money tab's
-    header already answers this by naming `r`; so does this."""
+async def test_the_money_panel_names_the_roll_key_when_recurring_items_exist(make_app, db):
+    """"0.00 budget" is true, useless, and reads as stale data. When recurring
+    items exist, name `r` which rolls them."""
+    from daybook.money import add_expense, upsert_recurring
+
+    upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
+    add_expense(db, amount=42.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "42.00" in panel
+    assert "press r" in panel, f"recurring exists but r not named: {panel!r}"
+    assert "1 to roll" in panel, f"count not shown: {panel!r}"
+    assert "0.00 of" not in panel, "an absent budget must not render as zero"
+
+
+async def test_the_money_panel_names_the_add_key_when_no_recurring_items_exist(make_app, db):
+    """When no recurring items exist, `r` does nothing — name `b` which adds a line."""
     from daybook.money import add_expense
 
     add_expense(db, amount=42.0, description="shop", category="grocery",
@@ -362,5 +379,5 @@ async def test_the_money_panel_names_the_roll_key_when_no_budget_exists(make_app
         await pilot.pause()
         panel = _panel(app, "money")
     assert "42.00" in panel
-    assert "press r" in panel, f"no budget and no prompt to fix it: {panel!r}"
-    assert "0.00 of" not in panel, "an absent budget must not render as zero"
+    assert "press b" in panel, f"no recurring and b not named: {panel!r}"
+    assert "press r" not in panel, f"no recurring but r named anyway: {panel!r}"
