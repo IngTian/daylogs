@@ -42,6 +42,7 @@ daybook/
   undo.py     in-memory ring buffer of row pre-images (deletes and edits)
   log.py      rotating file log under ~/.daybook/logs/
   tui/        app shell, footer prompt, three tabs, pure text widgets
+              tab order: Day · Body · Money; Day's scope id is still `summary`
     keymap.py   every key, as data — generates bindings, footer and help
     hints.py    every prompt's example and grammar, as data
     common.py   PanelTab: on_resize + panel_width, shared by the two big tabs
@@ -61,6 +62,11 @@ appended prose where it was convenient rather than editing the map.
   Never hand-write a key hint — that is how a footer starts describing keys that
   aren't bound. Tests enforce no duplicate `(key, scope)` and no tab key
   shadowing an app key.
+- **The digit keys are bound to named actions, not tab positions.** `Key("2", …,
+  "show_body", …)` calls `show_scope("body")`, so moving a pane without moving its
+  digit leaves a tab labelled 3 that `2` jumps to. `tuple(_TAB_OF)` carries the order
+  the arrow keys walk and a test asserts it matches the `TabPane` order — change all
+  three together or the test will tell you.
 - **Measured facts are encoded in `Key` flags; don't "simplify" them away — in
   either direction.** `priority=True` on `tab`/`shift+tab` because an ordinary App
   binding loses to the Screen's focus-next. `bind=False` on `enter` because a

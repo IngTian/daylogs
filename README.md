@@ -7,30 +7,23 @@ One command. One process. No server, no browser, no ports.
 
 ```
  ⭘                                     daybook — Fri Aug 28
- 1 Body  2 Money  3 Summary
+ 1 Day  2 Body  3 Money
 ╸━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- WEIGHT   71 kg   ▼ 0.2 vs 7d   ▼ 0.1 vs 30d   (last weighed Wed Aug 26)   ·  Jul 30 – Aug 28 2026
-╭────────────────────────────────────────────────╮╭────────────────────────────────────────────────╮
-│ TREND                                          ││ ENERGY                                         │
-│    71.5│⠀⠀⠀⡜⢆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ││   in          1,630 kcal                       │
-│        │⠀⠀⢠⠃⠀⠣⡀⠀⠀⠀⠀⠀⠀⠀⠀⢠⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ││   BMR      −  1,463                            │
-│        │⠀⠀⡎⠀⠀⠀⠑⡄⠀⠀⠀⠀⠀⠀⢠⠃⠱⡀⠀⠀⠀⠀⠀⠀⠀⠀⡸⠈⢢⠀⠀⠀⠀⠀⠀⠀⠀⠀ ││             ─────────                          │
-│        │⠀⢰⠁⠀⠀⠀⠀⠈⢆⠀⠀⠀⠀⢠⠃⠀⠀⠑⡄⠀⠀⠀⠀⠀⠀⢠⠃⠀⠀⠱⡀⠀⠀⠀⠀⠀⠀⠀ ││   net          +167                            │
-│        │⢀⠇⠀⠀⠀⠀⠀⠀⠀⠣⡀⠀⢀⠎⠀⠀⠀⠀⠘⢄⠀⠀⠀⠀⠀⡎⠀⠀⠀⠀⠘⢄⠀⠀⠀⠀⠀⠀ ││                                                │
-│        │⡸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠑⣄⠎⠀⠀⠀⠀⠀⠀⠈⢆⠀⠀⠀⢰⠁⠀⠀⠀⠀⠀⠈⢆⠀⠀⠀⠀⠀ ││   ████████████████████████████████████████     │
-│        │⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⡀⢀⠇⠀⠀⠀⠀⠀⠀⠀⠈⢆⠀⠀⠀⠀ ││   111% of maintenance                          │
-│      71│⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠱⡜⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢆⠀⠀⠀ ││                                                │
-│        └────────────────────────────────────── ││   over 1m                                      │
-│         Jul 30            Aug 13        Aug 28 ││     avg in      1,630 kcal  (1 days logged)    │
-╰────────────────────────────────────────────────╯│     avg net      +167                          │
-                                                  │     █                                          │
-                                                  ╰────────────────────────────────────────────────╯
- FOOD   Fri Aug 28   1,630 kcal in / 1,463 BMR → +167 net
-  time   description         kcal  src
-  08:05  yogurt and berries  320   lab
-  13:05  chicken salad       610   lab
- 1m
- w weigh · f food · p photo · h profile · x delete · u undo   + wider · ? keys   ↵ edit · q quit
+ TODAY   Fri Aug 28
+╭──────────────────────────────────────────────╮╭──────────────────────────────────────────────╮
+│ BODY                                         ││ MONEY                                        │
+│   weight      71.0 kg  ▼0.2 vs 7d           ││   spent      1,200.00 of 1,500.00            │
+│   in        1,600 / 1,450 BMR                ││   left         300.00                        │
+│   net         +150 kcal                      ││   burn           80% on day 28/31            │
+│   logged         2 meals                     ││                                              │
+╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
+ SUMMARY   Thu Aug 27   generated 06:10
+  Body: steady at 71 kg, down slightly over the week. Intake was 1,600 kcal
+  with a +150 net, comfortably above maintenance.
+
+  Money: spent 1,200 of 1,500 budget, tracking well for the month.
+
+ r regenerate · [ ] browse   t now · g go to   ↵ edit · q quit
 ```
 
 ## What it is, and what it isn't
@@ -94,7 +87,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 
 | Key | Does |
 |---|---|
-| `1` `2` `3` | Body / Money / Summary |
+| `1` `2` `3` | Day / Body / Money |
 | `←` `→` | previous / next tab — stops at the ends rather than wrapping |
 | `tab` `shift+tab` | next / previous sub-view *within* the tab (Body, Money) |
 | `[` `]` | previous / next period — day on Body, month on Money, report on Summary |
@@ -227,6 +220,11 @@ for the current single month, because burn-against-elapsed means nothing across 
 quarter; the bar says so when it's hidden.
 
 ### Panels
+
+**Day** shows BODY beside MONEY — today's weight and trend, intake against BMR,
+this month's spend against its budget and how far through the month you are — with
+the generated daily read scrolling underneath. The figures are always today's; the
+read is dated by the day it describes, which is why each half carries its own date.
 
 **Body** shows TREND (the braille chart) beside ENERGY — intake against BMR for
 the day, then the average and a sparkline over the horizon.
