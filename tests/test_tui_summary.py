@@ -381,3 +381,80 @@ async def test_the_money_panel_names_the_add_key_when_no_recurring_items_exist(m
     assert "42.00" in panel
     assert "press b" in panel, f"no recurring and b not named: {panel!r}"
     assert "press r" not in panel, f"no recurring but r named anyway: {panel!r}"
+
+
+async def test_the_two_headers_name_their_own_dates(make_app, db):
+    """The panels are today; the prose is the day it describes. Both said plainly."""
+    from textual.widgets import Static
+
+    from daybook.body import add_weight
+
+    add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
+    upsert_report(db, date="2026-08-29", content="yesterday's read")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        day = str(app.query_one("#day-head", Static).content)
+        summ = str(app.query_one("#summary-head", Static).content)
+    assert "Aug 30" in day, f"the TODAY header does not name today: {day!r}"
+    assert "Aug 29" in summ, f"the SUMMARY header does not name its report: {summ!r}"
+    assert "Aug 29" not in day and "Aug 30" not in summ, (
+        f"the headers have blurred the two dates: {day!r} / {summ!r}"
+    )
+
+
+async def test_browsing_reports_leaves_the_panels_alone(make_app, db):
+    """`[` moves the prose. The panels are "now" and do not travel."""
+    from textual.widgets import Static
+
+    from daybook.body import add_weight
+
+    add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
+    upsert_report(db, date="2026-08-29", content="newer")
+    upsert_report(db, date="2026-08-28", content="older")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        before = _panel(app, "body")
+        day_before = str(app.query_one("#day-head", Static).content)
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        summ = str(app.query_one("#summary-head", Static).content)
+        after = _panel(app, "body")
+        day_after = str(app.query_one("#day-head", Static).content)
+    assert "Aug 28" in summ, f"browsing did not move the prose: {summ!r}"
+    assert after == before, "browsing changed the panel values"
+    assert day_after == day_before, "browsing changed the TODAY header"
+
+
+async def test_generating_shows_on_the_summary_header_only(make_app, db):
+    import asyncio
+
+    from textual.widgets import Static
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
+        started.set()
+        await release.wait()
+        return "fresh"
+
+    upsert_report(db, date="2026-08-29", content="old")
+    app = make_app(runner_text=runner,
+                   now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        await pilot.press("r")
+        await started.wait()
+        await pilot.pause()
+        day = str(app.query_one("#day-head", Static).content)
+        summ = str(app.query_one("#summary-head", Static).content)
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        after = str(app.query_one("#summary-head", Static).content)
+    assert "generating" in summ.lower(), f"no progress on the summary header: {summ!r}"
+    assert "generating" not in day.lower(), (
+        f"the TODAY header claims to be generating, but the figures are not: {day!r}"
+    )
+    assert "generating" not in after.lower(), "the indicator outlived the run"
