@@ -315,3 +315,52 @@ async def test_the_body_panel_shows_net_against_bmr_when_the_profile_is_set(
         panel = _panel(app, "body")
     assert "BMR" in panel
     assert "net" in panel
+
+
+async def test_the_money_panel_shows_spend_burn_and_what_is_left(make_app, db):
+    from daybook.money import add_expense, upsert_budget
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=500.0, source="manual")
+    add_expense(db, amount=120.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "120.00" in panel
+    assert "500.00" in panel, f"the budget is not shown: {panel!r}"
+    assert "380.00" in panel, f"what is left is not shown: {panel!r}"
+    assert "30/31" in panel, f"the burn is not shown against elapsed days: {panel!r}"
+
+
+async def test_the_money_panel_flags_an_overrun_with_the_glyph(make_app, db):
+    """Colour is never the only signal in this app, so the glyph is asserted."""
+    from daybook.money import add_expense, upsert_budget
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=100.0, source="manual")
+    add_expense(db, amount=250.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "⚠" in panel, f"an overrun with no glyph: {panel!r}"
+    assert "grocery" in panel
+
+
+async def test_the_money_panel_names_the_roll_key_when_no_budget_exists(make_app, db):
+    """"0.00 budget" is true, useless, and reads as stale data. The Money tab's
+    header already answers this by naming `r`; so does this."""
+    from daybook.money import add_expense
+
+    add_expense(db, amount=42.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert "42.00" in panel
+    assert "press r" in panel, f"no budget and no prompt to fix it: {panel!r}"
+    assert "0.00 of" not in panel, "an absent budget must not render as zero"

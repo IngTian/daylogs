@@ -13,7 +13,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
-from daybook import body, summary
+from daybook import body, money, summary
 from daybook import horizon as hz
 from daybook.fmt import human_date
 from daybook.markup import to_markdown
@@ -80,6 +80,33 @@ class SummaryTab(PanelTab):
         lines.append(f"  logged    {meals:>7} meal{'' if meals == 1 else 's'}")
         return "\n".join(lines)
 
+    def _money_panel(self, conn, cfg, *, date: str) -> str:
+        """This month's spend against its budget. One summarize_month call.
+
+        The burn line only means something for a month in progress — 84% on day 27
+        of 31 is fine and the same number on day 12 is not — so it is omitted for a
+        past month rather than shown misleadingly.
+        """
+        month = date[:7]
+        s = money.summarize_month(conn, month=month, today=date, cfg=cfg)
+        lines: list[str] = [f"  spent   {s.total_spent:>10,.2f}"]
+
+        pending, _ = money.pending_roll(conn, month=month)
+        if s.total_budget <= 0:
+            # Name the key. A zero budget is true and useless.
+            lines.append(f"  budget          —   press r on Money ({pending} to roll)")
+        else:
+            lines[0] = f"  spent   {s.total_spent:>10,.2f} of {s.total_budget:,.2f}"
+            lines.append(f"  left    {s.remaining:>10,.2f}")
+            if month == self.app.today()[:7]:
+                pct = round(s.total_spent / s.total_budget * 100)
+                lines.append(f"  burn    {pct:>9}% on day {s.day_of_month}/{s.days_in_month}")
+
+        if s.over_budget:
+            names = ", ".join(c.category for c in s.over_budget[:2])
+            lines.append(f"  over      {names}  ⚠")
+        return "\n".join(lines)
+
     # ── rendering ────────────────────────────────────────────────────────
     def reload(self) -> None:
         conn = self.app.conn
@@ -87,6 +114,9 @@ class SummaryTab(PanelTab):
         self.query_one("#day-head", Static).update(f"TODAY   {human_date(today)}")
         self.query_one("#day-body-body", Static).update(
             self._body_panel(self.app.conn, self.app.cfg, date=today)
+        )
+        self.query_one("#day-money-body", Static).update(
+            self._money_panel(self.app.conn, self.app.cfg, date=today)
         )
         row = (
             summary.get_report(conn, self.viewing_date)
