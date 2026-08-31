@@ -24,3 +24,22 @@ def test_css_path_matches_the_file_that_exists():
     assert DaybookApp.CSS_PATH == "app.tcss"
     module_dir = Path(files("daybook.tui").joinpath("app.tcss").__fspath__()).parent
     assert (module_dir / DaybookApp.CSS_PATH).is_file()
+
+
+def test_the_declared_version_matches_the_package():
+    """`pyproject.toml` and `__version__` are two places carrying one fact.
+
+    Nothing forced them to agree, so a bump could touch one and leave the other —
+    and the symptom is `day --version` disagreeing with the wheel anyone installed,
+    which is the kind of thing nobody notices until it matters.
+    """
+    import pathlib
+    import tomllib
+
+    from daybook import __version__
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    declared = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    assert declared == __version__, (
+        f"pyproject says {declared}, daybook.__version__ says {__version__}"
+    )

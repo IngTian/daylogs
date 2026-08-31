@@ -33,8 +33,8 @@ _GLYPH = {
 # are distinguishable before you have read a single label. Same palette as the
 # good/bad signals rather than a second set of colours to learn.
 _KIND_STYLE = {
-    "write": "#7faab2",
-    "view": "#a08fb1",
+    "write": "#67acb9",
+    "view": "#9d81b8",
     "danger": BAD,
     "nav": FAINT,
 }

@@ -12,24 +12,25 @@ from dataclasses import dataclass
 
 FALLBACK_SLUG = "other"
 
-# Muted warm-earth palette, also used for the good/bad signals in the UI.
+# Vivid warm-earth palette, also used for the good/bad signals in the UI.
+# Each hue's HSV saturation multiplied by 1.55 and value by 1.04, clamped to 1.0.
 PALETTE: tuple[str, ...] = (
-    "#7c8db7",
-    "#a08fb1",
-    "#79a888",
-    "#d4a574",
-    "#c47864",
-    "#7faab2",
-    "#b89588",
-    "#8e9099",
-    "#94b380",
-    "#a39d96",
-    "#b07a8c",
-    "#9ba068",
-    "#c79a5e",
-    "#86a3a7",
-    "#a37b62",
-    "#7c958d",
+    "#5f7bbe",
+    "#9d81b8",
+    "#63af7b",
+    "#dc9142",
+    "#cc5131",
+    "#67acb9",
+    "#bf8772",
+    "#8d919f",
+    "#88ba68",
+    "#aaa095",
+    "#b7607d",
+    "#9ea64c",
+    "#cf8626",
+    "#78a7ae",
+    "#aa6941",
+    "#739b8e",
 )
 
 
@@ -41,15 +42,15 @@ class Category:
 
 
 BUILTIN: tuple[Category, ...] = (
-    Category("grocery", "Grocery", "#d4a574"),
-    Category("restaurant", "Restaurant", "#c47864"),
-    Category("transport", "Transport", "#7c8db7"),
-    Category("housing", "Housing", "#a08fb1"),
-    Category("utilities", "Utilities", "#8e9099"),
-    Category("subscriptions", "Subscriptions", "#7faab2"),
-    Category("entertainment", "Entertainment", "#b89588"),
-    Category("education", "Education", "#79a888"),
-    Category(FALLBACK_SLUG, "Other", "#a39d96"),
+    Category("grocery", "Grocery", "#dc9142"),
+    Category("restaurant", "Restaurant", "#cc5131"),
+    Category("transport", "Transport", "#5f7bbe"),
+    Category("housing", "Housing", "#9d81b8"),
+    Category("utilities", "Utilities", "#8d919f"),
+    Category("subscriptions", "Subscriptions", "#67acb9"),
+    Category("entertainment", "Entertainment", "#bf8772"),
+    Category("education", "Education", "#63af7b"),
+    Category(FALLBACK_SLUG, "Other", "#aaa095"),
 )
 
 
