@@ -1,31 +1,21 @@
 # daybook
 
-A terminal app for three things: what you weigh, what you eat, and what you
-spend — plus one short daily read of all of it, written by Claude.
+I only get real control of my weight and my spending when I type the numbers in
+myself — not when something syncs them for me, but when I deliberately type them.
+The typing is what makes me notice, and noticing is what changes the next
+decision. A number that arrives on its own gets read once and forgotten.
+
+So daybook has no bank integration and no health-app import, deliberately. The
+manual entry isn't friction waiting to be automated away; it is the mechanism.
+Everything here exists to make that daily typing fast enough that I keep doing
+it — a grammar that takes a whole entry on one line, and one keystroke per view.
+
+Three things, in a terminal: what you weigh, what you eat, and what you spend —
+plus one short daily read of all of it, written by Claude.
 
 One command. One process. No server, no browser, no ports.
 
-```
- ⭘                                     daybook — Fri Aug 28
- 1 Day  2 Body  3 Money
-╸━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- TODAY   Fri Aug 28
-╭──────────────────────────────────────────────╮╭──────────────────────────────────────────────╮
-│ BODY                                         ││ MONEY                                        │
-│   weight      71.0 kg  ▼0.2 vs 7d           ││   spent      1,200.00 of 1,500.00            │
-│   in        1,600 / 1,450 BMR                ││   left         300.00                        │
-│   net         +150 kcal                      ││   burn           80% on day 28/31            │
-│   logged         2 meals                     ││                                              │
-╰──────────────────────────────────────────────╯╰──────────────────────────────────────────────╯
- SUMMARY   Thu Aug 27   generated 06:10
-  Body: steady at 71 kg, down slightly over the week. Intake was 1,600 kcal
-  with a +150 net, comfortably above maintenance.
-
-  Money: spent 1,200 of 1,500 budget, tracking well for the month.
-
- Thu Aug 27
- r regenerate · u undo   ? keys   [ prev · ] next · t today · g go to date · q quit
-```
+![The Day tab: today's body and money figures above the generated daily read](https://raw.githubusercontent.com/IngTian/daybook/main/assets/day.png)
 
 ## What it is, and what it isn't
 
@@ -38,10 +28,21 @@ The design rule: **anything that doesn't survive daily use doesn't ship.**
 ## Install
 
 ```bash
-conda create -n daybook python=3.12
-conda activate daybook
-pip install -e '.[dev]'
+uv tool install git+https://github.com/IngTian/daybook
 ```
+
+or, equivalently, `pipx install git+https://github.com/IngTian/daybook`. Either
+one puts `day` on your `PATH` in its own isolated environment — no environment to
+activate, nothing added to whatever Python you use for other work. If you have
+neither tool, `uv` installs in one line:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Upgrade with `uv tool upgrade daybook-tui`, remove with `uv tool uninstall
+daybook-tui`. Working on daybook itself is a different setup — see
+[Development](#development).
 
 **Requirements.** Python 3.12+ and any terminal with truecolour. macOS and Linux;
 not tested on Windows.
@@ -64,16 +65,18 @@ day export ~/Drive/daybook     # one CSV per table, readable anywhere
 day --version
 ```
 
-To run `day` from any shell without activating the environment, symlink the
-console script somewhere on your `PATH`:
+`uv tool install` already puts `day` on your `PATH`, so there is no environment to
+activate. If you installed into an environment by hand instead, symlink the
+console script:
 
 ```bash
 ln -sf "$(command -v day)" ~/.local/bin/day
 ```
 
-`build_binary.sh` produces a standalone PyInstaller executable for a machine
-with no Python — but it starts in ~4,770 ms against ~60 ms for the symlink,
-because `--onefile` unpacks 15 MB on every launch. Prefer the symlink locally.
+`build_binary.sh` produces a standalone PyInstaller executable for a machine with
+no Python at all — but it starts in ~4,770 ms against ~60 ms for an installed
+console script, because `--onefile` unpacks 15 MB on every launch. Prefer a real
+install unless you genuinely have no Python.
 
 ### Keys
 
@@ -231,9 +234,13 @@ read is dated by the day it describes, which is why each half carries its own da
 **Body** shows TREND (the braille chart) beside ENERGY — intake against BMR for
 the day, then the average and a sparkline over the horizon.
 
+![The Body tab: the braille weight chart beside the day's energy balance](https://raw.githubusercontent.com/IngTian/daybook/main/assets/body.png)
+
 **Money** shows BUDGET vs SPENT beside WHERE IT WENT. The first scales each bar to
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
+
+![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daybook/main/assets/money.png)
 
 Ranked bars rather than pie charts, deliberately: a terminal has about eight
 distinguishable fill glyphs and there are nine categories, so a pie collides — and
@@ -354,12 +361,35 @@ It is an export, not an import; loading it back in is not supported.
 
 ## Development
 
+Working on daybook wants an editable install with the dev extras, which is a
+different thing from the isolated tool install above. Any environment manager
+does; this is conda because that's what I use:
+
+```bash
+conda create -n daybook python=3.12
+conda activate daybook
+pip install -e '.[dev]'
+```
+
 ```bash
 pytest
 ruff check .
 ```
 
 Runtime dependency: `textual`. Everything else is the standard library.
+
+The README's three screenshots are generated, not drawn:
+
+```bash
+python tools/screenshots.py       # rewrites assets/{day,body,money}.{svg,png}
+```
+
+Run it after anything that moves the layout and commit the result. The seed data
+is synthetic and the clock is pinned, so two runs produce byte-identical files —
+a diff means the UI actually changed. The previous hand-drawn ASCII had drifted
+out of alignment and had once advertised a key that was never bound; an
+illustration nobody can verify against the app is an illustration that lies
+eventually.
 
 Design notes:
 
