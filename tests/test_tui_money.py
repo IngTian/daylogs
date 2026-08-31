@@ -242,7 +242,11 @@ async def test_x_deletes_a_recurring_row(make_app, db, type_into):
 
 async def test_header_shows_spend_against_budget(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    # The month variant of the trap above: on a month's last day after 20:00 Toronto,
+    # `dt.date.today()` under `TZ=UTC` is already the 1st of the next month, so the
+    # budget and the expense land in a month the app is not showing and the header
+    # reads `spent 0.00`. Reproduce with `TZ=UTC pytest` on any month-end evening.
+    month = app.today()[:7]
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=500)
     add_expense(
         db, amount=412.0, description="shop", category="grocery", date=f"{month}-10"
@@ -258,7 +262,7 @@ async def test_header_shows_spend_against_budget(make_app, db):
 
 async def test_header_says_over_when_past_budget(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
         db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"
@@ -273,7 +277,7 @@ async def test_header_says_over_when_past_budget(make_app, db):
 
 async def test_burn_bar_shows_percentage_and_calendar_progress(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=100)
     add_expense(
         db, amount=50.0, description="shop", category="grocery", date=f"{month}-02"
@@ -290,7 +294,7 @@ async def test_burn_bar_shows_percentage_and_calendar_progress(make_app, db):
 
 async def test_over_budget_category_is_flagged_in_the_table(make_app, db):
     app = make_app()
-    month = dt.date.today().isoformat()[:7]
+    month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
         db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"
