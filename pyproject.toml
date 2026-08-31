@@ -3,7 +3,12 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "daybook"
+# The distribution is `daybook-tui`; the import package and the command stay
+# `daybook` and `day`. PyPI's `daybook` was taken in 2022 by an unrelated
+# reading-log CLI that has had no release since, and reclaiming a name under
+# PEP 541 is slow and rarely granted — so the published name carries a suffix
+# and nothing a user actually types does.
+name = "daybook-tui"
 version = "0.2.0"
 description = "A three-feature personal daybook: weight, food, expenses, and one daily summary."
 readme = "README.md"

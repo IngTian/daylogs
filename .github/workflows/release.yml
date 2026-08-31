@@ -1,0 +1,95 @@
+name: Release
+
+# Publishes `daybook-tui` to PyPI when a version tag is pushed:
+#
+#     git tag v0.2.0 && git push origin v0.2.0
+#
+# Authentication is PyPI Trusted Publishing (OIDC), so there is no API token in
+# the repository or in Actions secrets — nothing to leak or rotate. It needs a
+# one-time setup on PyPI: Publishing -> add a pending publisher with owner
+# `IngTian`, repository `daybook`, workflow `release.yml`, environment `pypi`.
+# Until that exists, the publish step fails and the build artifacts are still
+# attached to the GitHub release, so a tag is never wasted.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The tag is the release's identity, so a tag that disagrees with the
+      # version in the package would publish something misnamed. Fail here
+      # rather than on PyPI, where a filename cannot be taken back.
+      - name: tag matches the declared version
+        run: |
+          declared=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tagged="${GITHUB_REF_NAME#v}"
+          echo "tag=$tagged pyproject=$declared"
+          test "$tagged" = "$declared"
+
+      - run: pip install -q build
+      - run: python -m build --sdist --wheel --outdir dist
+
+      # Same guard the CI workflow runs: the stylesheet is loaded by path at
+      # runtime, so a wheel without it installs fine and starts up unstyled.
+      - name: wheel ships the stylesheet
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          if "daybook/tui/app.tcss" not in zipfile.ZipFile(wheel).namelist():
+              sys.exit(f"app.tcss missing from {wheel}")
+          print("app.tcss present in", wheel)
+          PY
+
+      - name: installed wheel runs
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install -q dist/*.whl
+          /tmp/smoke/bin/day --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: attach the artifacts to a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$REPO" --title "$GITHUB_REF_NAME" --generate-notes
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # the OIDC token trusted publishing exchanges for an upload
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
