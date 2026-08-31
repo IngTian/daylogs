@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from os.path import commonprefix
 
-from daybook import sigil
+from daylogs import sigil
 
 
 @dataclass(frozen=True)

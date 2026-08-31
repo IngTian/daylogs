@@ -39,7 +39,7 @@ Screen {
 /* Under 100 columns the two panels stack rather than share the width. Side by
    side they had ~40 columns each, which is not enough for a label, a bar and two
    amounts — the bars vanished and the figures truncated. See
-   DaybookApp.HORIZONTAL_BREAKPOINTS. */
+   DaylogsApp.HORIZONTAL_BREAKPOINTS. */
 .-narrow .panel-row {
     layout: vertical;
 }

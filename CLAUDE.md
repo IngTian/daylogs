@@ -1,11 +1,11 @@
-# daybook — Claude Code context
+# daylogs — Claude Code context
 
 A single-user terminal app for three things: weight, food, and expenses, plus
 one daily summary. Keeping it small is the point, not a side effect: every
 feature has to survive daily use, and every layer of complexity has to justify
 itself against a simpler version.
 
-## What daybook is not
+## What daylogs is not
 
 Say so plainly if a request drifts into any of these — they were all
 deliberately cut, and adding one back is a scope decision, not a detail:
@@ -21,8 +21,8 @@ deliberately cut, and adding one back is a scope decision, not a detail:
 ## Layout
 
 ```
-daybook/
-  config.py   tomllib config + update_config; DAYBOOK_HOME overrides the data root
+daylogs/
+  config.py   tomllib config + update_config; DAYLOGS_HOME overrides the data root
   db.py       connect + six-table schema (no schema-migration framework)
   categories.py  constant category tuple, extensible via config.toml
   sigil.py    tokeniser: `!` category, `@` time, `~` note, `=` kcal, `#` cycle
@@ -40,7 +40,7 @@ daybook/
   markup.py   legacy <num>/<warn> tags → markdown, for reports already stored
   fmt.py      hhmm / human_date — shared by the data and UI layers
   undo.py     in-memory ring buffer of row pre-images (deletes and edits)
-  log.py      rotating file log under ~/.daybook/logs/
+  log.py      rotating file log under ~/.daylogs/logs/
   tui/        app shell, footer prompt, three tabs, pure text widgets
               tab order: Day · Body · Money; Day's scope id is still `summary`
     keymap.py   every key, as data — generates bindings, footer and help
@@ -57,7 +57,7 @@ appended prose where it was convenient rather than editing the map.
 
 ## Invariants
 
-- **`daybook/tui/keymap.py` is the only place keys are declared.** The bindings,
+- **`daylogs/tui/keymap.py` is the only place keys are declared.** The bindings,
   the contextual footer, and the `?` overlay are all generated from `KEYMAP`.
   Never hand-write a key hint — that is how a footer starts describing keys that
   aren't bound. Tests enforce no duplicate `(key, scope)` and no tab key
@@ -150,10 +150,10 @@ appended prose where it was convenient rather than editing the map.
   few hundred expenses is 0.15 ms and a full tab reload is under 0.6 ms. If
   something feels slow, measure before touching queries — last time the entire
   cost turned out to be a UI animation.
-- **No business logic in `daybook/tui/`.** Tabs render and handle keys.
+- **No business logic in `daylogs/tui/`.** Tabs render and handle keys.
   Arithmetic belongs in `body.py` / `money.py` / `summary.py`, with tests
   there. A tab that grows a calculation is a bug worth rejecting.
-- **Every prompt declares a hint in `daybook/tui/hints.py`**, and a test greps the
+- **Every prompt declares a hint in `daylogs/tui/hints.py`**, and a test greps the
   `prompt.open("…")` call sites to fail when one doesn't. `profile` shipped with a
   working grammar and no way to discover it because the label *was* the placeholder,
   so it vanished on the first keystroke and there was nowhere to put an example. The
@@ -197,7 +197,7 @@ appended prose where it was convenient rather than editing the map.
 - **The app owns prompt-error policy.** Tabs let `ParseError`/`MoneyError`/
   `BodyError`/`PhotoError`/`ViewError` propagate; the app re-opens the prompt
   with the text intact. A tab that catches them discards what the user typed.
-- **`claude -p` runners are always injected.** `DaybookApp` takes
+- **`claude -p` runners are always injected.** `DaylogsApp` takes
   `runner_text` / `runner_json` / `runner_image`; services take `runner=`. No
   test may spawn a subprocess.
 - **Parsers stay pure.** `parse.py` takes `now` as an argument. No test result

@@ -1,4 +1,4 @@
-from daybook.undo import UndoStack
+from daylogs.undo import UndoStack
 
 
 def test_push_pop_is_lifo():

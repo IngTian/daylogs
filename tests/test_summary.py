@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from daybook.body import add_food, add_weight
-from daybook.config import Config
-from daybook.money import add_expense, upsert_budget
-from daybook.summary import (
+from daylogs.body import add_food, add_weight
+from daylogs.config import Config
+from daylogs.money import add_expense, upsert_budget
+from daylogs.summary import (
     SYSTEM_PROMPT,
     build_payload,
     generate,
@@ -194,7 +194,7 @@ async def test_generate_retries_once_then_succeeds(db, tmp_path):
     async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
         attempts["n"] += 1
         if attempts["n"] == 1:
-            from daybook.claude import ClaudeError
+            from daylogs.claude import ClaudeError
 
             raise ClaudeError("transient")
         return "ok"
@@ -204,7 +204,7 @@ async def test_generate_retries_once_then_succeeds(db, tmp_path):
 
 
 async def test_generate_raises_after_exhausting_retries_and_writes_nothing(db, tmp_path):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def runner(system_prompt, user_prompt, *, timeout_sec, model=None):
         raise ClaudeError("down")
@@ -223,7 +223,7 @@ async def test_generate_rejects_empty_output(db, tmp_path):
 
 
 async def test_generate_does_not_clobber_an_existing_report_on_failure(db, tmp_path):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     upsert_report(db, date="2026-08-26", content="the good one")
 

@@ -17,8 +17,8 @@ import logging
 import sqlite3
 import time
 
-from daybook import body, money
-from daybook.fmt import hhmm
+from daylogs import body, money
+from daylogs.fmt import hhmm
 
 log = logging.getLogger(__name__)
 

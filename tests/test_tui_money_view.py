@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from helpers import go_money
 
-from daybook.money import add_expense, upsert_budget
+from daylogs.money import add_expense, upsert_budget
 
 TZ = ZoneInfo("America/Toronto")
 NOW = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)

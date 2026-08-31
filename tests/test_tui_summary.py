@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 # instead. Aliasing the shared helper keeps one definition of where tab 1 is.
 from helpers import go_day as go_summary
 
-from daybook.summary import get_report, target_date, upsert_report
+from daylogs.summary import get_report, target_date, upsert_report
 
 TZ = ZoneInfo("America/Toronto")
 MORNING = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)
@@ -56,7 +56,7 @@ async def test_g_generates_and_persists(make_app, db):
 
 
 async def test_generation_failure_surfaces_and_persists_nothing(make_app, db):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def runner(*a, **k):
         raise ClaudeError("down")
@@ -191,7 +191,7 @@ async def test_autorun_skipped_when_a_report_already_exists(make_app, db):
 
 
 async def test_autorun_failure_does_not_break_the_app(make_app, db):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def runner(*a, **k):
         raise ClaudeError("offline")
@@ -258,7 +258,7 @@ def _panel(app, which):
 
 
 async def test_the_body_panel_shows_weight_energy_and_meals(make_app, db):
-    from daybook.body import add_food, add_weight
+    from daylogs.body import add_food, add_weight
 
     add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
     add_weight(db, kg=71.5, date="2026-08-24", at=1787400000, note="")
@@ -294,7 +294,7 @@ async def test_the_body_panel_names_the_key_when_there_is_no_profile(make_app, d
     passes this assertion with a complete profile too — covering nothing it names.
     With a weight logged, the absent profile is the only remaining cause.
     """
-    from daybook.body import add_food, add_weight
+    from daylogs.body import add_food, add_weight
 
     add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
     add_food(db, description="eggs", kcal=400, source="labeled",
@@ -310,7 +310,7 @@ async def test_the_body_panel_names_the_key_when_there_is_no_profile(make_app, d
 async def test_the_body_panel_shows_net_against_bmr_when_the_profile_is_set(
     make_app, db, make_cfg
 ):
-    from daybook.body import add_food, add_weight
+    from daylogs.body import add_food, add_weight
 
     add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
     add_food(db, description="eggs", kcal=2000, source="labeled",
@@ -325,7 +325,7 @@ async def test_the_body_panel_shows_net_against_bmr_when_the_profile_is_set(
 
 
 async def test_the_money_panel_shows_spend_burn_and_what_is_left(make_app, db):
-    from daybook.money import add_expense, upsert_budget
+    from daylogs.money import add_expense, upsert_budget
 
     upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
                   amount=500.0, source="manual")
@@ -343,7 +343,7 @@ async def test_the_money_panel_shows_spend_burn_and_what_is_left(make_app, db):
 
 async def test_the_money_panel_flags_an_overrun_with_the_glyph(make_app, db):
     """Colour is never the only signal in this app, so the glyph is asserted."""
-    from daybook.money import add_expense, upsert_budget
+    from daylogs.money import add_expense, upsert_budget
 
     upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
                   amount=100.0, source="manual")
@@ -360,7 +360,7 @@ async def test_the_money_panel_flags_an_overrun_with_the_glyph(make_app, db):
 async def test_the_money_panel_names_the_roll_key_when_recurring_items_exist(make_app, db):
     """"0.00 budget" is true, useless, and reads as stale data. When recurring
     items exist, name `r` which rolls them."""
-    from daybook.money import add_expense, upsert_recurring
+    from daylogs.money import add_expense, upsert_recurring
 
     upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")
     add_expense(db, amount=42.0, description="shop", category="grocery",
@@ -377,7 +377,7 @@ async def test_the_money_panel_names_the_roll_key_when_recurring_items_exist(mak
 
 async def test_the_money_panel_names_the_add_key_when_no_recurring_items_exist(make_app, db):
     """When no recurring items exist, `r` does nothing — name `b` which adds a line."""
-    from daybook.money import add_expense
+    from daylogs.money import add_expense
 
     add_expense(db, amount=42.0, description="shop", category="grocery",
                 date="2026-08-10")
@@ -394,7 +394,7 @@ async def test_the_two_headers_name_their_own_dates(make_app, db):
     """The panels are today; the prose is the day it describes. Both said plainly."""
     from textual.widgets import Static
 
-    from daybook.body import add_weight
+    from daylogs.body import add_weight
 
     add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
     upsert_report(db, date="2026-08-29", content="yesterday's read")
@@ -414,7 +414,7 @@ async def test_browsing_reports_leaves_the_panels_alone(make_app, db):
     """`[` moves the prose. The panels are "now" and do not travel."""
     from textual.widgets import Static
 
-    from daybook.body import add_weight
+    from daylogs.body import add_weight
 
     add_weight(db, kg=71.0, date="2026-08-30", at=1788000000, note="")
     upsert_report(db, date="2026-08-29", content="newer")
@@ -473,8 +473,8 @@ async def test_generating_shows_on_the_summary_header_only(make_app, db):
 
 async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
     """The app declares support down to 80 columns, where the two panels stack."""
-    from daybook.body import add_weight
-    from daybook.money import add_expense, upsert_recurring
+    from daylogs.body import add_weight
+    from daylogs.money import add_expense, upsert_recurring
 
     add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
     upsert_recurring(db, name="Internet", cost=50.0, cycle="monthly", category="grocery")

@@ -1,4 +1,4 @@
-from daybook.markup import to_markdown
+from daylogs.markup import to_markdown
 
 
 def test_num_becomes_bold():
@@ -33,7 +33,7 @@ def test_headings_are_preserved_for_the_markdown_widget():
 
 
 def test_unknown_tags_are_left_alone():
-    assert "<repo>" in to_markdown("<repo>daybook</repo>")
+    assert "<repo>" in to_markdown("<repo>daylogs</repo>")
 
 
 def test_unmatched_tag_does_not_crash():

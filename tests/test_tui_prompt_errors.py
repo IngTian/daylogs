@@ -1,6 +1,6 @@
 from helpers import all_expenses, go_body
 
-from daybook.body import list_weight
+from daylogs.body import list_weight
 
 
 async def test_bad_weight_keeps_the_prompt_open_with_the_text(make_app, db, type_into):
@@ -174,7 +174,7 @@ async def test_a_handler_that_chains_to_another_prompt_is_not_stomped(make_app, 
 async def test_opening_a_prompt_shows_label_example_and_grammar(make_app):
     """The label used to *be* the placeholder, so it vanished on the first keystroke
     and there was never anywhere to put an example."""
-    from daybook.tui import hints
+    from daylogs.tui import hints
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
@@ -245,7 +245,7 @@ async def test_closing_the_prompt_clears_every_slot(make_app, db, type_into):
 
 
 async def test_fixing_an_error_restores_the_grammar(make_app, db, type_into):
-    from daybook.tui import hints
+    from daylogs.tui import hints
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
@@ -307,7 +307,7 @@ async def test_the_border_shows_candidates_while_in_a_sigil_token(make_app, type
 
 
 async def test_the_border_returns_to_the_grammar_outside_a_sigil_token(make_app, type_into):
-    from daybook.tui import hints
+    from daylogs.tui import hints
 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:

@@ -1,8 +1,8 @@
 from helpers import go_day
 from textual.content import Content
 
-from daybook.tui import keymap as km
-from daybook.tui.footer import glyph, render_keys
+from daylogs.tui import keymap as km
+from daylogs.tui.footer import glyph, render_keys
 
 
 def plain(markup: str) -> str:
@@ -238,7 +238,7 @@ def test_delete_and_undo_sit_with_the_action_verbs_not_after_quit():
 
 
 def test_keys_are_colour_coded_by_kind():
-    from daybook.tui.footer import _KIND_STYLE
+    from daylogs.tui.footer import _KIND_STYLE
 
     text = render_keys("money", width=400)
     assert _KIND_STYLE["write"] in text

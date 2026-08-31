@@ -9,21 +9,21 @@ test of its own.
 from importlib.resources import files
 from pathlib import Path
 
-from daybook.tui.app import DaybookApp
+from daylogs.tui.app import DaylogsApp
 
 
 def test_stylesheet_ships_as_package_data():
-    css = files("daybook.tui").joinpath("app.tcss")
-    assert css.is_file(), "app.tcss must live inside the daybook.tui package"
+    css = files("daylogs.tui").joinpath("app.tcss")
+    assert css.is_file(), "app.tcss must live inside the daylogs.tui package"
 
 
 def test_css_path_matches_the_file_that_exists():
     """CSS_PATH is resolved relative to app.py. If either the constant or the
     filename is renamed without the other, the app starts unstyled rather than
     failing loudly — so assert they agree."""
-    assert DaybookApp.CSS_PATH == "app.tcss"
-    module_dir = Path(files("daybook.tui").joinpath("app.tcss").__fspath__()).parent
-    assert (module_dir / DaybookApp.CSS_PATH).is_file()
+    assert DaylogsApp.CSS_PATH == "app.tcss"
+    module_dir = Path(files("daylogs.tui").joinpath("app.tcss").__fspath__()).parent
+    assert (module_dir / DaylogsApp.CSS_PATH).is_file()
 
 
 def test_the_declared_version_matches_the_package():
@@ -36,10 +36,10 @@ def test_the_declared_version_matches_the_package():
     import pathlib
     import tomllib
 
-    from daybook import __version__
+    from daylogs import __version__
 
     root = pathlib.Path(__file__).resolve().parents[1]
     declared = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
     assert declared == __version__, (
-        f"pyproject says {declared}, daybook.__version__ says {__version__}"
+        f"pyproject says {declared}, daylogs.__version__ says {__version__}"
     )

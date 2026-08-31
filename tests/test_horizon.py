@@ -2,8 +2,8 @@ import datetime as dt
 
 import pytest
 
-from daybook import horizon as hz
-from daybook.horizon import (
+from daylogs import horizon as hz
+from daylogs.horizon import (
     DEFAULT,
     HORIZONS,
     HorizonError,

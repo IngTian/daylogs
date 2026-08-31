@@ -1,7 +1,7 @@
 import pytest
 
-from daybook.horizon import HORIZONS
-from daybook.moneyview import SORT_FIELDS, MoneyView, ViewError
+from daylogs.horizon import HORIZONS
+from daylogs.moneyview import SORT_FIELDS, MoneyView, ViewError
 
 
 def V(**kw):

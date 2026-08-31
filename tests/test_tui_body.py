@@ -1,7 +1,7 @@
 from helpers import go_body
 
-from daybook.body import add_food, add_weight, list_food, list_weight
-from daybook.estimate import Estimate
+from daylogs.body import add_food, add_weight, list_food, list_weight
+from daylogs.estimate import Estimate
 
 
 async def test_w_logs_a_weight(make_app, db, type_into):
@@ -68,7 +68,7 @@ async def test_f_without_calories_estimates_then_logs_as_estimated(
         assert kw["description"] == "chicken caesar salad"
         return Estimate(description="chicken caesar salad", kcal=610)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", fake_from_text)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", fake_from_text)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -93,7 +93,7 @@ async def test_an_estimate_can_be_corrected_before_accepting(
     async def fake_from_text(**kw):
         return Estimate(description="salad", kcal=610)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", fake_from_text)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", fake_from_text)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -117,12 +117,12 @@ async def test_an_estimate_can_be_corrected_before_accepting(
 async def test_estimate_failure_surfaces_and_logs_nothing(
     make_app, db, type_into, monkeypatch
 ):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def boom(**kw):
         raise ClaudeError("no claude")
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", boom)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", boom)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -144,13 +144,13 @@ async def test_p_uses_the_inbox_when_the_clipboard_is_empty(
     img = inbox / "meal.jpg"
     img.write_bytes(b"\xff\xd8\xff")
 
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     async def fake_from_image(**kw):
         assert "meal.jpg" in str(kw["image_path"])
         return Estimate(description="ribeye + eggs", kcal=910)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", fake_from_image)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", fake_from_image)
 
     app = make_app()
     async with app.run_test() as pilot:
@@ -170,19 +170,19 @@ async def test_p_uses_the_inbox_when_the_clipboard_is_empty(
 async def test_a_failed_photo_estimate_leaves_the_inbox_file_pending(
     make_app, db, tmp_path, monkeypatch
 ):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     img = inbox / "meal.jpg"
     img.write_bytes(b"\xff\xd8\xff")
 
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     async def boom(**kw):
         raise ClaudeError("down")
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", boom)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", boom)
 
     app = make_app()
     async with app.run_test() as pilot:
@@ -201,14 +201,14 @@ async def test_p_prefers_the_clipboard_over_the_inbox(make_app, db, tmp_path, mo
     clip = tmp_path / "clip.png"
     clip.write_bytes(b"\x89PNG")
 
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: clip)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: clip)
     seen = {}
 
     async def fake_from_image(**kw):
         seen["path"] = str(kw["image_path"])
         return Estimate(description="clip meal", kcal=100)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", fake_from_image)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", fake_from_image)
 
     app = make_app()
     async with app.run_test() as pilot:
@@ -221,7 +221,7 @@ async def test_p_prefers_the_clipboard_over_the_inbox(make_app, db, tmp_path, mo
 
 
 async def test_p_with_nothing_available_opens_the_path_prompt(make_app, db, monkeypatch):
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -384,7 +384,7 @@ async def test_food_header_shows_net_with_a_profile(make_app, make_cfg, db):
 
 
 async def test_photo_path_prompt_rejects_a_non_image(make_app, tmp_path, type_into, monkeypatch):
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
     bad = tmp_path / "notes.txt"
     bad.write_text("x")
     app = make_app()
@@ -514,11 +514,11 @@ async def test_a_bad_profile_line_keeps_the_text_and_writes_nothing(make_app, ty
 
 
 async def test_weight_deltas_are_coloured_by_direction(make_app, db):
-    """Down is good — an assumption, since daybook stores no goal weight. The arrow
+    """Down is good — an assumption, since daylogs stores no goal weight. The arrow
     carries the direction either way, so colour is emphasis, not the only signal."""
     import datetime as dt
 
-    from daybook.tui.widgets import BAD, GOOD
+    from daylogs.tui.widgets import BAD, GOOD
 
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     add_weight(db, kg=82.0, date="2026-08-21", at=1)
@@ -932,7 +932,7 @@ def _footer(app) -> str:
     by App.refresh_footer(), so asserting on the method passes while the screen
     stays silent. That is exactly how the first version of this shipped half-dead.
     """
-    from daybook.tui.footer import KeyFooter
+    from daylogs.tui.footer import KeyFooter
 
     return str(app.query_one(KeyFooter).render())
 
@@ -945,7 +945,7 @@ async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
     async def gated_from_text(**kw):
         return await runner(**kw)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated_from_text)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", gated_from_text)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -968,7 +968,7 @@ async def test_the_footer_state_row_shows_estimating_while_in_flight(
     make_app, db, type_into, monkeypatch
 ):
     runner, started, release = _gate()
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", runner)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", runner)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1006,7 +1006,7 @@ async def test_the_rendered_footer_shows_and_then_clears_the_indicator(
         await release.wait()
         return Estimate(description="gated", kcal=500)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", gated)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
         await go_body(pilot, app)
@@ -1051,7 +1051,7 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     started, release = asyncio.Event(), asyncio.Event()
 
@@ -1060,7 +1060,7 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
         await release.wait()
         return Estimate(description="ribeye", kcal=910)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
@@ -1085,12 +1085,12 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
 async def test_the_indicator_clears_when_the_estimate_fails(
     make_app, db, type_into, monkeypatch
 ):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def boom(**kw):
         raise ClaudeError("no claude")
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", boom)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", boom)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1109,12 +1109,12 @@ async def test_the_indicator_clears_when_the_estimate_times_out(
     """A timeout reaches the tab as ClaudeError from claude._run's wait_for, so it
     is the same exit as a failure — asserted separately because the issue names
     timeout as its own case."""
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def timed_out(**kw):
         raise ClaudeError("claude -p (json) timed out after 60s")
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", timed_out)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", timed_out)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1151,7 +1151,7 @@ async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicato
         await release_second.wait()
         return Estimate(description="second", kcal=400)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", two_stage)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", two_stage)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1185,7 +1185,7 @@ async def test_the_photo_estimate_shows_the_same_indicator(
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     started, release = asyncio.Event(), asyncio.Event()
 
@@ -1194,7 +1194,7 @@ async def test_the_photo_estimate_shows_the_same_indicator(
         await release.wait()
         return Estimate(description="ribeye", kcal=910)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1225,7 +1225,7 @@ async def test_no_three_second_toast_is_fired_for_an_estimate(
         await release.wait()
         return Estimate(description="x", kcal=1)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", gated)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1253,7 +1253,7 @@ async def test_no_three_second_toast_is_fired_for_a_photo_estimate(
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     started, release = asyncio.Event(), asyncio.Event()
     toasts = []
@@ -1263,7 +1263,7 @@ async def test_no_three_second_toast_is_fired_for_a_photo_estimate(
         await release.wait()
         return Estimate(description="ribeye", kcal=910)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
         await go_body(pilot, app)
@@ -1304,7 +1304,7 @@ async def test_only_one_estimate_runs_at_a_time(
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     async def image_call(**kw):
         nonlocal live, peak
@@ -1327,8 +1327,8 @@ async def test_only_one_estimate_runs_at_a_time(
         finally:
             live -= 1
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", image_call)
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_text", text_call)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", image_call)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", text_call)
 
     app = make_app()
     async with app.run_test() as pilot:
@@ -1373,13 +1373,13 @@ async def test_escaping_a_photo_confirm_does_not_let_the_next_meal_eat_the_photo
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
     monkeypatch.setattr(
-        "daybook.tui.body_tab.estimate.from_image",
+        "daylogs.tui.body_tab.estimate.from_image",
         lambda **kw: _immediate(Estimate(description="ribeye", kcal=910)),
     )
     monkeypatch.setattr(
-        "daybook.tui.body_tab.estimate.from_text",
+        "daylogs.tui.body_tab.estimate.from_text",
         lambda **kw: _immediate(Estimate(description="side salad", kcal=120)),
     )
 
@@ -1427,14 +1427,14 @@ async def test_a_superseded_photo_estimate_does_not_let_the_next_meal_eat_the_ph
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
-    monkeypatch.setattr("daybook.tui.body_tab.photo.clipboard_image", lambda d: None)
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
     async def never(**kw):
         await asyncio.sleep(3600)
 
-    monkeypatch.setattr("daybook.tui.body_tab.estimate.from_image", never)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", never)
     monkeypatch.setattr(
-        "daybook.tui.body_tab.estimate.from_text",
+        "daylogs.tui.body_tab.estimate.from_text",
         lambda **kw: _immediate(Estimate(description="side salad", kcal=120)),
     )
 

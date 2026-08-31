@@ -1,8 +1,8 @@
-"""Typed config loaded from ~/Documents/daybook/config.toml.
+"""Typed config loaded from ~/Documents/daylogs/config.toml.
 
 Every key has a default, so an absent file is a supported state — a fresh
 install runs with no configuration at all. The data root is overridable with
-DAYBOOK_HOME, which is how the tests isolate.
+DAYLOGS_HOME, which is how the tests isolate.
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ class Config:
 
 
 def default_root() -> Path:
-    env = os.environ.get("DAYBOOK_HOME")
+    env = os.environ.get("DAYLOGS_HOME")
     if env:
         return Path(env).expanduser()
-    return Path.home() / "Documents" / "daybook"
+    return Path.home() / "Documents" / "daylogs"
 
 
 def load_config(root: Path | None = None) -> Config:
@@ -59,7 +59,7 @@ def load_config(root: Path | None = None) -> Config:
 
     return Config(
         root=root,
-        db_path=path_of("db_path", "daybook.db"),
+        db_path=path_of("db_path", "daylogs.db"),
         inbox_dir=path_of("inbox_dir", "inbox"),
         memory_path=path_of("memory_path", "memory.md"),
         timezone=str(raw.get("timezone") or _DEFAULT_TZ),

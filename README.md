@@ -1,11 +1,11 @@
-# daybook
+# daylogs
 
 I only get real control of my weight and my spending when I type the numbers in
 myself — not when something syncs them for me, but when I deliberately type them.
 The typing is what makes me notice, and noticing is what changes the next
 decision. A number that arrives on its own gets read once and forgotten.
 
-So daybook has no bank integration and no health-app import, deliberately. The
+So daylogs has no bank integration and no health-app import, deliberately. The
 manual entry isn't friction waiting to be automated away; it is the mechanism.
 Everything here exists to make that daily typing fast enough that I keep doing
 it — a grammar that takes a whole entry on one line, and one keystroke per view.
@@ -15,7 +15,7 @@ plus one short daily read of all of it, written by Claude.
 
 One command. One process. No server, no browser, no ports.
 
-![The Day tab: today's body and money figures above the generated daily read](https://raw.githubusercontent.com/IngTian/daybook/main/assets/day.png)
+![The Day tab: today's body and money figures above the generated daily read](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/day.png)
 
 ## What it is, and what it isn't
 
@@ -28,10 +28,10 @@ The design rule: **anything that doesn't survive daily use doesn't ship.**
 ## Install
 
 ```bash
-uv tool install git+https://github.com/IngTian/daybook
+uv tool install git+https://github.com/IngTian/daylogs
 ```
 
-or, equivalently, `pipx install git+https://github.com/IngTian/daybook`. Either
+or, equivalently, `pipx install git+https://github.com/IngTian/daylogs`. Either
 one puts `day` on your `PATH` in its own isolated environment — no environment to
 activate, nothing added to whatever Python you use for other work. If you have
 neither tool, `uv` installs in one line:
@@ -40,8 +40,8 @@ neither tool, `uv` installs in one line:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Upgrade with `uv tool upgrade daybook-tui`, remove with `uv tool uninstall
-daybook-tui`. Working on daybook itself is a different setup — see
+Upgrade with `uv tool upgrade daylogs`, remove with `uv tool uninstall
+daylogs`. Working on daylogs itself is a different setup — see
 [Development](#development).
 
 **Requirements.** Python 3.12+ and any terminal with truecolour. macOS and Linux;
@@ -60,8 +60,8 @@ only. The inbox folder and a pasted file path work anywhere.
 day                            # the TUI
 day summary                    # generate yesterday's summary, print to stdout
 day summary --date 2026-08-20  # a specific day
-day backup ~/Drive/daybook     # consistent DB copy (cron-friendly)
-day export ~/Drive/daybook     # one CSV per table, readable anywhere
+day backup ~/Drive/daylogs     # consistent DB copy (cron-friendly)
+day export ~/Drive/daylogs     # one CSV per table, readable anywhere
 day --version
 ```
 
@@ -234,13 +234,13 @@ read is dated by the day it describes, which is why each half carries its own da
 **Body** shows TREND (the braille chart) beside ENERGY — intake against BMR for
 the day, then the average and a sparkline over the horizon.
 
-![The Body tab: the braille weight chart beside the day's energy balance](https://raw.githubusercontent.com/IngTian/daybook/main/assets/body.png)
+![The Body tab: the braille weight chart beside the day's energy balance](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/body.png)
 
 **Money** shows BUDGET vs SPENT beside WHERE IT WENT. The first scales each bar to
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
 
-![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daybook/main/assets/money.png)
+![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/money.png)
 
 Ranked bars rather than pie charts, deliberately: a terminal has about eight
 distinguishable fill glyphs and there are nine categories, so a pie collides — and
@@ -287,7 +287,7 @@ Everywhere: `esc` cancels, `↑` / `↓` walk that prompt's history.
 
 ## Configuration
 
-Optional. `~/Documents/daybook/config.toml`; every key has a default.
+Optional. `~/Documents/daylogs/config.toml`; every key has a default.
 
 ```toml
 timezone             = "America/Toronto"
@@ -300,7 +300,7 @@ summary_timeout_sec  = 120
 estimate_timeout_sec = 60
 
 # Paths. Relative values resolve against the data root above.
-db_path              = "daybook.db"
+db_path              = "daylogs.db"
 inbox_dir            = "inbox"      # phone photos land here
 memory_path          = "memory.md"  # free text passed to the daily summary
 
@@ -325,7 +325,7 @@ Three ways in, tried in that order when you press `p`:
 
 1. **Clipboard** — screenshot or Continuity Camera, then `p`.
 2. **Inbox** — on the phone: Photos → Share → Save to Files →
-   `daybook/inbox`. The Body tab shows a pending count; `p` takes the oldest
+   `daylogs/inbox`. The Body tab shows a pending count; `p` takes the oldest
    and moves it to `inbox/processed/` once the row is written. Shoot at lunch,
    log at night.
 3. **Path** — paste or drag a file into the prompt.
@@ -334,26 +334,31 @@ A failed estimate leaves the file pending rather than silently consuming it.
 
 ## Data
 
-SQLite, six tables, at `~/Documents/daybook/daybook.db`. Logs at
-`~/.daybook/logs/`. Override the data root with `DAYBOOK_HOME`.
+SQLite, six tables, at `~/Documents/daylogs/daylogs.db`. Logs at
+`~/.daylogs/logs/`. Override the data root with `DAYLOGS_HOME`.
+
+This project was called **daybook** until 0.2.0, and the data root moved with the
+rename. If a `~/Documents/daybook/` is still there, `day` refuses to start and
+prints the two `mv` commands that move it — rather than quietly opening a new,
+empty database beside your old one.
 
 The connection runs `PRAGMA journal_mode=DELETE` on purpose. WAL's `-wal` and
 `-shm` sidecars can sync independently of the main file under iCloud Drive and
 corrupt the database on the receiving device; rollback-journal keeps SQLite to
-one file. daybook is read-heavy, so the write cost is noise.
+one file. daylogs is read-heavy, so the write cost is noise.
 
 **Back it up.** A synced folder is not a backup: it replicates a deletion or a
 corruption as faithfully as it replicates a write. `day backup <dir>` writes a
 consistent copy via `VACUUM INTO`; point it somewhere else you own and run it
 from cron.
 
-**And get it out.** A backup only daybook can open is a weaker promise than a file
+**And get it out.** A backup only daylogs can open is a weaker promise than a file
 anything can read, so `day export <dir>` writes one CSV per table into a dated
 subdirectory — `weight`, `food`, `expense`, `recurring`, `budget`, `report`, with
 the schema's own column names as headers. The table list comes from the database
 rather than a hand-kept list, so nothing is silently left out. It prints the
 directory on stdout and per-table row counts on stderr, so `cd "$(day export
-~/Drive/daybook)"` works and cron logs stay readable.
+~/Drive/daylogs)"` works and cron logs stay readable.
 
 CSV, because every table is flat and "open it in a spreadsheet" is the point. The
 one cost: CSV cannot tell an empty note from an absent one — both come out blank.
@@ -361,13 +366,13 @@ It is an export, not an import; loading it back in is not supported.
 
 ## Development
 
-Working on daybook wants an editable install with the dev extras, which is a
+Working on daylogs wants an editable install with the dev extras, which is a
 different thing from the isolated tool install above. Any environment manager
 does; this is conda because that's what I use:
 
 ```bash
-conda create -n daybook python=3.12
-conda activate daybook
+conda create -n daylogs python=3.12
+conda activate daylogs
 pip install -e '.[dev]'
 ```
 
@@ -393,7 +398,7 @@ eventually.
 
 Design notes:
 
-- Business logic never lives in `daybook/tui/`. Tabs render and handle keys;
+- Business logic never lives in `daylogs/tui/`. Tabs render and handle keys;
   arithmetic lives in `body.py` / `money.py` / `summary.py` with tests.
 - The `claude -p` runners are always injected, so no test spawns a subprocess.
 - Parsers in `parse.py` are pure functions with `now` passed in — no test

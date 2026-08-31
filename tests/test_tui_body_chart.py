@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from helpers import go_body
 
-from daybook.body import add_food, add_weight
+from daylogs.body import add_food, add_weight
 
 TZ = ZoneInfo("America/Toronto")
 NOW = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)

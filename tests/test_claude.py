@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from daybook import claude as C
+from daylogs import claude as C
 
 
 class FakeProc:

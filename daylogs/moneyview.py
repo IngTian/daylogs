@@ -16,7 +16,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass, field
 
-from daybook import horizon as hz
+from daylogs import horizon as hz
 
 SORT_FIELDS = ("date", "amount", "category")
 PANES = ("categories", "expenses", "recurring")

@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from textual.widgets import Static
 
-from daybook.tui import keymap as km
-from daybook.tui.widgets import BAD, FAINT, esc
+from daylogs.tui import keymap as km
+from daylogs.tui.widgets import BAD, FAINT, esc
 
 _GLYPH = {
     "left_square_bracket": "[",

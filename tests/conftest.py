@@ -1,7 +1,7 @@
 import pytest
 
-from daybook.config import Config
-from daybook.db import connect, ensure_schema
+from daylogs.config import Config
+from daylogs.db import connect, ensure_schema
 
 
 @pytest.fixture()
@@ -32,13 +32,13 @@ def make_cfg(tmp_path):
 
 @pytest.fixture()
 def make_app(db, make_cfg):
-    """Build a DaybookApp against the test database with injected runners."""
-    from daybook.tui.app import DaybookApp
+    """Build a DaylogsApp against the test database with injected runners."""
+    from daylogs.tui.app import DaylogsApp
 
     def _make(*, cfg=None, **kw):
         runners = {k: kw.pop(k) for k in list(kw) if k.startswith("runner_")}
         now = kw.pop("now", None)
-        return DaybookApp(cfg or make_cfg(**kw), db, now=now, **runners)
+        return DaylogsApp(cfg or make_cfg(**kw), db, now=now, **runners)
 
     return _make
 

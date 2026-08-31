@@ -1,13 +1,13 @@
 name: Release
 
-# Publishes `daybook-tui` to PyPI when a version tag is pushed:
+# Publishes `daylogs` to PyPI when a version tag is pushed:
 #
 #     git tag v0.2.0 && git push origin v0.2.0
 #
 # Authentication is PyPI Trusted Publishing (OIDC), so there is no API token in
 # the repository or in Actions secrets — nothing to leak or rotate. It needs a
 # one-time setup on PyPI: Publishing -> add a pending publisher with owner
-# `IngTian`, repository `daybook`, workflow `release.yml`, environment `pypi`.
+# `IngTian`, repository `daylogs`, workflow `release.yml`, environment `pypi`.
 # Until that exists, the publish step fails and the build artifacts are still
 # attached to the GitHub release, so a tag is never wasted.
 
@@ -42,14 +42,22 @@ jobs:
 
       # Same guard the CI workflow runs: the stylesheet is loaded by path at
       # runtime, so a wheel without it installs fine and starts up unstyled.
-      - name: wheel ships the stylesheet
+      - name: wheel ships the stylesheet, and nothing else
         run: |
           python - <<'PY'
           import glob, sys, zipfile
           wheel = glob.glob("dist/*.whl")[0]
-          if "daybook/tui/app.tcss" not in zipfile.ZipFile(wheel).namelist():
+          names = zipfile.ZipFile(wheel).namelist()
+          if "daylogs/tui/app.tcss" not in names:
               sys.exit(f"app.tcss missing from {wheel}")
-          print("app.tcss present in", wheel)
+          # A stale build/ can smuggle a package that no longer exists in the
+          # source into the wheel — it happened during the daybook -> daylogs
+          # rename. A file uploaded to PyPI cannot be taken back, so check here.
+          tops = {n.split("/")[0] for n in names if "/" in n}
+          unexpected = {t for t in tops - {"daylogs"} if not t.endswith(".dist-info")}
+          if unexpected:
+              sys.exit(f"unexpected top-level packages in {wheel}: {sorted(unexpected)}")
+          print("app.tcss present, and only daylogs/ ships:", wheel)
           PY
 
       - name: installed wheel runs

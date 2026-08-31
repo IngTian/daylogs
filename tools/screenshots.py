@@ -3,8 +3,8 @@
 
     python tools/screenshots.py
 
-Writes `assets/{day,body,money}.{svg,png}`. Run it after any change that moves
-the layout, and commit whatever it produces.
+Writes `assets/{day,body,money}.png`. Run it after any change that moves the
+layout, and commit what it produces.
 
 The README used to carry hand-drawn ASCII of the Day tab. It drifted twice: the
 box borders fell out of alignment because `▼` and `🐄` are double-width and the
@@ -37,12 +37,12 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from daybook.body import add_food, add_weight  # noqa: E402
-from daybook.config import load_config  # noqa: E402
-from daybook.db import connect, ensure_schema  # noqa: E402
-from daybook.money import add_expense, upsert_budget, upsert_recurring  # noqa: E402
-from daybook.summary import upsert_report  # noqa: E402
-from daybook.tui.app import DaybookApp  # noqa: E402
+from daylogs.body import add_food, add_weight  # noqa: E402
+from daylogs.config import load_config  # noqa: E402
+from daylogs.db import connect, ensure_schema  # noqa: E402
+from daylogs.money import add_expense, upsert_budget, upsert_recurring  # noqa: E402
+from daylogs.summary import upsert_report  # noqa: E402
+from daylogs.tui.app import DaylogsApp  # noqa: E402
 
 ASSETS = ROOT / "assets"
 TZ = ZoneInfo("America/Toronto")
@@ -149,7 +149,7 @@ def seed(root: Path):
 
 
 async def shoot(cfg, conn, out: Path) -> list[Path]:
-    app = DaybookApp(cfg, conn, now=lambda: NOW)
+    app = DaylogsApp(cfg, conn, now=lambda: NOW)
     written = []
     async with app.run_test(size=SIZE) as pilot:
         await pilot.pause()

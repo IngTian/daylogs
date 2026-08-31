@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from daybook.body import (
+from daylogs.body import (
     BodyError,
     add_food,
     add_weight,
@@ -20,7 +20,7 @@ from daybook.body import (
     weight_delta,
     weight_series,
 )
-from daybook.config import Config
+from daylogs.config import Config
 
 
 def _cfg(tmp_path, **kw):

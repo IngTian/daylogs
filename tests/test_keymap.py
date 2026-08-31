@@ -1,4 +1,4 @@
-from daybook.tui import keymap as km
+from daylogs.tui import keymap as km
 
 
 def test_no_duplicate_key_within_a_scope():

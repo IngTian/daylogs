@@ -1,7 +1,7 @@
 import pytest
 
-from daybook.claude import ClaudeError
-from daybook.estimate import ESTIMATE_SCHEMA, Estimate, from_image, from_text
+from daylogs.claude import ClaudeError
+from daylogs.estimate import ESTIMATE_SCHEMA, Estimate, from_image, from_text
 
 
 async def test_from_text_returns_estimate():

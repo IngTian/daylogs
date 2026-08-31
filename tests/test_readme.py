@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daybook.categories import slugs
-from daybook.parse import (
+from daylogs.categories import slugs
+from daylogs.parse import (
     parse_budget,
     parse_expense,
     parse_food,

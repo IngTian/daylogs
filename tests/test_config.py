@@ -1,12 +1,12 @@
 import pytest
 
-from daybook.config import load_config, update_config
+from daylogs.config import load_config, update_config
 
 
 def test_defaults_when_no_file(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.root == tmp_path
-    assert cfg.db_path == tmp_path / "daybook.db"
+    assert cfg.db_path == tmp_path / "daylogs.db"
     assert cfg.inbox_dir == tmp_path / "inbox"
     assert cfg.memory_path == tmp_path / "memory.md"
     assert cfg.timezone == "America/Toronto"
@@ -43,7 +43,7 @@ def test_reads_toml_and_expands_user(tmp_path):
 
 
 def test_env_override_selects_root(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAYBOOK_HOME", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("DAYLOGS_HOME", str(tmp_path / "elsewhere"))
     cfg = load_config()
     assert cfg.root == tmp_path / "elsewhere"
 

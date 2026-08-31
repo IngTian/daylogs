@@ -16,8 +16,8 @@ from collections import defaultdict, deque
 from textual.message import Message
 from textual.widgets import Input
 
-from daybook.complete import complete
-from daybook.tui import hints
+from daylogs.complete import complete
+from daylogs.tui import hints
 
 _HISTORY = 50
 

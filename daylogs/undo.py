@@ -1,6 +1,6 @@
 """In-memory ring buffer of row pre-images — deletes and edits both.
 
-daybook hard-deletes. That removes a `deleted_at` column from every table,
+daylogs hard-deletes. That removes a `deleted_at` column from every table,
 the active/in-use query wrappers, a trash service, and a partial unique
 index. The cost is that undo lives only as long as the process — which the
 footer help states rather than hides.

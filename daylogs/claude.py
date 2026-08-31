@@ -6,7 +6,7 @@ calorie estimate from a photo). One error type for all of them, because a
 caller forced to distinguish "binary missing" from "timed out" from "bad
 JSON" is a caller that will forget one of them.
 
-Every invocation passes --no-session-persistence, so daybook never pollutes
+Every invocation passes --no-session-persistence, so daylogs never pollutes
 ~/.claude/projects/. Runs under a Max OAuth subscription — no per-token API
 charge.
 """
