@@ -575,6 +575,7 @@ async def test_editing_a_weight_never_restamps_the_timestamp(make_app, db, type_
     add_weight(db, kg=78.2, date="2026-08-27", at=1787223943, note="")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -667,6 +668,7 @@ async def test_dropping_kcal_on_food_edit_is_rejected(make_app, db, type_into):
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -683,6 +685,7 @@ async def test_dropping_kcal_on_food_edit_is_rejected(make_app, db, type_into):
 async def test_enter_on_an_empty_table_does_not_crash(make_app):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open is False
@@ -694,6 +697,7 @@ async def test_a_rejected_edit_leaves_nothing_on_the_undo_stack(make_app, db, ty
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
@@ -853,6 +857,7 @@ async def test_editing_a_weight_with_unchanged_prefill_preserves_note(make_app, 
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="post-run")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
