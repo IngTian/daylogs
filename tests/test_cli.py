@@ -2,19 +2,19 @@ import sqlite3
 
 import pytest
 
-from daybook.__main__ import main
+from daylogs.__main__ import main
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAYBOOK_HOME", str(tmp_path))
+    monkeypatch.setenv("DAYLOGS_HOME", str(tmp_path))
     return tmp_path
 
 
 def _seed_weight(kg=70.0):
-    from daybook.body import add_weight
-    from daybook.config import load_config
-    from daybook.db import connect, ensure_schema
+    from daylogs.body import add_weight
+    from daylogs.config import load_config
+    from daylogs.db import connect, ensure_schema
 
     cfg = load_config()
     conn = connect(cfg.db_path)
@@ -25,7 +25,7 @@ def _seed_weight(kg=70.0):
 
 def test_version(capsys):
     assert main(["--version"]) == 0
-    assert "daybook" in capsys.readouterr().out.lower()
+    assert "daylogs" in capsys.readouterr().out.lower()
 
 
 def test_unknown_command_is_an_error():
@@ -36,7 +36,7 @@ def test_summary_prints_generated_content(capsys, monkeypatch):
     async def fake_runner(system_prompt, user_prompt, *, timeout_sec, model=None):
         return "## Body\n\nAll steady."
 
-    monkeypatch.setattr("daybook.__main__.claude.run_oneshot_text", fake_runner)
+    monkeypatch.setattr("daylogs.__main__.claude.run_oneshot_text", fake_runner)
     assert main(["summary"]) == 0
     assert "All steady." in capsys.readouterr().out
 
@@ -46,7 +46,7 @@ def test_summary_honours_explicit_date(capsys, monkeypatch):
         assert '"target_date": "2026-08-20"' in user_prompt
         return "dated"
 
-    monkeypatch.setattr("daybook.__main__.claude.run_oneshot_text", fake_runner)
+    monkeypatch.setattr("daylogs.__main__.claude.run_oneshot_text", fake_runner)
     assert main(["summary", "--date", "2026-08-20"]) == 0
     assert "dated" in capsys.readouterr().out
 
@@ -55,12 +55,12 @@ def test_summary_persists_so_a_second_run_can_read_it(monkeypatch):
     async def fake_runner(system_prompt, user_prompt, *, timeout_sec, model=None):
         return "persisted"
 
-    monkeypatch.setattr("daybook.__main__.claude.run_oneshot_text", fake_runner)
+    monkeypatch.setattr("daylogs.__main__.claude.run_oneshot_text", fake_runner)
     assert main(["summary", "--date", "2026-08-20"]) == 0
 
-    from daybook.config import load_config
-    from daybook.db import connect
-    from daybook.summary import get_report
+    from daylogs.config import load_config
+    from daylogs.db import connect
+    from daylogs.summary import get_report
 
     conn = connect(load_config().db_path)
     assert get_report(conn, "2026-08-20")["content"] == "persisted"
@@ -68,12 +68,12 @@ def test_summary_persists_so_a_second_run_can_read_it(monkeypatch):
 
 
 def test_summary_reports_failure_with_nonzero_exit(capsys, monkeypatch):
-    from daybook.claude import ClaudeError
+    from daylogs.claude import ClaudeError
 
     async def boom(*a, **k):
         raise ClaudeError("no claude on PATH")
 
-    monkeypatch.setattr("daybook.__main__.claude.run_oneshot_text", boom)
+    monkeypatch.setattr("daylogs.__main__.claude.run_oneshot_text", boom)
     assert main(["summary"]) != 0
     assert "no claude" in capsys.readouterr().err
 
@@ -88,7 +88,7 @@ def test_backup_writes_a_readable_copy(tmp_path, capsys):
     dest = tmp_path / "backups"
     assert main(["backup", str(dest)]) == 0
     out = capsys.readouterr().out.strip()
-    copies = list(dest.glob("daybook-*.db"))
+    copies = list(dest.glob("daylogs-*.db"))
     assert len(copies) == 1
     assert str(copies[0]) in out
     c = sqlite3.connect(copies[0])
@@ -105,13 +105,13 @@ def test_backup_is_repeatable_same_day(tmp_path):
     dest = tmp_path / "b"
     assert main(["backup", str(dest)]) == 0
     assert main(["backup", str(dest)]) == 0
-    assert len(list(dest.glob("daybook-*.db"))) == 1
+    assert len(list(dest.glob("daylogs-*.db"))) == 1
 
 
 def test_running_a_command_creates_the_schema(tmp_path):
     assert main(["backup", str(tmp_path / "b")]) == 0
-    from daybook.config import load_config
-    from daybook.db import TABLES
+    from daylogs.config import load_config
+    from daylogs.db import TABLES
 
     conn = sqlite3.connect(load_config().db_path)
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -130,7 +130,7 @@ def test_export_writes_a_csv_per_table(tmp_path, capsys):
     assert main(["export", str(dest)]) == 0
     cap = capsys.readouterr()
 
-    dirs = list(dest.glob("daybook-export-*"))
+    dirs = list(dest.glob("daylogs-export-*"))
     assert len(dirs) == 1, f"expected one dated directory, got {dirs}"
     written = sorted(p.name for p in dirs[0].glob("*.csv"))
     assert written == [
@@ -159,14 +159,14 @@ def test_export_reports_row_counts_on_stderr_not_stdout(tmp_path, capsys):
 
 def test_export_creates_the_destination_directory(tmp_path):
     assert main(["export", str(tmp_path / "deep" / "nested")]) == 0
-    assert list((tmp_path / "deep" / "nested").glob("daybook-export-*"))
+    assert list((tmp_path / "deep" / "nested").glob("daylogs-export-*"))
 
 
 def test_export_is_repeatable_same_day(tmp_path):
     dest = tmp_path / "e"
     assert main(["export", str(dest)]) == 0
     assert main(["export", str(dest)]) == 0
-    assert len(list(dest.glob("daybook-export-*"))) == 1, "a second export made a second directory"
+    assert len(list(dest.glob("daylogs-export-*"))) == 1, "a second export made a second directory"
 
 
 def test_export_on_an_empty_database_still_writes_every_header(tmp_path):
@@ -176,7 +176,7 @@ def test_export_on_an_empty_database_still_writes_every_header(tmp_path):
 
     dest = tmp_path / "out"
     assert main(["export", str(dest)]) == 0
-    d = next(iter(dest.glob("daybook-export-*")))
+    d = next(iter(dest.glob("daylogs-export-*")))
     files = sorted(d.glob("*.csv"))
     assert len(files) == 6
     for f in files:
@@ -200,3 +200,46 @@ def test_export_reports_an_unusable_destination_without_a_traceback(tmp_path, ca
     assert "Traceback" not in cap.err, f"a traceback reached the user:\n{cap.err}"
     assert str(blocker) in cap.err, f"the failing path was not named: {cap.err!r}"
     assert cap.out == "", f"a failed export still printed a path: {cap.out!r}"
+
+
+# ── the daybook -> daylogs migration guard ────────────────────────────────
+
+
+def test_a_pre_rename_data_root_refuses_to_start_and_names_the_fix(tmp_path, monkeypatch, capsys):
+    """Starting fresh beside an old data root would silently hide the history.
+
+    The rename moved the default root from ~/Documents/daybook to
+    ~/Documents/daylogs. If the new root is absent, `connect` would happily
+    create an empty database and the app would open with none of the user's
+    entries — indistinguishable from data loss, from the user's side.
+    """
+    legacy = tmp_path / "daybook"
+    legacy.mkdir()
+    (legacy / "daybook.db").write_bytes(b"")
+    new_root = tmp_path / "daylogs"
+    monkeypatch.setenv("DAYLOGS_HOME", str(new_root))
+
+    # `export` rather than no-args: it runs the same load_config -> guard ->
+    # connect path a bare `day` does, but returns instead of launching a TUI, so
+    # a broken guard fails the assertion rather than hanging the suite.
+    assert main(["export", str(tmp_path / "out")]) == 1
+    err = capsys.readouterr().err
+    assert str(legacy) in err, f"the old path was not named: {err!r}"
+    assert "mv" in err, f"the fix was not spelled out: {err!r}"
+    assert not new_root.exists(), "refusing to start must not create the new root"
+
+
+def test_the_guard_stays_out_of_the_way_once_the_move_has_happened(tmp_path, monkeypatch):
+    """A legacy directory that is merely *present* must not block a migrated user.
+
+    Deliberately not `--version`, which returns before the config is even loaded
+    and would pass whatever the guard did.
+    """
+    legacy = tmp_path / "daybook"
+    legacy.mkdir()
+    (legacy / "daybook.db").write_bytes(b"")
+    new_root = tmp_path / "daylogs"
+    new_root.mkdir()
+    monkeypatch.setenv("DAYLOGS_HOME", str(new_root))
+
+    assert main(["export", str(tmp_path / "out")]) == 0

@@ -1,6 +1,6 @@
 import pytest
 
-from daybook.tui.widgets import (
+from daylogs.tui.widgets import (
     budget_bars,
     burn_bar,
     mark,

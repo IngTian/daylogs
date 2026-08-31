@@ -1,7 +1,7 @@
 import pytest
 from helpers import all_expenses
 
-from daybook.money import (
+from daylogs.money import (
     MoneyError,
     add_expense,
     delete_expense,

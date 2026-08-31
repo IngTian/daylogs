@@ -1,6 +1,6 @@
 """Your data, in files anything can read.
 
-`day backup` writes a copy only daybook can open. That is the right tool for
+`day backup` writes a copy only daylogs can open. That is the right tool for
 losing your laptop and the wrong one for looking at three years of spend in a
 spreadsheet, so this writes one CSV per table instead.
 
@@ -27,7 +27,7 @@ import datetime as dt
 import sqlite3
 from pathlib import Path
 
-from daybook.db import table_names
+from daylogs.db import table_names
 
 
 def export_csv(
@@ -46,7 +46,7 @@ def export_csv(
     result should depend on when it runs.
     """
     stamp = (today or dt.date.today()).isoformat()
-    out_dir = Path(dest).expanduser() / f"daybook-export-{stamp}"
+    out_dir = Path(dest).expanduser() / f"daylogs-export-{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []

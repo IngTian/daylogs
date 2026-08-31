@@ -24,11 +24,11 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Markdown, Static
 
-from daybook import body, money, summary
-from daybook import horizon as hz
-from daybook.fmt import human_date
-from daybook.markup import to_markdown
-from daybook.tui.common import PanelTab
+from daylogs import body, money, summary
+from daylogs import horizon as hz
+from daylogs.fmt import human_date
+from daylogs.markup import to_markdown
+from daylogs.tui.common import PanelTab
 
 _EMPTY = "no summary yet — press r"
 

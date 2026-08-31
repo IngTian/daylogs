@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daybook.categories import slugs
-from daybook.parse import (
+from daylogs.categories import slugs
+from daylogs.parse import (
     parse_budget,
     parse_expense,
     parse_food,
@@ -20,9 +20,9 @@ from daybook.parse import (
     parse_recurring,
     parse_weigh,
 )
-from daybook.tui import hints
+from daylogs.tui import hints
 
-SRC = Path(__file__).resolve().parents[1] / "daybook"
+SRC = Path(__file__).resolve().parents[1] / "daylogs"
 
 # Fixed, because a parser result must never depend on when the suite runs.
 NOW = dt.datetime(2026, 8, 28, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
@@ -138,7 +138,7 @@ def test_categories_come_from_config_at_runtime(make_cfg):
 
 
 def test_every_sigil_named_by_a_hint_is_a_real_sigil():
-    from daybook.sigil import SIGILS
+    from daylogs.sigil import SIGILS
 
     for h in hints.HINTS:
         for s in h.sigils:
@@ -160,7 +160,7 @@ def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
     """The other direction, for the grammar-parsed prompts only. `photo path` is
     exempt: its `~/Downloads/...` is a home-directory tilde, and that prompt is not
     parsed by the grammar at all."""
-    from daybook import sigil
+    from daylogs import sigil
 
     for label in PARSERS:
         h = hints.for_label(label)

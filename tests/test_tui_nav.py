@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from helpers import all_expenses, go_body, go_day, go_money
 
-from daybook.summary import upsert_report
+from daylogs.summary import upsert_report
 
 TZ = ZoneInfo("America/Toronto")
 NOW = dt.datetime(2026, 8, 27, 9, 0, tzinfo=TZ)
@@ -204,7 +204,7 @@ async def test_plus_zooms_the_body_horizon_and_both_tabs_share_the_list(make_app
 
 # ── r means different things per tab ─────────────────────────────────────
 async def test_r_rolls_on_money_and_regenerates_on_summary(make_app, db, type_into):
-    from daybook.money import list_budget
+    from daylogs.money import list_budget
 
     calls = []
 
@@ -406,8 +406,8 @@ async def test_walking_stops_at_both_ends(make_app, db):
     nothing and make it ambiguous where the arrow lands."""
     from textual.widgets import DataTable
 
-    from daybook.body import add_food
-    from daybook.money import add_expense
+    from daylogs.body import add_food
+    from daylogs.money import add_expense
 
     # The cursor half of this test runs on Money — the right-hand end of the strip,
     # where the clamped `→` fires. Money opens on its categories pane, which shows
@@ -501,7 +501,7 @@ async def test_the_arrow_order_matches_the_tab_pane_order(make_app):
     """
     from textual.widgets import TabbedContent, TabPane
 
-    from daybook.tui.app import _TAB_OF
+    from daylogs.tui.app import _TAB_OF
 
     app = make_app()
     async with app.run_test() as pilot:
@@ -547,7 +547,7 @@ async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db
     fall-through is unconditional. This pins it at the narrow width the app declares
     it supports.
     """
-    from daybook.money import add_expense
+    from daylogs.money import add_expense
 
     long_desc = "a very long description that keeps going and going past any sane width"
     for i in range(4):

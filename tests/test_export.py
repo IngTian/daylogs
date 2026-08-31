@@ -1,6 +1,6 @@
 """Getting your data out.
 
-A backup you can only restore into daybook is a weaker promise than an export you
+A backup you can only restore into daylogs is a weaker promise than an export you
 can open anywhere, so these tests care about two things: that the export is
 *complete* (every table, every column, no silent omissions) and that what comes
 back out equals what went in.
@@ -11,11 +11,11 @@ import datetime as dt
 
 import pytest
 
-from daybook.body import add_food, add_weight
-from daybook.db import table_names
-from daybook.export import export_csv
-from daybook.money import add_expense, upsert_budget, upsert_recurring
-from daybook.summary import upsert_report
+from daylogs.body import add_food, add_weight
+from daylogs.db import table_names
+from daylogs.export import export_csv
+from daylogs.money import add_expense, upsert_budget, upsert_recurring
+from daylogs.summary import upsert_report
 
 TODAY = dt.date(2026, 8, 30)
 
@@ -60,7 +60,7 @@ def test_the_header_of_each_file_is_that_table_s_columns(db, tmp_path):
     export_csv(db, tmp_path / "out", today=TODAY)
     for table in table_names(db):
         cols = [r[1] for r in db.execute(f"PRAGMA table_info({table})")]
-        with (tmp_path / "out" / f"daybook-export-{TODAY}" / f"{table}.csv").open() as fh:
+        with (tmp_path / "out" / f"daylogs-export-{TODAY}" / f"{table}.csv").open() as fh:
             header = next(csv.reader(fh))
         assert header == cols, f"{table}: header {header} != columns {cols}"
 
@@ -82,7 +82,7 @@ def test_an_empty_table_still_gets_a_file_with_its_header(db, tmp_path):
 def test_rows_come_back_out_as_they_went_in(db, tmp_path):
     _seed(db)
     export_csv(db, tmp_path / "out", today=TODAY)
-    d = tmp_path / "out" / f"daybook-export-{TODAY}"
+    d = tmp_path / "out" / f"daylogs-export-{TODAY}"
 
     weight = _rows(d / "weight.csv")
     assert [r["kg"] for r in weight] == ["78.2", "78.0"]
@@ -117,7 +117,7 @@ def test_a_null_note_exports_as_an_empty_field(db, tmp_path):
     add_expense(db, amount=5.0, description="coffee", category="restaurant",
                 date="2026-08-27")
     export_csv(db, tmp_path / "out", today=TODAY)
-    row = _rows(tmp_path / "out" / f"daybook-export-{TODAY}" / "expense.csv")[0]
+    row = _rows(tmp_path / "out" / f"daylogs-export-{TODAY}" / "expense.csv")[0]
     assert row["note"] == "", f"a NULL note exported as {row['note']!r}"
 
 
@@ -127,7 +127,7 @@ def test_a_description_with_a_comma_and_a_quote_survives(db, tmp_path):
     add_expense(db, amount=80.0, description=nasty, category="restaurant",
                 date="2026-08-27")
     export_csv(db, tmp_path / "out", today=TODAY)
-    row = _rows(tmp_path / "out" / f"daybook-export-{TODAY}" / "expense.csv")[0]
+    row = _rows(tmp_path / "out" / f"daylogs-export-{TODAY}" / "expense.csv")[0]
     assert row["description"] == nasty
 
 
@@ -137,7 +137,7 @@ def test_a_report_containing_newlines_survives(db, tmp_path):
     content = "## Body\n\nWeight is down 0.4 kg.\n\n## Money\n\nInside budget.\n"
     upsert_report(db, date="2026-08-29", content=content)
     export_csv(db, tmp_path / "out", today=TODAY)
-    rows = _rows(tmp_path / "out" / f"daybook-export-{TODAY}" / "report.csv")
+    rows = _rows(tmp_path / "out" / f"daylogs-export-{TODAY}" / "report.csv")
     assert len(rows) == 1, f"a multi-line report split into {len(rows)} rows"
     assert rows[0]["content"] == content
 
@@ -154,8 +154,8 @@ def test_rows_are_ordered_deterministically(db, tmp_path):
     export_csv(db, first, today=TODAY)
     export_csv(db, second, today=TODAY)
     for table in table_names(db):
-        a = (first / f"daybook-export-{TODAY}" / f"{table}.csv").read_bytes()
-        b = (second / f"daybook-export-{TODAY}" / f"{table}.csv").read_bytes()
+        a = (first / f"daylogs-export-{TODAY}" / f"{table}.csv").read_bytes()
+        b = (second / f"daylogs-export-{TODAY}" / f"{table}.csv").read_bytes()
         assert a == b, f"{table}.csv differed between two exports of the same data"
 
 
@@ -163,14 +163,14 @@ def test_the_destination_is_created_and_dated(db, tmp_path):
     dest = tmp_path / "nested" / "does-not-exist"
     out = export_csv(db, dest, today=TODAY)
     assert out, "nothing was written"
-    assert out[0].parent == dest / f"daybook-export-{TODAY}"
+    assert out[0].parent == dest / f"daylogs-export-{TODAY}"
     assert out[0].parent.is_dir()
 
 
 def test_re_exporting_the_same_day_replaces_the_files(db, tmp_path):
     _seed(db)
     export_csv(db, tmp_path / "out", today=TODAY)
-    path = tmp_path / "out" / f"daybook-export-{TODAY}" / "expense.csv"
+    path = tmp_path / "out" / f"daylogs-export-{TODAY}" / "expense.csv"
     assert len(_rows(path)) == 2
     db.execute("DELETE FROM expense WHERE description = 'lunch'")
     export_csv(db, tmp_path / "out", today=TODAY)
@@ -179,7 +179,7 @@ def test_re_exporting_the_same_day_replaces_the_files(db, tmp_path):
 
 def test_no_internal_table_reaches_the_export(db, tmp_path):
     """Kept as a guard on the export's own output, but note it cannot fail today:
-    daybook's tables use INTEGER PRIMARY KEY rather than AUTOINCREMENT, so
+    daylogs's tables use INTEGER PRIMARY KEY rather than AUTOINCREMENT, so
     `sqlite_sequence` is never created and there is nothing here to filter. The
     filter itself is tested where it lives, against a database that does have one
     — see test_db.py::test_table_names_hides_sqlite_internals.

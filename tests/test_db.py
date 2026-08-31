@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from daybook.db import SCHEMA_VERSION, TABLES, connect, ensure_schema
+from daylogs.db import SCHEMA_VERSION, TABLES, connect, ensure_schema
 
 
 def _tables(conn):
@@ -78,7 +78,7 @@ def test_recurring_name_unique(db):
 
 
 def test_table_names_lists_the_user_tables_in_a_stable_order(db):
-    from daybook.db import table_names
+    from daylogs.db import table_names
 
     assert table_names(db) == ["budget", "expense", "food", "recurring", "report", "weight"]
 
@@ -86,7 +86,7 @@ def test_table_names_lists_the_user_tables_in_a_stable_order(db):
 def test_table_names_hides_sqlite_internals(tmp_path):
     """The filter, tested against a database that actually has one.
 
-    daybook's own tables use INTEGER PRIMARY KEY, so `sqlite_sequence` never
+    daylogs's own tables use INTEGER PRIMARY KEY, so `sqlite_sequence` never
     appears and the filter cannot be exercised through `ensure_schema`. A table
     declared AUTOINCREMENT creates it, which is what a future migration might do —
     and an export is not the place to discover that SQLite's bookkeeping is now
@@ -94,7 +94,7 @@ def test_table_names_hides_sqlite_internals(tmp_path):
     """
     import sqlite3
 
-    from daybook.db import table_names
+    from daylogs.db import table_names
 
     conn = sqlite3.connect(tmp_path / "auto.db")
     conn.execute("CREATE TABLE thing (id INTEGER PRIMARY KEY AUTOINCREMENT, x TEXT)")

@@ -14,15 +14,17 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from daybook import __version__, claude, export, summary
-from daybook.config import load_config
-from daybook.db import connect, ensure_schema
-from daybook.log import setup_logging
-from daybook.money import MoneyError, check_date
+from daylogs import __version__, claude, export, summary
+from daylogs.config import load_config
+from daylogs.db import connect, ensure_schema
+from daylogs.log import setup_logging
+from daylogs.money import MoneyError, check_date
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="day", description="personal daybook")
+    parser = argparse.ArgumentParser(
+        prog="day", description="a personal daily log: weight, food, expenses"
+    )
     parser.add_argument("--version", action="store_true", help="print version and exit")
     sub = parser.add_subparsers(dest="cmd")
 
@@ -46,10 +48,20 @@ def main(argv: list[str] | None = None) -> int:
         return int(e.code) if e.code else 0
 
     if args.version:
-        print(f"daybook {__version__}")
+        print(f"daylogs {__version__}")
         return 0
 
     cfg = load_config()
+    if (stale := _legacy_root_to_move(cfg.root)) is not None:
+        print(
+            f"Your data is still under the old name: {stale}\n"
+            f"daylogs was renamed from daybook. Move it, then run again:\n"
+            f"    mv {stale} {cfg.root}\n"
+            f"    mv {cfg.root / 'daybook.db'} {cfg.db_path}",
+            file=sys.stderr,
+        )
+        return 1
+
     setup_logging()
     conn = connect(cfg.db_path)
     ensure_schema(conn)
@@ -64,6 +76,26 @@ def main(argv: list[str] | None = None) -> int:
         return _tui(conn, cfg)
     finally:
         conn.close()
+
+
+def _legacy_root_to_move(root: Path) -> Path | None:
+    """The pre-rename data root, when it holds the only copy of the data.
+
+    Renaming the project moved the default root from ~/Documents/daybook to
+    ~/Documents/daylogs. Without this check the first run after upgrading finds
+    no database, creates an empty one, and presents a working app with none of
+    your history in it — which reads as data loss even though nothing was
+    deleted. Refusing to start is the kinder failure, and it can name the exact
+    two commands that fix it.
+
+    Only fires when the new root is genuinely absent, so it costs nothing on a
+    fresh install and disappears as soon as the move happens. Deletable once no
+    installation predates the rename.
+    """
+    legacy = root.parent / "daybook"
+    if root.exists() or not (legacy / "daybook.db").is_file():
+        return None
+    return legacy
 
 
 def _summary(conn, cfg, date: str | None) -> int:
@@ -88,7 +120,7 @@ def _backup(conn, dest: Path) -> int:
     """VACUUM INTO writes a consistent single-file copy without stopping the
     app — exactly what a cron backup to a synced folder needs."""
     dest.mkdir(parents=True, exist_ok=True)
-    out = dest / f"daybook-{dt.date.today().isoformat()}.db"
+    out = dest / f"daylogs-{dt.date.today().isoformat()}.db"
     out.unlink(missing_ok=True)
     conn.execute("VACUUM INTO ?", (str(out),))
     print(out)
@@ -96,7 +128,7 @@ def _backup(conn, dest: Path) -> int:
 
 
 def _export(conn, dest: Path) -> int:
-    """One CSV per table, so the data is readable without daybook.
+    """One CSV per table, so the data is readable without daylogs.
 
     stdout is *only* the directory, so `cd "$(day export ~/Drive)"` works; the
     per-table counts go to stderr, where a human sees them and a script does not
@@ -118,9 +150,9 @@ def _export(conn, dest: Path) -> int:
 
 
 def _tui(conn, cfg) -> int:
-    from daybook.tui.app import DaybookApp
+    from daylogs.tui.app import DaylogsApp
 
-    DaybookApp(cfg, conn).run()
+    DaylogsApp(cfg, conn).run()
     return 0
 
 

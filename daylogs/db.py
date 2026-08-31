@@ -5,7 +5,7 @@ PRAGMA user_version so a future change has somewhere to hook.
 
 journal_mode=DELETE is deliberate. WAL's -wal/-shm sidecars can sync
 independently of the main file under iCloud Drive and corrupt the database on
-the receiving device. daybook is read-heavy; the write cost is noise.
+the receiving device. daylogs is read-heavy; the write cost is noise.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 import pytest
 
-from daybook.money import (
+from daylogs.money import (
     MoneyError,
     delete_recurring,
     list_budget,

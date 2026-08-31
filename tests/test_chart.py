@@ -1,4 +1,4 @@
-from daybook.tui.chart import braille_line, frame_chart
+from daylogs.tui.chart import braille_line, frame_chart
 
 BLANK = "⠀"
 

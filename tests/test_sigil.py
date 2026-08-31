@@ -5,7 +5,7 @@ nothing else uses them, and they are cheap to produce here and impossible to
 recover later.
 """
 
-from daybook.sigil import SIGILS, Token, escape, fold_spans, group, token_at, tokenize
+from daylogs.sigil import SIGILS, Token, escape, fold_spans, group, token_at, tokenize
 
 
 def test_a_plain_word_is_a_plain_token():

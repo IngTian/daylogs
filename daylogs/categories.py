@@ -3,7 +3,7 @@
 A table with CRUD endpoints, a colour column and a sort order is the obvious
 design and the wrong one here: ten rows that change twice a year do not need a
 table, three foreign keys and a service. There is deliberately no `employment`
-slug — it would only ever classify income, which daybook does not track.
+slug — it would only ever classify income, which daylogs does not track.
 """
 
 from __future__ import annotations

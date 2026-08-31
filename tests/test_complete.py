@@ -4,7 +4,7 @@ No Textual here: the widget decides when to call this and what to do with the
 result, and the matching itself is testable as arithmetic on strings.
 """
 
-from daybook.complete import complete
+from daylogs.complete import complete
 
 CATS = ("education", "entertainment", "grocery", "housing", "other", "restaurant")
 VOCAB = {"!": CATS, "#": ("annually", "monthly")}

@@ -23,7 +23,7 @@ jobs:
       # package-data declaration. Build a real wheel and assert the stylesheet
       # is inside it — without app.tcss the app installs fine and then starts
       # up unstyled.
-      - name: wheel ships the stylesheet
+      - name: wheel ships the stylesheet, and nothing else
         run: |
           pip install -q build
           python -m build --wheel --outdir dist_check
@@ -31,9 +31,19 @@ jobs:
           import glob, sys, zipfile
           wheel = glob.glob("dist_check/*.whl")[0]
           names = zipfile.ZipFile(wheel).namelist()
-          if "daybook/tui/app.tcss" not in names:
+          if "daylogs/tui/app.tcss" not in names:
               sys.exit(f"app.tcss missing from {wheel}")
-          print("app.tcss present in", wheel)
+          # A stale `build/` directory makes setuptools reuse its cached copy of
+          # a previous package tree, so a wheel can quietly contain a package
+          # that no longer exists in the source. That happened during the
+          # daybook -> daylogs rename: the wheel shipped both. CI checks out
+          # clean and would not reproduce it, so assert the shape instead.
+          tops = {n.split("/")[0] for n in names if "/" in n}
+          unexpected = tops - {"daylogs", "daylogs-0.2.0.dist-info"}
+          unexpected = {t for t in unexpected if not t.endswith(".dist-info")}
+          if unexpected:
+              sys.exit(f"unexpected top-level packages in {wheel}: {sorted(unexpected)}")
+          print("app.tcss present, and only daylogs/ ships:", wheel)
           PY
 
       # The wheel is inspected above but never run. Install it non-editably in a
@@ -45,4 +55,4 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install -q dist_check/*.whl
           /tmp/smoke/bin/day --version
-          /tmp/smoke/bin/python -c "import daybook.tui.app; print('imports clean')"
+          /tmp/smoke/bin/python -c "import daylogs.tui.app; print('imports clean')"

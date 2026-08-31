@@ -17,13 +17,13 @@ _BACKUPS = 3
 
 
 def log_dir(root: Path | None = None) -> Path:
-    return (root or Path.home() / ".daybook") / "logs"
+    return (root or Path.home() / ".daylogs") / "logs"
 
 
 def setup_logging(root: Path | None = None, level: int = logging.INFO) -> Path:
     d = log_dir(root)
     d.mkdir(parents=True, exist_ok=True)
-    path = d / "daybook.log"
+    path = d / "daylogs.log"
     handler = logging.handlers.RotatingFileHandler(
         path, maxBytes=_MAX_BYTES, backupCount=_BACKUPS, encoding="utf-8"
     )

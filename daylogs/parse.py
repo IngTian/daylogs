@@ -16,9 +16,9 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
-from daybook import money, sigil
-from daybook.categories import FALLBACK_SLUG, get
-from daybook.fmt import hhmm
+from daylogs import money, sigil
+from daylogs.categories import FALLBACK_SLUG, get
+from daylogs.fmt import hhmm
 
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
 # Plausibility limits. Once shared with a separate edit grammar; now one grammar.

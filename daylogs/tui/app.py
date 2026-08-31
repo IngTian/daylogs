@@ -20,21 +20,21 @@ from textual.binding import Binding
 from textual.containers import Vertical
 from textual.widgets import DataTable, Header, Input, TabbedContent, TabPane
 
-from daybook import claude, summary
-from daybook.body import BodyError
-from daybook.horizon import HorizonError
-from daybook.money import MoneyError
-from daybook.moneyview import ViewError
-from daybook.parse import ParseError
-from daybook.photo import PhotoError
-from daybook.tui import hints, keymap
-from daybook.tui.body_tab import BodyTab
-from daybook.tui.footer import KeyFooter
-from daybook.tui.help import HelpScreen
-from daybook.tui.money_tab import MoneyTab
-from daybook.tui.prompt import InlinePrompt
-from daybook.tui.summary_tab import SummaryTab
-from daybook.undo import UndoStack
+from daylogs import claude, summary
+from daylogs.body import BodyError
+from daylogs.horizon import HorizonError
+from daylogs.money import MoneyError
+from daylogs.moneyview import ViewError
+from daylogs.parse import ParseError
+from daylogs.photo import PhotoError
+from daylogs.tui import hints, keymap
+from daylogs.tui.body_tab import BodyTab
+from daylogs.tui.footer import KeyFooter
+from daylogs.tui.help import HelpScreen
+from daylogs.tui.money_tab import MoneyTab
+from daylogs.tui.prompt import InlinePrompt
+from daylogs.tui.summary_tab import SummaryTab
+from daylogs.undo import UndoStack
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +47,9 @@ _TAB_OF = {"summary": "tab-summary", "body": "tab-body", "money": "tab-money"}
 RETRYABLE = (ParseError, MoneyError, BodyError, PhotoError, ViewError, HorizonError)
 
 
-class DaybookApp(App):
+class DaylogsApp(App):
     CSS_PATH = "app.tcss"
-    TITLE = "daybook"
+    TITLE = "daylogs"
 
     # Side-by-side panels need room for a label, a bar and two amounts each. Below
     # ~100 columns one of those has to give, and squeezing both panels dropped the

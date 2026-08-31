@@ -12,7 +12,7 @@ docs/
 *.spec
 dist_check/
 
-# daybook's own data, in case anyone ever points DAYBOOK_HOME at the checkout.
+# daylogs's own data, in case anyone ever points DAYLOGS_HOME at the checkout.
 # Nothing here is currently tracked; this keeps it that way.
 *.db
 *.db-journal

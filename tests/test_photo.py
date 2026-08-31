@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from daybook import photo
+from daylogs import photo
 
 
 def test_next_inbox_returns_oldest_image(tmp_path):

@@ -16,8 +16,8 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 
-from daybook.categories import slugs
-from daybook.horizon import Span
+from daylogs.categories import slugs
+from daylogs.horizon import Span
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}$")

@@ -14,14 +14,14 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
-from daybook import body, estimate, parse, photo, sigil
-from daybook import horizon as hz
-from daybook.config import load_config, update_config
-from daybook.fmt import hhmm, human_date
-from daybook.parse import ParseError, parse_food, parse_profile, parse_weigh
-from daybook.tui import chart
-from daybook.tui.common import PanelTab
-from daybook.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
+from daylogs import body, estimate, parse, photo, sigil
+from daylogs import horizon as hz
+from daylogs.config import load_config, update_config
+from daylogs.fmt import hhmm, human_date
+from daylogs.parse import ParseError, parse_food, parse_profile, parse_weigh
+from daylogs.tui import chart
+from daylogs.tui.common import PanelTab
+from daylogs.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
 
 _CHART_H = 8
 _YLABEL_W = 7
@@ -464,7 +464,7 @@ class BodyTab(PanelTab):
         """Persist to config.toml and reload, so BMR appears on this keystroke.
 
         `load_config` is re-read from the app's own root rather than the default,
-        or a DAYBOOK_HOME-based run would write one file and read another.
+        or a DAYLOGS_HOME-based run would write one file and read another.
         """
         profile = parse_profile(value)
         update_config(self.app.cfg.root / "config.toml", profile.fields())
@@ -609,7 +609,7 @@ class BodyTab(PanelTab):
 def _delta(value: float | None, label: str) -> str:
     """A weight change, coloured down-is-good.
 
-    That direction is an assumption, and the only one available: daybook stores no
+    That direction is an assumption, and the only one available: daylogs stores no
     goal weight, so "good" has to come from somewhere. Losing reads as progress
     for the person who built a weight tracker. The arrow carries the direction
     regardless, so the colour adds emphasis rather than being the only signal —

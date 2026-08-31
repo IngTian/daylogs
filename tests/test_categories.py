@@ -1,4 +1,4 @@
-from daybook.categories import (
+from daylogs.categories import (
     BUILTIN,
     FALLBACK_SLUG,
     PALETTE,
@@ -7,7 +7,7 @@ from daybook.categories import (
     get,
     slugs,
 )
-from daybook.config import load_config
+from daylogs.config import load_config
 
 
 def test_nine_builtins_no_income_category():
@@ -67,8 +67,8 @@ def test_ui_signal_colors_are_palette_members():
     """The GOOD/BAD/WARN constants in widgets.py and write/view in footer.py
     must stay synchronized with PALETTE. They drifted to literals once; this
     test stops it happening again."""
-    from daybook.tui.footer import _KIND_STYLE
-    from daybook.tui.widgets import BAD, GOOD, WARN
+    from daylogs.tui.footer import _KIND_STYLE
+    from daylogs.tui.widgets import BAD, GOOD, WARN
 
     assert GOOD in PALETTE, f"GOOD {GOOD} not in PALETTE"
     assert BAD in PALETTE, f"BAD {BAD} not in PALETTE"

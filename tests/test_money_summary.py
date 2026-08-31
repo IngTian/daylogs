@@ -1,6 +1,6 @@
 import pytest
 
-from daybook.money import MoneyError, add_expense, summarize_month, upsert_budget
+from daylogs.money import MoneyError, add_expense, summarize_month, upsert_budget
 
 
 def _e(db, amount, category, date, description="x"):

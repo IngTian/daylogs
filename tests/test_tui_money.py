@@ -2,7 +2,7 @@ import datetime as dt
 
 from helpers import all_expenses, go_money
 
-from daybook.money import (
+from daylogs.money import (
     add_expense,
     list_budget,
     list_recurring,
@@ -430,7 +430,7 @@ async def test_burn_bar_returns_once_a_budget_exists(make_app, db):
 
 
 async def test_over_budget_is_coloured_bad_and_under_budget_good(make_app, db):
-    from daybook.tui.widgets import BAD, GOOD
+    from daylogs.tui.widgets import BAD, GOOD
 
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     upsert_budget(db, month="2026-08", name="Gas", category="transport", amount=100)
@@ -447,7 +447,7 @@ async def test_over_budget_is_coloured_bad_and_under_budget_good(make_app, db):
 
 async def test_a_refunded_category_is_not_coloured_as_an_overrun(make_app, db):
     """A negative spend is under every cap; painting it red would be nonsense."""
-    from daybook.tui.widgets import BAD
+    from daylogs.tui.widgets import BAD
 
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     upsert_budget(db, month="2026-08", name="Other", category="other", amount=100)

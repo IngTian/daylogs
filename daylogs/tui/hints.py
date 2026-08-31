@@ -107,8 +107,8 @@ def vocab_for(hint: Hint | None, cfg=None) -> dict[str, tuple[str, ...]]:
     """
     if hint is None:
         return {}
-    from daybook import money
-    from daybook.categories import slugs
+    from daylogs import money
+    from daylogs.categories import slugs
 
     out: dict[str, tuple[str, ...]] = {}
     for s in hint.sigils:

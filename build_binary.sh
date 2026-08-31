@@ -30,8 +30,8 @@ pyinstaller \
   --clean \
   --noconfirm \
   --collect-all textual \
-  --collect-submodules daybook \
-  --add-data "daybook/tui/app.tcss:daybook/tui" \
+  --collect-submodules daylogs \
+  --add-data "daylogs/tui/app.tcss:daylogs/tui" \
   --exclude-module pytest \
   --exclude-module _pytest \
   --exclude-module ruff \

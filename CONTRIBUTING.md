@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. One thing to know before you open a PR: **daybook is
+Thanks for looking. One thing to know before you open a PR: **daylogs is
 deliberately small, and staying small is the feature.**
 
 It does three things — weight, food, expenses — plus one daily summary. There is
@@ -16,10 +16,10 @@ preamble.
   smoke test of the installed console script.
 - New behaviour comes with a test. Parsers are pure functions with `now` injected,
   so nothing should depend on when the suite runs.
-- No business logic in `daybook/tui/`. Tabs render and handle keys; arithmetic
+- No business logic in `daylogs/tui/`. Tabs render and handle keys; arithmetic
   lives in `body.py` / `money.py` / `horizon.py` with tests next to it.
-- Keys are declared once, in `daybook/tui/keymap.py`. Prompt hints are declared
-  once, in `daybook/tui/hints.py`. Tests enforce both — never hand-write a hint.
+- Keys are declared once, in `daylogs/tui/keymap.py`. Prompt hints are declared
+  once, in `daylogs/tui/hints.py`. Tests enforce both — never hand-write a hint.
 - Fixtures and examples use obviously-synthetic data. This is a personal-finance
   and body-weight app; nobody's real numbers belong in the repo.
 

@@ -11,8 +11,8 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-from daybook.tui import keymap as km
-from daybook.tui.footer import glyph
+from daylogs.tui import keymap as km
+from daylogs.tui.footer import glyph
 
 _TITLES = {
     "nav": "Move around",
@@ -43,7 +43,7 @@ class HelpScreen(ModalScreen):
         groups = list(km.help_groups().items())
         half = (len(groups) + 1) // 2
         with VerticalScroll(id="help-body"):
-            yield Static("daybook keys", classes="pane-title")
+            yield Static("daylogs keys", classes="pane-title")
             with Horizontal(id="help-columns"):
                 for column in (groups[:half], groups[half:]):
                     yield Static(_render_column(column), classes="help-col")

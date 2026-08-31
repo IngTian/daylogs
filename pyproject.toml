@@ -3,9 +3,13 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "daybook"
+# Renamed from `daybook` before the first release. PyPI's `daybook` was taken in
+# 2022 by an unrelated reading-log CLI with no release since, and PEP 541 name
+# reclamation is slow and rarely granted — so rather than publish under a
+# suffixed name forever, the project took a free one. The command is still `day`.
+name = "daylogs"
 version = "0.2.0"
-description = "A three-feature personal daybook: weight, food, expenses, and one daily summary."
+description = "A personal daily log in the terminal: weight, food, expenses, and one daily summary."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -24,9 +28,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/IngTian/daybook"
-Repository = "https://github.com/IngTian/daybook"
-Issues = "https://github.com/IngTian/daybook/issues"
+Homepage = "https://github.com/IngTian/daylogs"
+Repository = "https://github.com/IngTian/daylogs"
+Issues = "https://github.com/IngTian/daylogs/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -37,16 +41,16 @@ dev = [
 ]
 
 [project.scripts]
-day = "daybook.__main__:main"
+day = "daylogs.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["daybook*"]
+include = ["daylogs*"]
 
 # Textual loads app.tcss via App.CSS_PATH at runtime. setuptools ships no
 # non-Python files by default, so without this a non-editable install (and any
 # binary built from the wheel) starts up with no stylesheet.
 [tool.setuptools.package-data]
-"daybook.tui" = ["*.tcss"]
+"daylogs.tui" = ["*.tcss"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

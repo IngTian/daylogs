@@ -12,11 +12,11 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
-from daybook import money, parse
-from daybook.moneyview import PANES, MoneyView
-from daybook.parse import parse_budget, parse_expense, parse_recurring
-from daybook.tui.common import PanelTab
-from daybook.tui.widgets import (
+from daylogs import money, parse
+from daylogs.moneyview import PANES, MoneyView
+from daylogs.parse import parse_budget, parse_expense, parse_recurring
+from daylogs.tui.common import PanelTab
+from daylogs.tui.widgets import (
     BAD,
     FAINT,
     GOOD,
@@ -29,7 +29,7 @@ from daybook.tui.widgets import (
     signed,
     wide_sparkline,
 )
-from daybook.tui.widgets import money as fmt
+from daylogs.tui.widgets import money as fmt
 
 _ARROW = {True: "↓", False: "↑"}
 _SORT_LABEL = {"date": "date", "amount": "cost", "category": "category"}

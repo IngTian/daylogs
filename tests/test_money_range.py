@@ -1,7 +1,7 @@
 import pytest
 
-from daybook.horizon import Span
-from daybook.money import (
+from daylogs.horizon import Span
+from daylogs.money import (
     add_expense,
     group_expenses,
     month_span,
@@ -10,7 +10,7 @@ from daybook.money import (
     summarize_span,
     upsert_budget,
 )
-from daybook.moneyview import MoneyView
+from daylogs.moneyview import MoneyView
 
 
 def _span(months):
@@ -105,7 +105,7 @@ def test_all_time_on_an_empty_database_does_not_crash(db):
 
 
 def test_bad_month_still_rejected(seeded):
-    from daybook.money import MoneyError
+    from daylogs.money import MoneyError
 
     with pytest.raises(MoneyError):
         summarize_span(seeded, span=_span(["nonsense"]))
@@ -188,7 +188,7 @@ def test_filter_that_matches_nothing_returns_empty(seeded):
 
 
 def test_unknown_sort_field_is_rejected_not_injected(seeded):
-    from daybook.money import MoneyError
+    from daylogs.money import MoneyError
 
     v = MoneyView(anchor="2026-08-31", horizon="all")
     v.sort_field = "amount; DROP TABLE expense"
