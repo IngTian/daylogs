@@ -27,6 +27,7 @@ from daylogs.tui.widgets import (
     mark,
     ranked_bars,
     signed,
+    view_row,
     wide_sparkline,
 )
 from daylogs.tui.widgets import money as fmt
@@ -164,9 +165,7 @@ class MoneyTab(PanelTab):
         self.query_one("#money-head", Static).update(head)
 
         self._fill_panels(s)
-        self.query_one("#money-panes", Static).update(
-            "   ".join(f"[b]{p}[/b]" if p == v.pane else p for p in PANES)
-        )
+        self.query_one("#money-panes", Static).update(view_row(PANES, v.pane))
         self._fill_table(s)
 
     def _no_budget_hint(self, months: list[str]) -> str:

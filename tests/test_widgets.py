@@ -330,3 +330,33 @@ def test_very_narrow_widths_still_produce_a_bounded_line():
             assert len(line) <= width
         for line in ranked_bars([("housing", 900.0)], width=width):
             assert len(line) <= width
+
+
+# ── view_row ─────────────────────────────────────────────────────────────
+
+
+def test_view_row_marks_only_the_active_name():
+    from daylogs.tui.widgets import view_row
+
+    assert view_row(("weight", "food"), "food") == "weight   [b]food[/b]"
+
+
+def test_view_row_is_what_both_tabs_use():
+    """Body and Money must draw this row identically — the point of the shared
+    helper is that "they look the same" is true by construction rather than by
+    two call sites happening to agree.
+    """
+    from daylogs.moneyview import PANES
+    from daylogs.tui.widgets import view_row
+
+    body = view_row(("weight", "food"), "weight")
+    money = view_row(PANES, PANES[0])
+    assert body.startswith("[b]") and money.startswith("[b]")
+    assert "   " in body and "   " in money
+
+
+def test_view_row_marks_nothing_when_the_active_name_is_unknown():
+    """A typo'd mode should degrade to an unmarked row, not raise in a render."""
+    from daylogs.tui.widgets import view_row
+
+    assert view_row(("weight", "food"), "nonsense") == "weight   food"

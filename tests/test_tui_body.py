@@ -1461,3 +1461,65 @@ async def test_a_superseded_photo_estimate_does_not_let_the_next_meal_eat_the_ph
 
 async def _immediate(value):
     return value
+
+
+# ── which view am I on ───────────────────────────────────────────────────
+
+
+def _view_row(app) -> str:
+    from textual.widgets import Static
+
+    return str(app.query_one("#body-views", Static).content)
+
+
+async def test_the_table_header_names_the_view_it_is_showing(make_app, make_cfg, db):
+    """The header used to say FOOD unconditionally, including while the table
+    below it listed weigh-ins with `date | kg | note` columns and the header
+    quoted the day's calorie total. A label that is wrong is worse than absent —
+    it is the reason the weight view felt unlocated.
+    """
+    add_weight(db, kg=80.0, date="2026-08-27", at=1)
+    add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=2)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1996-08-27")
+    app = make_app(cfg=cfg)
+    async with app.run_test() as pilot:
+        body = await go_body(pilot, app)
+        body.viewing_date = "2026-08-27"
+        body.reload()
+        await pilot.pause()
+        assert body.table_mode == "food"
+        assert "FOOD" in _food_head(app)
+
+        await pilot.press("tab")
+        await pilot.pause()
+        assert body.table_mode == "weight"
+        head = _food_head(app)
+    assert "WEIGHT" in head, f"the weight table is not labelled: {head!r}"
+    assert "FOOD" not in head, f"still labelled FOOD while showing weigh-ins: {head!r}"
+    assert "kcal" not in head, f"a calorie total over the weight table: {head!r}"
+    assert "BMR" not in head
+
+
+async def test_body_lists_both_views_with_the_active_one_marked(make_app, db):
+    """Money has always drawn its three panes as a visible row; Body had the same
+    two-way toggle and drew nothing, so `tab` was undiscoverable."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        row = _view_row(app)
+    assert "weight" in row and "food" in row, f"not both views: {row!r}"
+    assert "[b]food[/b]" in row, f"the active view is not marked: {row!r}"
+    assert "[b]weight[/b]" not in row
+
+
+async def test_tab_moves_the_mark_to_the_other_view(make_app, db):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        await pilot.press("tab")
+        await pilot.pause()
+        row = _view_row(app)
+    assert "[b]weight[/b]" in row, f"the mark did not follow the tab: {row!r}"
+    assert "[b]food[/b]" not in row
