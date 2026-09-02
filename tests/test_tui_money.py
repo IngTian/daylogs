@@ -242,14 +242,23 @@ async def test_x_deletes_a_recurring_row(make_app, db, type_into):
 
 async def test_header_shows_spend_against_budget(make_app, db):
     app = make_app()
-    # The month variant of the trap above: on a month's last day after 20:00 Toronto,
-    # `dt.date.today()` under `TZ=UTC` is already the 1st of the next month, so the
-    # budget and the expense land in a month the app is not showing and the header
-    # reads `spent 0.00`. Reproduce with `TZ=UTC pytest` on any month-end evening.
+    # Two date traps meet here, and the second one bit after the first was fixed.
+    #
+    # The month: on a month's last day after 20:00 Toronto, `dt.date.today()`
+    # under `TZ=UTC` is already the 1st of the next month, so the rows land in a
+    # month the app is not showing and the header reads `spent 0.00`. Hence
+    # `app.today()` rather than the process clock.
+    #
+    # The *day*: these tests used to seed `f"{month}-10"`, which is in the future
+    # for the first nine days of any month — and the default horizon is
+    # month-to-date, so the expense fell outside the window and the header read
+    # `spent 0.00` again. It broke on 2026-09-02. Seeding on `app.today()` is
+    # inside every month-to-date span by construction, so there is no day left to
+    # be wrong about.
     month = app.today()[:7]
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=500)
     add_expense(
-        db, amount=412.0, description="shop", category="grocery", date=f"{month}-10"
+        db, amount=412.0, description="shop", category="grocery", date=app.today()
     )
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
@@ -265,7 +274,7 @@ async def test_header_says_over_when_past_budget(make_app, db):
     month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
-        db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"
+        db, amount=289.0, description="dinner", category="restaurant", date=app.today()
     )
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
@@ -280,7 +289,7 @@ async def test_burn_bar_shows_percentage_and_calendar_progress(make_app, db):
     month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Grocery", category="grocery", amount=100)
     add_expense(
-        db, amount=50.0, description="shop", category="grocery", date=f"{month}-02"
+        db, amount=50.0, description="shop", category="grocery", date=app.today()
     )
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
@@ -297,7 +306,7 @@ async def test_over_budget_category_is_flagged_in_the_table(make_app, db):
     month = app.today()[:7]      # the app's clock, not the process TZ — see above
     upsert_budget(db, month=month, name="Restaurant", category="restaurant", amount=200)
     add_expense(
-        db, amount=289.0, description="dinner", category="restaurant", date=f"{month}-11"
+        db, amount=289.0, description="dinner", category="restaurant", date=app.today()
     )
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
@@ -776,3 +785,29 @@ async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app
     rows = all_expenses(db)
     assert len(rows) == 1
     assert rows[0]["note"] == "receipt in wallet"
+
+
+async def test_month_to_date_header_holds_on_the_first_of_the_month(make_app, db):
+    """The regression guard for the day-of-month trap, pinned to the worst case.
+
+    Every other test here runs on the real clock, so none of them can fail on the
+    day that matters: on the 1st, a month-to-date span is a single day wide, and
+    anything seeded on a hardcoded later day sits in the future and is invisible.
+    That is the shape that broke four tests on 2026-09-02, and it is the fifth
+    date-relative failure in this repo, so it gets a test that does not depend on
+    when it runs.
+    """
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    first = dt.datetime(2026, 9, 1, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
+    app = make_app(now=lambda: first)
+    upsert_budget(db, month="2026-09", name="Grocery", category="grocery", amount=500)
+    add_expense(db, amount=412.0, description="shop", category="grocery", date="2026-09-01")
+    async with app.run_test() as pilot:
+        money_tab = await go_money(pilot, app)
+        money_tab.reload()
+        await pilot.pause()
+        head = str(app.query_one("#money-head").content)
+    assert "412.00" in head, f"spend on the 1st vanished from the header: {head!r}"
+    assert "500.00" in head
