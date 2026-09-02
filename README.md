@@ -104,6 +104,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
 | `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
 | `-` | zoom **out** — a longer horizon: `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
+| `T` | change the theme — `tab` completes the list, and the choice is remembered |
 | `?` | the full keymap |
 | `u` | undo the last delete or edit |
 | `esc` | back out one step — never quits |
@@ -222,6 +223,18 @@ alongside the `⚠` glyph, never instead of it. On Body, a falling weight is gre
 a rising one red; there's no goal weight to compare against, so that's an
 assumption, and the arrow carries the direction either way.
 
+`T` changes the **theme** — the background, borders, muted text and accents. Every
+theme Textual ships is on offer (gruvbox, nord, tokyo-night, dracula, catppuccin,
+solarized, rose-pine and a dozen more); `tab` completes the names, and the choice is
+written to `config.toml` so it survives a restart. daylogs defines no palettes of
+its own: the stylesheet uses only Textual's design tokens, so this costs nothing to
+maintain.
+
+What a theme deliberately does **not** change is the nine category colours or the
+green/red/amber signals. A category's colour is its identity — grocery being amber
+is a fact about grocery, not about the chrome around it — and those hues were
+checked against a warm dark theme, a cool dark theme and a light one.
+
 The Day tab speaks the same three colours rather than inventing any: the weight
 trend and the calorie net are green down and red up, on that same assumption; what
 is left of the budget is green while positive and red once over; and the burn line
@@ -308,6 +321,7 @@ height_cm            = 170          # BMR input
 sex                  = "female"     # BMR constant term only
 birthday             = "1990-01-01" # age, for BMR
 claude_model         = ""           # empty = CLI default
+theme                = "gruvbox"    # any Textual theme; `T` sets it for you
 summary_after_hour   = 6
 summary_timeout_sec  = 120
 estimate_timeout_sec = 60

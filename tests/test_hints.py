@@ -39,7 +39,9 @@ PARSERS = {
     "recurring": parse_recurring,
 }
 
-NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile"}
+# `theme` takes one name from a fixed list, validated by `themes.check` rather than
+# by a grammar — there is nothing to parse, so it belongs here deliberately.
+NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile", "theme"}
 
 
 def test_every_prompt_opened_in_the_app_has_a_hint():
@@ -169,3 +171,19 @@ def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
                 assert (
                     tok.sigil in h.grammar
                 ), f"{h.label}: example uses {tok.sigil}, grammar does not"
+
+
+def test_theme_completes_without_a_sigil():
+    """Its whole input is a theme name, so the implicit sigil is the empty string —
+    the same shape as `fix category`."""
+    v = hints.vocab_for(hints.for_label("theme"))
+    assert "gruvbox" in v[""]
+    assert "tokyo-night" in v[""]
+
+
+def test_theme_offers_textuals_list_not_a_frozen_copy():
+    """If this ever diverges from themes.names(), completion is offering names the
+    prompt will reject."""
+    from daylogs.tui import themes
+
+    assert hints.vocab_for(hints.for_label("theme"))[""] == themes.names()

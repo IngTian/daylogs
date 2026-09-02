@@ -77,6 +77,9 @@ HINTS: tuple[Hint, ...] = (
     Hint("filter", "coffee", "text to match in a description · esc clears it"),
     # ── app ──────────────────────────────────────────────────────────────
     Hint("go to date", "2026-06-15", "a date, or 2026-06 for the whole month"),
+    # The whole line is one name, so the implicit sigil is the empty string — the
+    # same shape as `fix category`.
+    Hint("theme", "gruvbox", "a theme name — tab completes the list", sigils=("",)),
 )
 
 _BY_LABEL = {h.label: h for h in HINTS}
@@ -109,6 +112,12 @@ def vocab_for(hint: Hint | None, cfg=None) -> dict[str, tuple[str, ...]]:
         return {}
     from daylogs import money
     from daylogs.categories import slugs
+    from daylogs.tui import themes
+
+    # Two prompts complete a bare word, and they want different words, so the
+    # empty sigil alone is not enough to decide — the label is what disambiguates.
+    if hint.label == "theme":
+        return {"": themes.names()}
 
     out: dict[str, tuple[str, ...]] = {}
     for s in hint.sigils:

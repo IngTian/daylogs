@@ -138,3 +138,31 @@ def test_update_config_leaves_no_temp_file_behind(tmp_path):
     path = tmp_path / "config.toml"
     update_config(path, {"height_cm": 180.0})
     assert [p.name for p in tmp_path.iterdir()] == ["config.toml"]
+
+
+# ── theme ────────────────────────────────────────────────────────────────
+
+
+def test_theme_defaults_to_gruvbox(tmp_path):
+    """The default is a string chosen from a list Textual owns; test_themes.py
+    guards that the name still exists there."""
+    from daylogs.config import load_config
+
+    assert load_config(tmp_path).theme == "gruvbox"
+
+
+def test_theme_is_read_from_config(tmp_path):
+    from daylogs.config import load_config
+
+    (tmp_path / "config.toml").write_text('theme = "nord"\n')
+    assert load_config(tmp_path).theme == "nord"
+
+
+def test_an_unreadable_theme_value_does_not_break_loading(tmp_path):
+    """config.py stays pure — it does not know which names are valid, so a wrong
+    one loads fine and the TUI layer resolves it. Validating here would drag
+    Textual into the config module."""
+    from daylogs.config import load_config
+
+    (tmp_path / "config.toml").write_text('theme = "nonsense"\n')
+    assert load_config(tmp_path).theme == "nonsense"
