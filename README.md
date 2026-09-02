@@ -222,6 +222,13 @@ alongside the `⚠` glyph, never instead of it. On Body, a falling weight is gre
 a rising one red; there's no goal weight to compare against, so that's an
 assumption, and the arrow carries the direction either way.
 
+The Day tab speaks the same three colours rather than inventing any: the weight
+trend and the calorie net are green down and red up, on that same assumption; what
+is left of the budget is green while positive and red once over; and the burn line
+turns amber when spending has run **ahead of the elapsed days**, not past a flat
+threshold — 84% on day 27 of 31 is fine and the same number on day 12 is not. Every
+sign and glyph stays, so colour is emphasis rather than the only signal.
+
 A month nobody has rolled yet has no budget at all, and the header says so and
 names the key rather than reporting a meaningless "0.00 budget".
 
