@@ -52,6 +52,28 @@ def mark(text: str, style: str = "") -> str:
     return f"[{style}]{text}[/]" if style else text
 
 
+def trend_style(value: float | None, *, falling_is_good: bool = True) -> str:
+    """Which way is good, for a signed number. The one place that rule lives.
+
+    For a weight change or a calorie net, **down is good** — an assumption, and
+    the only one available, since daylogs stores no goal weight and no target
+    intake. Losing reads as progress for the person who built a weight tracker.
+    For money remaining, the sign flips: more left is better, hence the keyword.
+
+    Centralised because the rule was written out at each call site, and this repo
+    has already been bitten by a rule cloned per caller (see
+    `horizon.resolve_goto`). Formatting stays with the caller — the Day panel is
+    tighter than the Body tab and renders the same delta differently on purpose —
+    so what is shared is the judgement, not the layout.
+
+    Zero is neither: an unchanged number should not be flagged as a win or a loss.
+    """
+    if value is None or value == 0:
+        return ""
+    good = value < 0 if falling_is_good else value > 0
+    return GOOD if good else BAD
+
+
 def sparkline(values: list[float], width: int = 24, *, from_zero: bool = False) -> str:
     """`from_zero` scales against 0..max instead of min..max.
 

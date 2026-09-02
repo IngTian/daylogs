@@ -102,7 +102,8 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | `[` `]` | previous / next period — report on Day, day on Body, month on Money |
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
-| `+` `-` | widen / narrow the time horizon (Body, Money): `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
+| `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
+| `-` | zoom **out** — a longer horizon: `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
 | `?` | the full keymap |
 | `u` | undo the last delete or edit |
 | `esc` | back out one step — never quits |
@@ -220,6 +221,13 @@ Green means inside the budget, amber means within 10% of a cap, red means over �
 alongside the `⚠` glyph, never instead of it. On Body, a falling weight is green and
 a rising one red; there's no goal weight to compare against, so that's an
 assumption, and the arrow carries the direction either way.
+
+The Day tab speaks the same three colours rather than inventing any: the weight
+trend and the calorie net are green down and red up, on that same assumption; what
+is left of the budget is green while positive and red once over; and the burn line
+turns amber when spending has run **ahead of the elapsed days**, not past a flat
+threshold — 84% on day 27 of 31 is fine and the same number on day 12 is not. Every
+sign and glyph stays, so colour is emphasis rather than the only signal.
 
 A month nobody has rolled yet has no budget at all, and the header says so and
 names the key rather than reporting a meaningless "0.00 budget".

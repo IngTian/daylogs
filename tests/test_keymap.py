@@ -26,7 +26,7 @@ def test_the_promised_navigation_keys_exist():
     app = {k.key for k in km.keys_for("app")}
     for key in (
         "1", "2", "3", "tab", "shift+tab", "left_square_bracket",
-        "right_square_bracket", "t", "g", "plus", "minus", "question_mark",
+        "right_square_bracket", "t", "g", "plus", "equals_sign", "minus", "question_mark",
         "u", "escape", "q",
     ):
         assert key in app, f"missing app key {key!r}"

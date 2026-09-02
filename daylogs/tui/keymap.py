@@ -62,8 +62,17 @@ KEYMAP: tuple[Key, ...] = (
     Key("right_square_bracket", "next", "next_period", "app", "nav"),
     Key("t", "today", "jump_now", "app", "nav"),
     Key("g", "go to date", "goto", "app", "nav"),
-    Key("plus", "wider", "zoom_in", "app", "view"),
-    Key("minus", "narrower", "zoom_out", "app", "view", footer=False),
+    # A magnifying glass, not a window size: `+` shortens the horizon and shows
+    # it in more detail, `-` pulls back. It read the other way round until 0.3.0
+    # — `+` was labelled "wider" while calling an action named `zoom_in` — which
+    # disagreed with every map and image viewer, and with itself.
+    #
+    # `equals_sign` is the same action: `+` needs shift on every layout this runs
+    # on and `=` is the same physical key without it. Off the footer so the hint
+    # is not drawn twice; `?` lists it.
+    Key("plus", "zoom in", "zoom_in", "app", "view"),
+    Key("equals_sign", "zoom in", "zoom_in", "app", "view", footer=False),
+    Key("minus", "zoom out", "zoom_out", "app", "view", footer=False),
     # ── app: meta ────────────────────────────────────────────────────────
     # pinned: `?` is how you discover everything else and `q` is how you leave.
     # Without pinning they sit last in the footer and are the first things a
