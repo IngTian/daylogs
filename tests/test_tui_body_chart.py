@@ -100,19 +100,28 @@ async def test_zoom_changes_the_horizon_and_the_header_shows_the_span(make_app, 
         before = str(app.query_one("#weight-head").content)
         await pilot.press("plus")
         await pilot.pause()
-        assert body.horizon == "MTD"
+        assert body.horizon == "1w"
         assert str(app.query_one("#weight-head").content) != before
 
 
-async def test_zoom_clamps_at_all(make_app, db):
+async def test_zoom_clamps_at_both_ends(make_app, db):
+    """Wrapping from `all` back to `1w` on a keypress reads as a glitch.
+
+    Both ends, in one test: the old version only pressed one key and so only ever
+    covered one clamp, which meant the other end was never exercised at all.
+    """
     _seed(db)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.pause()
+        body = app.query_one("#body")
         for _ in range(10):
+            await pilot.press("minus")
+        assert body.horizon == "all", "zooming out must stop at the widest horizon"
+        for _ in range(20):
             await pilot.press("plus")
-        assert app.query_one("#body").horizon == "all"
+        assert body.horizon == "1w", "zooming in must stop at the narrowest horizon"
 
 
 async def test_a_wider_window_shows_more_of_the_series(make_app, db):

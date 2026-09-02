@@ -29,6 +29,7 @@ from daylogs import horizon as hz
 from daylogs.fmt import human_date
 from daylogs.markup import to_markdown
 from daylogs.tui.common import PanelTab
+from daylogs.tui.widgets import BAD, WARN, mark, trend_style
 
 _EMPTY = "no summary yet — press r"
 
@@ -75,7 +76,13 @@ class SummaryTab(PanelTab):
         else:
             kg = latest["kg"]
             d7 = body.weight_delta(conn, end_date=date, days=7)
-            trend = "" if d7 is None else f"  {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            # Coloured with the same rule as the Body tab, via the same function.
+            # Marked after the width arithmetic, per mark()'s contract — the arrow
+            # and sign carry the direction, so colour only emphasises.
+            trend = ""
+            if d7 is not None:
+                arrow = "▼" if d7 < 0 else "▲"
+                trend = "  " + mark(f"{arrow}{abs(d7):g} vs 7d", trend_style(d7))
             lines.append(f"  weight    {kg:>7,.1f} kg{trend}")
 
         kcal = body.day_kcal(conn, date=date)
@@ -84,8 +91,9 @@ class SummaryTab(PanelTab):
             lines.append(f"  in        {kcal:>7,} kcal")
             lines.append("  BMR             —   press h on Body")
         else:
+            net = kcal - bmr
             lines.append(f"  in        {kcal:>7,} / {bmr:,} BMR")
-            lines.append(f"  net       {kcal - bmr:>+7,} kcal")
+            lines.append(f"  net       {mark(f'{net:>+7,}', trend_style(net))} kcal")
 
         meals = len(body.list_food(conn, date=date))
         lines.append(f"  logged    {meals:>7} meal{'' if meals == 1 else 's'}")
@@ -111,14 +119,22 @@ class SummaryTab(PanelTab):
                 lines.append(f"  budget          —   press r on Money ({pending} to roll)")
         else:
             lines[0] = f"  spent   {s.total_spent:>10,.2f} of {s.total_budget:,.2f}"
-            lines.append(f"  left    {s.remaining:>10,.2f}")
+            # More left is better, so the sign convention flips relative to weight
+            # and calories — hence the keyword rather than a second rule.
+            left = mark(f"{s.remaining:>10,.2f}", trend_style(s.remaining, falling_is_good=False))
+            lines.append(f"  left    {left}")
             if month == self.app.today()[:7]:
                 pct = round(s.total_spent / s.total_budget * 100)
-                lines.append(f"  burn    {pct:>9}% on day {s.day_of_month}/{s.days_in_month}")
+                # Amber against *elapsed days*, not a flat threshold: 84% on day 27
+                # of 31 is fine and the same number on day 12 is not. This is the
+                # rule the Money tab's burn bar already draws with its `┃` marker.
+                elapsed = s.day_of_month / s.days_in_month * 100
+                burn = f"{pct:>9}% on day {s.day_of_month}/{s.days_in_month}"
+                lines.append(f"  burn    {mark(burn, WARN if pct > elapsed else '')}")
 
         if s.over_budget:
             names = ", ".join(c.category for c in s.over_budget[:2])
-            lines.append(f"  over      {names}  ⚠")
+            lines.append(f"  over      {mark(f'{names}  ⚠', BAD)}")
         return "\n".join(lines)
 
     # ── rendering ────────────────────────────────────────────────────────

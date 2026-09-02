@@ -21,7 +21,7 @@ from daylogs.fmt import hhmm, human_date
 from daylogs.parse import ParseError, parse_food, parse_profile, parse_weigh
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
-from daylogs.tui.widgets import BAD, GOOD, burn_bar, mark, sparkline
+from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style
 
 _CHART_H = 8
 _YLABEL_W = 7
@@ -309,11 +309,12 @@ class BodyTab(PanelTab):
         self.reload()
 
     def key_zoom_in(self) -> None:
-        self.horizon = hz.next_horizon(self.horizon, 1)
+        # HORIZONS runs short -> long, so magnifying is a step *back* along it.
+        self.horizon = hz.next_horizon(self.horizon, -1)
         self.reload()
 
     def key_zoom_out(self) -> None:
-        self.horizon = hz.next_horizon(self.horizon, -1)
+        self.horizon = hz.next_horizon(self.horizon, 1)
         self.reload()
 
     def key_back(self) -> bool:
@@ -618,7 +619,6 @@ def _delta(value: float | None, label: str) -> str:
     if value is None:
         return f"— vs {label}"
     arrow = "▼" if value < 0 else ("▲" if value > 0 else "→")
-    style = GOOD if value < 0 else (BAD if value > 0 else "")
-    return mark(f"{arrow} {abs(value):g} vs {label}", style)
+    return mark(f"{arrow} {abs(value):g} vs {label}", trend_style(value))
 
 

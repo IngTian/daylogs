@@ -489,3 +489,147 @@ async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
     assert "1,284.50" in money_panel, f"clipped at 80 columns: {money_panel!r}"
     for line in (body_panel + "\n" + money_panel).splitlines():
         assert len(line) <= 76, f"line too wide for a stacked panel: {line!r}"
+
+# ── colour on the Day tab ────────────────────────────────────────────────
+# The palette reached Body and Money but not the tab the app opens to, so the
+# landing screen showed the same facts in plain white. These assert on the
+# individual line rather than the whole panel: a test that only asks "is GOOD
+# anywhere in this panel" passes on a neighbouring line's colour.
+
+
+def _line(panel: str, needle: str) -> str:
+    for line in panel.splitlines():
+        if needle in line:
+            return line
+    raise AssertionError(f"no {needle!r} line in panel:\n{panel}")
+
+
+async def test_the_body_panel_colours_the_weight_trend_by_direction(make_app, db):
+    """Down is good — the same assumption the Body tab already makes, and the
+    arrow carries the direction regardless, so colour stays emphasis."""
+    from daylogs.body import add_weight
+    from daylogs.tui.widgets import BAD, GOOD
+
+    add_weight(db, kg=71.5, date="2026-08-24", at=1787400000, note="")
+    add_weight(db, kg=71.2, date="2026-08-30", at=1788000000, note="")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "body"), "weight")
+    assert GOOD in line, f"a falling weight is not green: {line!r}"
+    assert BAD not in line
+
+
+async def test_a_rising_weight_is_red_on_the_day_panel(make_app, db):
+    from daylogs.body import add_weight
+    from daylogs.tui.widgets import BAD, GOOD
+
+    add_weight(db, kg=71.2, date="2026-08-24", at=1787400000, note="")
+    add_weight(db, kg=71.9, date="2026-08-30", at=1788000000, note="")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "body"), "weight")
+    assert BAD in line, f"a rising weight is not red: {line!r}"
+    assert GOOD not in line
+
+
+async def test_the_body_panel_colours_net_by_direction(make_app, db, make_cfg):
+    """A deficit is green on the same reasoning as a falling weight, and the sign
+    on the number is the signal colour only emphasises."""
+    from daylogs.body import add_food, add_weight
+    from daylogs.tui.widgets import GOOD
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
+    add_food(db, description="eggs", kcal=400, source="labeled",
+             date="2026-08-30", at=1788010000)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1990-01-01")
+    app = make_app(cfg=cfg, now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "body"), "net")
+    assert GOOD in line, f"400 kcal against maintenance is not a green net: {line!r}"
+
+
+async def test_a_surplus_net_is_red_on_the_day_panel(make_app, db, make_cfg):
+    from daylogs.body import add_food, add_weight
+    from daylogs.tui.widgets import BAD
+
+    add_weight(db, kg=70.0, date="2026-08-30", at=1788000000, note="")
+    add_food(db, description="feast", kcal=4000, source="labeled",
+             date="2026-08-30", at=1788010000)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1990-01-01")
+    app = make_app(cfg=cfg, now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "body"), "net")
+    assert BAD in line, f"4,000 kcal against maintenance is not a red net: {line!r}"
+
+
+async def test_the_money_panel_colours_what_is_left(make_app, db):
+    """Money's own header already paints what is left green; the Day panel showing
+    the same figure in white was the inconsistency."""
+    from daylogs.money import add_expense, upsert_budget
+    from daylogs.tui.widgets import GOOD
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=500.0, source="manual")
+    add_expense(db, amount=120.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "money"), "left")
+    assert GOOD in line, f"money left over is not green: {line!r}"
+
+
+async def test_an_overrun_is_red_on_both_lines_of_the_money_panel(make_app, db):
+    """The glyph is still asserted separately: colour is never the only signal."""
+    from daylogs.money import add_expense, upsert_budget
+    from daylogs.tui.widgets import BAD
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=100.0, source="manual")
+    add_expense(db, amount=250.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        panel = _panel(app, "money")
+    assert BAD in _line(panel, "left"), "a negative remainder is not red"
+    assert BAD in _line(panel, "over"), "the overrun line is not red"
+    assert "⚠" in panel, "colour must not have replaced the glyph"
+
+
+async def test_burn_is_amber_only_when_it_runs_ahead_of_the_month(make_app, db):
+    """84% spent on day 27 of 31 is fine and the same number on day 12 is not, so
+    the warning is against elapsed days rather than against a flat threshold."""
+    from daylogs.money import add_expense, upsert_budget
+    from daylogs.tui.widgets import WARN
+
+    # Day 30 of 31 is ~97% elapsed. 99 of 100 spent is ahead of that, and still
+    # under budget — so this is the warning state, not the overrun state.
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=100.0, source="manual")
+    add_expense(db, amount=99.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "money"), "burn")
+    assert WARN in line, f"spending ahead of the month is not flagged: {line!r}"
+
+
+async def test_burn_is_plain_when_spending_is_behind_the_month(make_app, db):
+    from daylogs.money import add_expense, upsert_budget
+    from daylogs.tui.widgets import WARN
+
+    upsert_budget(db, month="2026-08", name="Grocery", category="grocery",
+                  amount=500.0, source="manual")
+    add_expense(db, amount=120.0, description="shop", category="grocery",
+                date="2026-08-10")
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "money"), "burn")
+    assert WARN not in line, f"24% spent on day 30 must not warn: {line!r}"

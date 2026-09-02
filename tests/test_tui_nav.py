@@ -157,7 +157,7 @@ async def test_brackets_step_by_the_active_range(make_app):
         await pilot.press("3")
         await pilot.pause()
         money = app.query_one("#money")
-        await pilot.press("plus")  # 3m
+        await pilot.press("minus")  # zoom out: MTD -> 3m
         await pilot.press("left_square_bracket")
         assert money.view.anchor == "2026-05-27"
 
@@ -175,7 +175,12 @@ async def test_brackets_browse_reports_on_summary(make_app, db):
 
 
 # ── zoom ─────────────────────────────────────────────────────────────────
-async def test_plus_widens_the_money_horizon_and_minus_narrows(make_app):
+async def test_plus_magnifies_the_money_horizon_and_minus_pulls_back(make_app):
+    """`+` is a magnifying glass: a shorter window, seen in more detail.
+
+    It used to be the other way round — `+` widened — which put it at odds with
+    every map and image viewer, and with the name of the action it calls.
+    """
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await pilot.press("3")
@@ -183,12 +188,12 @@ async def test_plus_widens_the_money_horizon_and_minus_narrows(make_app):
         money = app.query_one("#money")
         assert money.view.horizon == "MTD"
         await pilot.press("plus")
-        assert money.view.horizon == "3m"
+        assert money.view.horizon == "1m", "+ must shorten the window, not widen it"
         await pilot.press("minus")
         assert money.view.horizon == "MTD"
 
 
-async def test_plus_zooms_the_body_horizon_and_both_tabs_share_the_list(make_app):
+async def test_plus_magnifies_the_body_horizon_and_both_tabs_share_the_list(make_app):
     """The same horizon list serves Body and Money, so `+` means one thing."""
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
@@ -197,9 +202,23 @@ async def test_plus_zooms_the_body_horizon_and_both_tabs_share_the_list(make_app
         body = app.query_one("#body")
         assert body.horizon == "1m"
         await pilot.press("plus")
-        assert body.horizon == "MTD"
+        assert body.horizon == "1w", "+ must shorten the window, not widen it"
         await pilot.press("minus")
         assert body.horizon == "1m"
+
+
+async def test_equals_is_the_same_key_as_plus(make_app):
+    """`+` needs shift and `=` does not; on a zoom key that is friction for
+    nothing, so both are bound and must not drift apart."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await pilot.press("3")
+        await pilot.pause()
+        money = app.query_one("#money")
+        await pilot.press("equals_sign")
+        assert money.view.horizon == "1m"
+        await pilot.press("equals_sign")
+        assert money.view.horizon == "1w"
 
 
 # ── r means different things per tab ─────────────────────────────────────

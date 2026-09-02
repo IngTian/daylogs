@@ -236,11 +236,11 @@ async def test_grouped_chip_shows_in_the_status_hint(make_app, seeded):
 
 
 # ── range ────────────────────────────────────────────────────────────────
-async def test_widening_the_horizon_changes_the_header_and_totals(make_app, seeded):
+async def test_zooming_out_widens_the_horizon_and_changes_the_header_and_totals(make_app, seeded):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
-        await pilot.press("plus")   # MTD -> 3m, which reaches back into May
+        await pilot.press("minus")  # MTD -> 3m, which reaches back into May
         await pilot.pause()
         head = str(app.query_one("#money-head").content)
     assert "MAY" in head.upper() and "AUG" in head.upper()
@@ -252,7 +252,7 @@ async def test_all_time_label(make_app, seeded):
     async with app.run_test() as pilot:
         await go_money(pilot, app)
         for _ in range(5):
-            await pilot.press("plus")
+            await pilot.press("minus")
         await pilot.pause()
         head = str(app.query_one("#money-head").content)
     assert "ALL TIME" in head
@@ -273,7 +273,7 @@ async def test_calendar_marker_hidden_for_a_multi_month_range(make_app, seeded):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
-        await pilot.press("plus")
+        await pilot.press("minus")
         await pilot.pause()
         bar = str(app.query_one("#money-bar").content)
     assert "┃" not in bar
@@ -296,7 +296,7 @@ async def test_multi_month_budget_is_the_sum(make_app, seeded, db):
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await go_money(pilot, app)
-        await pilot.press("plus")
+        await pilot.press("minus")
         await pilot.pause()
         head = str(app.query_one("#money-head").content)
     assert "500.00" in head
