@@ -308,7 +308,7 @@ async def test_the_footer_never_advertises_a_key_nothing_handles(make_app):
         keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
     assert "regenerate" in keys
     assert "next view" not in keys
-    assert "wider" not in keys
+    assert "zoom in" not in keys
 
 
 async def test_the_footer_still_advertises_keys_the_tab_does_handle(make_app):
@@ -328,4 +328,4 @@ async def test_body_and_money_keep_their_sub_view_and_horizon_keys(make_app):
             await pilot.pause()
             keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
             assert "next view" in keys
-            assert "wider" in keys
+            assert "zoom in" in keys

@@ -336,11 +336,11 @@ class MoneyTab(PanelTab):
         self.reload()
 
     def key_zoom_in(self) -> None:
-        self.view.widen()
+        self.view.narrow()
         self.reload()
 
     def key_zoom_out(self) -> None:
-        self.view.narrow()
+        self.view.widen()
         self.reload()
 
     def key_sort_date(self) -> None:

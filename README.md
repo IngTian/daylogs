@@ -102,7 +102,8 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | `[` `]` | previous / next period — report on Day, day on Body, month on Money |
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
-| `+` `-` | widen / narrow the time horizon (Body, Money): `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
+| `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
+| `-` | zoom **out** — a longer horizon: `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
 | `?` | the full keymap |
 | `u` | undo the last delete or edit |
 | `esc` | back out one step — never quits |

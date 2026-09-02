@@ -309,11 +309,12 @@ class BodyTab(PanelTab):
         self.reload()
 
     def key_zoom_in(self) -> None:
-        self.horizon = hz.next_horizon(self.horizon, 1)
+        # HORIZONS runs short -> long, so magnifying is a step *back* along it.
+        self.horizon = hz.next_horizon(self.horizon, -1)
         self.reload()
 
     def key_zoom_out(self) -> None:
-        self.horizon = hz.next_horizon(self.horizon, -1)
+        self.horizon = hz.next_horizon(self.horizon, 1)
         self.reload()
 
     def key_back(self) -> bool:
