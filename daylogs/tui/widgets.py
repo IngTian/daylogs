@@ -52,6 +52,24 @@ def mark(text: str, style: str = "") -> str:
     return f"[{style}]{text}[/]" if style else text
 
 
+def view_row(names: tuple[str, ...], active: str) -> str:
+    """The sub-view strip: every view a tab has, with the current one in bold.
+
+    Money drew this for its three panes from the start. Body had the same toggle
+    — weigh-ins or meals, on `tab` — and drew nothing, so the key was
+    undiscoverable and the weight table read as having come from nowhere.
+
+    Shared rather than cloned so that "the two tabs look the same" is true by
+    construction. Two call sites that merely happen to agree is exactly how
+    widgets' good/bad colours drifted out of PALETTE.
+
+    An unknown `active` marks nothing rather than raising: this runs inside a
+    render, where an exception costs the whole frame, and an unmarked row still
+    tells the truth about which views exist.
+    """
+    return "   ".join(f"[b]{n}[/b]" if n == active else n for n in names)
+
+
 def trend_style(value: float | None, *, falling_is_good: bool = True) -> str:
     """Which way is good, for a signed number. The one place that rule lives.
 

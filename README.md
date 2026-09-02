@@ -98,7 +98,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 |---|---|
 | `1` `2` `3` | Day / Body / Money |
 | `←` `→` | previous / next tab — stops at the ends rather than wrapping |
-| `tab` `shift+tab` | next / previous sub-view *within* the tab (Body, Money) |
+| `tab` `shift+tab` | next / previous sub-view *within* the tab — the strip above the table lists them and marks the one you're on (Body, Money) |
 | `[` `]` | previous / next period — report on Day, day on Body, month on Money |
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |

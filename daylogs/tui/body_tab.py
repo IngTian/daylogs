@@ -21,7 +21,7 @@ from daylogs.fmt import hhmm, human_date
 from daylogs.parse import ParseError, parse_food, parse_profile, parse_weigh
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
-from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style
+from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style, view_row
 
 _CHART_H = 8
 _YLABEL_W = 7
@@ -35,6 +35,13 @@ _DEFAULT_HORIZON = "1m"
 # 60 seconds — so it vanished while you were still waiting, indistinguishable from
 # a dropped keypress. Same spacing convention as summary_tab's "generating…".
 _ESTIMATING = "   estimating…"
+# The two sub-views `tab` walks, in the order the strip draws them. Named so the
+# header, the strip and the toggle cannot disagree about what exists.
+_VIEWS = ("weight", "food")
+# How many weigh-ins the weight view lists. Shared with the header, which states
+# the number — a header quoting a different count than the query uses is the same
+# defect as a header naming the wrong view.
+_WEIGHT_ROWS = 60
 
 
 class BodyTab(PanelTab):
@@ -72,6 +79,9 @@ class BodyTab(PanelTab):
                 yield Static("ENERGY", classes="panel-title")
                 yield Static(id="energy-body", classes="panel-body")
         yield Static(id="food-head", classes="pane-title")
+        # Same position and class as Money's pane strip, so both tabs answer
+        # "which view am I on" in the same place on screen.
+        yield Static(id="body-views", classes="muted")
         yield DataTable(id="body-table", cursor_type="row")
         yield Static(id="inbox-line", classes="muted")
 
@@ -155,14 +165,26 @@ class BodyTab(PanelTab):
             self._energy_panel(conn, cfg, date=date, kcal=kcal, bmr=bmr, span=span)
         )
 
-        label = human_date(date)
-        if bmr is None:
-            self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
+        # The header describes the table directly beneath it, so it has to follow
+        # table_mode. It used to read "FOOD … kcal in / BMR → net" unconditionally,
+        # including while the table listed weigh-ins — a label that is wrong is
+        # worse than one that is missing.
+        if self.table_mode == "weight":
+            # Says "recent" rather than naming the span, because list_weight is not
+            # span-filtered: it returns the latest 60 rows whatever the horizon and
+            # whatever day is being viewed. Claiming the span here would be the same
+            # class of lie this fixes.
+            self._food_head = f"WEIGHT   {_WEIGHT_ROWS} most recent weigh-ins"
         else:
-            self._food_head = (
-                f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
-            )
+            label = human_date(date)
+            if bmr is None:
+                self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
+            else:
+                self._food_head = (
+                    f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
+                )
         self._paint_food_head()
+        self.query_one("#body-views", Static).update(view_row(_VIEWS, self.table_mode))
 
         self._fill_table(date)
 
@@ -225,7 +247,7 @@ class BodyTab(PanelTab):
         self._ids = []
         if self.table_mode == "weight":
             table.add_columns("date", "kg", "note")
-            for r in body.list_weight(self.app.conn, limit=60):
+            for r in body.list_weight(self.app.conn, limit=_WEIGHT_ROWS):
                 table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
                 self._ids.append(r["id"])
         else:
@@ -288,7 +310,7 @@ class BodyTab(PanelTab):
             self.app.prompt.open("food", prefill=parse.render_food(row))
 
     def key_next_subview(self) -> None:
-        self.table_mode = "weight" if self.table_mode == "food" else "food"
+        self.table_mode = _VIEWS[(_VIEWS.index(self.table_mode) + 1) % len(_VIEWS)]
         self.reload()
 
     key_prev_subview = key_next_subview  # only two sub-views; direction is moot
