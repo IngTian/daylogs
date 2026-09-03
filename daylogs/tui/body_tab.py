@@ -131,7 +131,15 @@ class BodyTab(PanelTab):
         else:
             d7 = body.weight_delta(conn, end_date=date, days=7)
             d30 = body.weight_delta(conn, end_date=date, days=30)
-            head = f"WEIGHT   {kg:g} kg   {_delta(d7, '7d')}   {_delta(d30, '30d')}"
+            head = f"WEIGHT   {kg:g} kg"
+            # A bare number, next to the weight it restates. No band and no colour:
+            # "overweight" is a judgement this app does not otherwise make, and there
+            # is no BMI chart for the same reason — it is the weight curve times a
+            # constant.
+            index = body.bmi(cfg, kg)
+            if index is not None:
+                head += f"   BMI {index:.1f}"
+            head += f"   {_delta(d7, '7d')}   {_delta(d30, '30d')}"
             # The reading is the latest *on or before* the viewed day, which can
             # be much older. Showing a stale number as today's is the kind of
             # quiet wrongness that makes a tracker untrustworthy.
@@ -174,8 +182,16 @@ class BodyTab(PanelTab):
 
         kcal = body.day_kcal(conn, date=date)
         bmr = body.compute_bmr(cfg, kg, today=date)
+        # Resolved through the data layer rather than multiplied here: four surfaces
+        # read the same burn, and four compositions is four chances for one panel to
+        # measure the same day against two different baselines.
+        factor, origin = body.resolved_factor(conn, cfg, date=date)
+        burn = body.day_tdee(conn, cfg, date=date)
         self.query_one("#energy-body", Static).update(
-            self._energy_panel(conn, cfg, date=date, kcal=kcal, bmr=bmr, span=span)
+            self._energy_panel(
+                conn, cfg, date=date, kcal=kcal, bmr=bmr,
+                burn=burn, factor=factor, origin=origin, span=span,
+            )
         )
 
         # The header describes the table directly beneath it, so it has to follow
@@ -190,7 +206,15 @@ class BodyTab(PanelTab):
             self._food_head = f"WEIGHT   {_WEIGHT_ROWS} most recent weigh-ins"
         else:
             label = human_date(date)
-            if bmr is None:
+            if burn is not None:
+                # "burn", not "BMR": with a factor the baseline is what the day
+                # actually cost, and naming it BMR would be measuring against resting
+                # expenditure while claiming otherwise.
+                self._food_head = (
+                    f"FOOD   {label}   {kcal:,} kcal in / {burn:,} burn"
+                    f" → {kcal - burn:+,} net"
+                )
+            elif bmr is None:
                 self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
             else:
                 self._food_head = (
@@ -220,11 +244,19 @@ class BodyTab(PanelTab):
         """Braille cells inside the trend panel, after the y labels and the axis."""
         return max(16, self.panel_width("#panel-trend", minimum=24) - _YLABEL_W - 1)
 
-    def _energy_panel(self, conn, cfg, *, date, kcal, bmr, span) -> str:
+    def _energy_panel(
+        self, conn, cfg, *, date, kcal, bmr, burn, factor, origin, span
+    ) -> str:
         """Intake against maintenance for the day, then the same over the horizon.
 
-        A calorie count means nothing without a baseline, which is why BMR sits
-        next to it rather than on its own line elsewhere.
+        A calorie count means nothing without a baseline, which is why the baseline
+        sits next to it rather than on its own line elsewhere.
+
+        With an activity factor the baseline is `burn` — what the day actually cost —
+        and the two rows that derive it stay on screen. That is deliberate: a factor
+        rescales every calorie judgement for its day, so an inferred number with
+        nothing to make you doubt it would quietly become the baseline for everything.
+        Without a factor every line here is exactly what it was before.
         """
         lines: list[str] = []
         if bmr is None:
@@ -235,16 +267,27 @@ class BodyTab(PanelTab):
             lines.append("  BMR             —   press h to set height,")
             lines.append("                      sex and birthday")
         else:
-            net = kcal - bmr
+            # What `net` is measured against, and the one value the bar and the
+            # percentage may use — naming it once is what keeps this panel from
+            # measuring the same day against two different baselines.
+            against = bmr if burn is None else burn
             lines.append(f"  in        {kcal:>7,} kcal")
-            lines.append(f"  BMR      −{bmr:>7,}")
+            if burn is None:
+                lines.append(f"  BMR      −{bmr:>7,}")
+            else:
+                # BMR and activity derive `burn`; `in`, `burn` and `net` are the sum.
+                # So BMR drops its minus sign: it is no longer a term of `net`, and a
+                # column of signs that does not add up is worse than no signs.
+                lines.append(f"  BMR       {bmr:>7,}")
+                lines.append(f"  activity  {f'×{factor:g}':>7}  {origin}")
+                lines.append(f"  burn     −{against:>7,}")
             lines.append("            ─────────")
-            lines.append(f"  net       {net:>+7,}")
+            lines.append(f"  net       {kcal - against:>+7,}")
             if kcal:
                 lines.append("")
                 bar_w = max(10, self.panel_width("#panel-energy", minimum=24) - 6)
-                lines.append(f"  {burn_bar(kcal, bmr, width=bar_w, marker_frac=None)}")
-                lines.append(f"  {round(kcal / bmr * 100)}% of maintenance")
+                lines.append(f"  {burn_bar(kcal, against, width=bar_w, marker_frac=None)}")
+                lines.append(f"  {round(kcal / against * 100)}% of maintenance")
 
         avg = body.kcal_average(conn, start=span.start, end=span.end)
         logged = body.kcal_series_between(conn, start=span.start, end=span.end)
@@ -254,8 +297,11 @@ class BodyTab(PanelTab):
             lines.append("    no food logged in this window")
         else:
             lines.append(f"    avg in    {avg:>7,} kcal  ({len(logged)} days logged)")
-            if bmr is not None:
-                lines.append(f"    avg net   {avg - bmr:>+7,}")
+            # Per day, not this average minus today's burn: a factor describes one
+            # day, so a single gym session must not restate the whole window.
+            avg_net = body.net_average(conn, cfg, start=span.start, end=span.end)
+            if avg_net is not None:
+                lines.append(f"    avg net   {avg_net:>+7,}")
             spark_w = max(10, self.panel_width("#panel-energy", minimum=24) - 6)
             lines.append(
                 # Calories are a magnitude from zero, so scale from zero: a run of
@@ -307,6 +353,7 @@ class BodyTab(PanelTab):
                 f"{cfg.height_cm:g}" if cfg.height_cm else "",
                 cfg.sex or "",
                 cfg.birthday or "",
+                cfg.activity or "",
             )
             if v
         )
@@ -527,6 +574,14 @@ class BodyTab(PanelTab):
                 if not ok
             )
             self.app.notify(f"saved — still need {missing} for BMR", timeout=5)
+        elif body.baseline_factor(cfg) is None:
+            # An empty state names the fix. Resting BMR is not maintenance, and
+            # nothing else on screen would tell you that a level is what turns one
+            # into the other.
+            self.app.notify(
+                "profile saved — add desk, light, active or heavy for maintenance",
+                timeout=6,
+            )
         else:
             self.app.notify("profile saved", timeout=3)
         self.app.refresh_tabs()

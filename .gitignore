@@ -8,6 +8,8 @@ dist/
 .venv/
 docs/
 .superpowers/
+# Local Claude Code settings for this checkout. Machine-specific, never shared.
+.claude/
 .DS_Store
 *.spec
 dist_check/

@@ -344,19 +344,23 @@ def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
     )
 
 
-def day_factor(conn, cfg, *, date: str) -> float | None:
-    """The multiplier to apply to BMR for `date`, or None if there is nothing to say.
+def resolved_factor(conn, cfg, *, date: str) -> tuple[float | None, str | None]:
+    """`(multiplier, where it came from)` for `date` — `"logged"` or `"profile"`.
 
     Three steps, each a real state:
 
     1. the latest activity row carrying a factor — an inference over what you did;
     2. otherwise the profile baseline, which is the common case and needs no input;
-    3. otherwise None, and `net` sits against resting BMR exactly as it did before.
+    3. otherwise `(None, None)`, and `net` sits against resting BMR as it did before.
 
     Latest-wins rather than first: re-logging supersedes, which is the same rule the
     weight series applies to two weigh-ins on one day. A row whose factor is NULL —
     an inference that never landed — falls through to the baseline rather than
-    poisoning the day with nothing.
+    poisoning the day with nothing, and reports the baseline's origin, not the log's.
+
+    The origin comes back because it reaches the screen. A factor rescales every
+    calorie judgement for its day, and a multiplier with nothing to make you doubt it
+    quietly becomes the baseline for everything.
     """
     row = conn.execute(
         "SELECT factor FROM activity WHERE date = ? AND factor IS NOT NULL"
@@ -364,8 +368,18 @@ def day_factor(conn, cfg, *, date: str) -> float | None:
         (_check_date(date),),
     ).fetchone()
     if row is not None:
-        return float(row["factor"])
-    return baseline_factor(cfg)
+        return float(row["factor"]), "logged"
+    base = baseline_factor(cfg)
+    return (base, "profile") if base is not None else (None, None)
+
+
+def day_factor(conn, cfg, *, date: str) -> float | None:
+    """The multiplier to apply to BMR for `date`, or None if there is nothing to say.
+
+    One resolution, two callers: only the ENERGY panel wants the origin. Resolving it
+    twice is how a header and a panel start disagreeing about the same day.
+    """
+    return resolved_factor(conn, cfg, date=date)[0]
 
 
 def compute_tdee(bmr: int | None, factor: float | None) -> int | None:
@@ -378,6 +392,49 @@ def compute_tdee(bmr: int | None, factor: float | None) -> int | None:
     if bmr is None or factor is None:
         return None
     return round(bmr * factor)
+
+
+def day_tdee(conn, cfg, *, date: str) -> int | None:
+    """What `date` cost: that day's resting BMR, scaled by that day's factor.
+
+    The one place that composition lives. Four surfaces read it — the ENERGY panel,
+    the FOOD header, the Day tab's BODY block and the digest payload — and four
+    separate compositions is four chances for one panel to measure against two
+    different baselines.
+
+    The weight is the latest on or before `date`, the rule every other reader
+    follows: a week-old weigh-in is the best available answer. A day before the first
+    weigh-in has no BMR and therefore no burn.
+    """
+    latest = latest_weight(conn, on_or_before=date)
+    bmr = compute_bmr(cfg, latest["kg"] if latest else None, today=date)
+    return compute_tdee(bmr, day_factor(conn, cfg, date=date))
+
+
+def net_series_between(
+    conn, cfg, *, start: str | None, end: str
+) -> list[tuple[str, int]]:
+    """Daily `intake − that day's burn`, ascending, for the days that have both.
+
+    Per day, not "the window's average intake minus today's burn": a factor describes
+    one day, so a single gym session must not restate a month of net. Days with no
+    food are absent — a logging gap is not a fast, the same rule
+    `kcal_series_between` follows — and so are days with no resolvable burn, because
+    showing intake as if it were net reads as an enormous surplus.
+    """
+    return [
+        (date, kcal - tdee)
+        for date, kcal in kcal_series_between(conn, start=start, end=end)
+        if (tdee := day_tdee(conn, cfg, date=date)) is not None
+    ]
+
+
+def net_average(conn, cfg, *, start: str | None, end: str) -> int | None:
+    """Mean net over the days that have both an intake and a burn."""
+    series = net_series_between(conn, cfg, start=start, end=end)
+    if not series:
+        return None
+    return round(sum(v for _, v in series) / len(series))
 
 
 def bmi(cfg, kg: float | None) -> float | None:

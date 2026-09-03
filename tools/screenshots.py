@@ -102,10 +102,15 @@ Groceries are tracking under budget with two days left. Utilities went over by 5
 the hydro bill landed early, so it is a timing artifact rather than a real overrun.
 """
 
+# `activity` is set so the screenshots show the ENERGY panel as it reads with a
+# maintenance figure — the common case, and the whole point of the setting. It is a
+# profile baseline rather than a logged activity row deliberately: an `a`-logged
+# factor would advertise a flow this release does not ship.
 CONFIG = """timezone   = "America/Toronto"
 height_cm  = 175.0
 sex        = "male"
 birthday   = "1995-04-12"
+activity   = "light"
 """
 
 

@@ -123,7 +123,7 @@ figures above them are always today's.
 | `w` | weigh in |
 | `f` | log food |
 | `p` | log food from a photo |
-| `h` | set height, sex and birthday (for BMR) |
+| `h` | set height, sex, birthday and your ordinary-day level (for BMR, maintenance and BMI) |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
 
@@ -259,13 +259,14 @@ quarter; the bar says so when it's hidden.
 
 ### Panels
 
-**Day** shows BODY beside MONEY — today's weight and trend, intake against BMR,
-this month's spend against its budget and how far through the month you are — with
-the generated daily read scrolling underneath. The figures are always today's; the
-read is dated by the day it describes, which is why each half carries its own date.
+**Day** shows BODY beside MONEY — today's weight, BMI and trend, intake against
+what the day cost, this month's spend against its budget and how far through the
+month you are — with the generated daily read scrolling underneath. The figures are
+always today's; the read is dated by the day it describes, which is why each half
+carries its own date.
 
-**Body** shows TREND (the braille chart) beside ENERGY — intake against BMR for
-the day, then the average and a sparkline over the horizon.
+**Body** shows TREND (the braille chart) beside ENERGY — intake against
+maintenance for the day, then the average and a sparkline over the horizon.
 
 ![The Body tab: the braille weight chart beside the day's energy balance](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/body.png)
 
@@ -283,6 +284,56 @@ Shares are of **gross** spend. A refund can push a category below zero for the
 window — a reimbursed bill, a returned order — and such a row keeps its amount but
 shows no share, because a part-to-whole has no negative slice. It still appears on
 both panels, so the rows and the header total reconcile.
+
+### Maintenance, not resting BMR
+
+Mifflin-St Jeor gives **resting** expenditure — roughly what you'd burn asleep all
+day. Netting calories against that calls a sedentary day a deficit it isn't, and
+understates a hard one. So `net` is measured against **burn**: resting BMR times an
+activity factor.
+
+The factor comes from your **profile**, not from a daily entry. "Sat at a desk" is
+true almost every day, and a field you have to retype daily is one you skip — which
+leaves `net` on the wrong baseline. Set it once, with `h`:
+
+| Level | × | An ordinary day of |
+|---|---|---|
+| `desk` | 1.2 | sitting — desk work, little walking |
+| `light` | 1.375 | some walking, errands, light standing |
+| `active` | 1.55 | on your feet most of the day |
+| `heavy` | 1.725 | physical work |
+
+These are the standard PAL multipliers, **re-described on purpose**. The textbook
+labels bake habitual exercise into the band ("moderate: exercise 3–5 days a week"),
+and using those as a baseline *while also* logging hard days would count the
+exercise twice. A level here means a day with nothing logged, so the wording
+describes occupational movement only. Expect a different answer from an online TDEE
+calculator; double counting is the worse error.
+
+Nothing is assumed if you leave it out. With no level there is no factor, and every
+calorie figure sits against resting BMR exactly as it did before — silently
+defaulting to `desk` would raise your maintenance by 20% and restate every number on
+screen and in every summary already written.
+
+The ENERGY panel keeps the multiplier and where it came from on screen:
+
+```
+  in          1,200 kcal
+  BMR         1,780
+  activity     ×1.2  profile
+  burn     −  2,136
+            ─────────
+  net          -936
+```
+
+A factor rescales every calorie judgement for its day, so it says whether it came
+from your `profile` or was `logged`, rather than arriving as a number with nothing
+to make you doubt it. The window average underneath is computed **per day** against
+that day's own burn, so one hard day can't restate a whole month.
+
+**BMI** shows as a bare number beside your weight. No band, no colour and no chart:
+"overweight" is a judgement daylogs doesn't make, and a BMI chart would be the
+weight curve times a constant.
 
 ### The weight chart
 
@@ -324,9 +375,10 @@ Optional. `~/Documents/daylogs/config.toml`; every key has a default.
 
 ```toml
 timezone             = "America/Toronto"
-height_cm            = 170          # BMR input
+height_cm            = 170          # BMR input, and BMI
 sex                  = "female"     # BMR constant term only
 birthday             = "1990-01-01" # age, for BMR
+activity             = "desk"       # ordinary day: desk/light/active/heavy
 claude_model         = ""           # empty = CLI default
 theme                = "gruvbox"    # any Textual theme; `T` sets it for you
 summary_after_hour   = 6
@@ -348,10 +400,12 @@ Built-in categories: `grocery`, `restaurant`, `transport`, `housing`,
 `utilities`, `subscriptions`, `entertainment`, `education`, `other`. Adding
 one needs no code change — just a `[[category]]` block.
 
-Height, sex and birthday only feed the Mifflin-St Jeor BMR line. Leave them
-out and the Body tab shows calories without a maintenance baseline. You don't have
-to edit the file for those three — `h` on the Body tab writes them here for you,
-keeping your comments and `[[category]]` blocks intact.
+Height, sex and birthday feed the Mifflin-St Jeor BMR line, and height also gives
+BMI. Leave them out and the Body tab shows calories with no baseline at all.
+`activity` turns that resting number into maintenance — see [Maintenance, not
+resting BMR](#maintenance-not-resting-bmr) — and is deliberately not defaulted.
+You don't have to edit the file for any of the four: `h` on the Body tab writes them
+here for you, keeping your comments and `[[category]]` blocks intact.
 
 ## Photos from a phone
 

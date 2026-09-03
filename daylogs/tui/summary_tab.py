@@ -85,14 +85,28 @@ class SummaryTab(PanelTab):
                 trend = "  " + mark(f"{arrow}{abs(d7):g} vs 7d", trend_style(d7))
             lines.append(f"  weight    {kg:>7,.1f} kg{trend}")
 
+        # A bare number, no band and no colour — the same stance the Body tab takes.
+        # None without a height, which is the only state worth distinguishing.
+        index = body.bmi(cfg, kg)
+        if index is not None:
+            lines.append(f"  BMI       {index:>7.1f}")
+
         kcal = body.day_kcal(conn, date=date)
         bmr = body.compute_bmr(cfg, kg, today=date)
+        # The same call the Body tab's ENERGY panel makes. Two panels resolving
+        # maintenance separately is how they start disagreeing about one day.
+        burn = body.day_tdee(conn, cfg, date=date)
         if bmr is None:
             lines.append(f"  in        {kcal:>7,} kcal")
             lines.append("  BMR             —   press h on Body")
         else:
-            net = kcal - bmr
-            lines.append(f"  in        {kcal:>7,} / {bmr:,} BMR")
+            # With a factor the baseline is what the day cost; without one it is
+            # resting expenditure, and the label has to say which.
+            against = bmr if burn is None else burn
+            net = kcal - against
+            lines.append(
+                f"  in        {kcal:>7,} / {against:,} {'BMR' if burn is None else 'burn'}"
+            )
             lines.append(f"  net       {mark(f'{net:>+7,}', trend_style(net))} kcal")
 
         meals = len(body.list_food(conn, date=date))
