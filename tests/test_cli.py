@@ -134,7 +134,8 @@ def test_export_writes_a_csv_per_table(tmp_path, capsys):
     assert len(dirs) == 1, f"expected one dated directory, got {dirs}"
     written = sorted(p.name for p in dirs[0].glob("*.csv"))
     assert written == [
-        "budget.csv", "expense.csv", "food.csv", "recurring.csv", "report.csv", "weight.csv"
+        "activity.csv", "budget.csv", "expense.csv", "food.csv",
+        "recurring.csv", "report.csv", "weight.csv",
     ], written
 
     with (dirs[0] / "weight.csv").open(newline="") as fh:
@@ -178,7 +179,7 @@ def test_export_on_an_empty_database_still_writes_every_header(tmp_path):
     assert main(["export", str(dest)]) == 0
     d = next(iter(dest.glob("daylogs-export-*")))
     files = sorted(d.glob("*.csv"))
-    assert len(files) == 6
+    assert len(files) == 7, "a new table must appear in export without touching the exporter"
     for f in files:
         with f.open(newline="") as fh:
             header = next(csv.reader(fh))

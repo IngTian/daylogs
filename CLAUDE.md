@@ -23,14 +23,15 @@ deliberately cut, and adding one back is a scope decision, not a detail:
 ```
 daylogs/
   config.py   tomllib config + update_config; DAYLOGS_HOME overrides the data root
-  db.py       connect + six-table schema (no schema-migration framework)
+  db.py       connect + seven-table schema (no schema-migration framework)
   categories.py  constant category tuple, extensible via config.toml
   sigil.py    tokeniser: `!` category, `@` time, `~` note, `=` kcal, `#` cycle
   complete.py tab completion for `!` and `#` vocabularies (no Textual import)
   parse.py    pure grammar parsers on top of sigil.py, and the shared amount/limit rules
   horizon.py  the one time-window concept: Span, Axis, resolve_goto
   moneyview.py  all Money tab state as one value with named transitions
-  body.py     weight, food, trend windows, Mifflin-St Jeor BMR, restamp
+  body.py     weight, food, activity; trend windows; Mifflin-St Jeor BMR,
+              activity factor -> TDEE ("burn"), BMI, per-day net series, restamp
   money.py    expenses, recurring, budgets, summarize_span
   claude.py   three `claude -p` subprocess wrappers
   photo.py    clipboard (osascript) / inbox / path acquisition
@@ -82,6 +83,24 @@ appended prose where it was convenient rather than editing the map.
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand
   edge of the span), not a month.
+- **The activity factor is never defaulted, and `body.day_tdee` is the only place
+  BMR is multiplied by it.** Assuming `desk` for an unset profile would raise
+  maintenance 20% and silently restate every figure on screen and in every digest
+  already written, so "no factor" is a real state in which every calorie number sits
+  against resting BMR exactly as it did before. Four surfaces read the burn — the
+  ENERGY panel, the FOOD header, the Day tab's BODY block, `summary.build_payload` —
+  and four separate compositions is four chances for one panel to measure the same
+  day against two baselines. `resolved_factor` also returns *where* the factor came
+  from, because that reaches the screen: a multiplier rescales every calorie
+  judgement for its day, so it must not arrive with nothing to make you doubt it.
+  The level keywords are standard PAL bands **re-described** to mean "a day with
+  nothing logged" — the textbook labels bake habitual exercise in, and using those
+  while also logging hard days counts the exercise twice.
+- **Net over a window is computed per day, never as one subtraction.** A factor
+  describes a single day, so `avg_in − today's burn` lets one gym session restate a
+  whole month. `body.net_series_between` pairs each day's intake with that day's own
+  burn and skips days that lack either — a day before the first weigh-in has no BMR
+  to scale, and showing its intake as net reads as an enormous surplus.
 - **`horizon.py` is the single time-window concept**, shared by the Body chart and
   the Money tab. Never add a second one: v2 had chart windows on Body and ranges
   on Money, so `+` meant different things per tab and neither offered MTD or YTD.

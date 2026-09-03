@@ -1523,3 +1523,244 @@ async def test_tab_moves_the_mark_to_the_other_view(make_app, db):
         row = _view_row(app)
     assert "[b]weight[/b]" in row, f"the mark did not follow the tab: {row!r}"
     assert "[b]food[/b]" not in row
+
+
+# ── TDEE: net against a real maintenance figure ───────────────────────────
+# `net` used to compare intake against *resting* expenditure, so a sedentary day
+# read as a deficit it wasn't and a hard day understated one. These pin the
+# substitution, and — just as important — pin that a profile with no activity level
+# still reads exactly as it did before.
+
+# 180 cm, male, born 1996-01-01, weighing 80 kg: Mifflin-St Jeor gives
+# 10*80 + 6.25*180 - 5*30 + 5 = 1,780 resting, and 1,780 x 1.2 = 2,136 for a desk
+# day. Spelled out so a wrong number is a wrong number, not a recomputed agreement.
+_BMR = 1780
+_DESK_BURN = 2136
+_GYM_BURN = 2848  # x 1.6
+DAY = "2026-09-03"
+
+
+def _profile(make_cfg, **kw):
+    return make_cfg(height_cm=180, sex="male", birthday="1996-01-01", **kw)
+
+
+async def _energy_on(app, date=DAY):
+    body = app.query_one("#body")
+    body.viewing_date = date
+    body.reload()
+    return body
+
+
+def _row(panel: str, label: str) -> str:
+    """One labelled line of a panel.
+
+    Asserted per line rather than against the whole blob because the value column is
+    right-aligned inside a 7-wide field, so the minus sign is *detached* from its
+    digits — `BMR      −  1,780`. A substring check for "−1,780" tests nothing that
+    is on the screen.
+    """
+    for line in panel.splitlines():
+        if line.strip().startswith(label):
+            return line
+    raise AssertionError(f"no {label!r} line in:\n{panel}")
+
+
+def _has_no_row(panel: str, label: str) -> bool:
+    return not any(line.strip().startswith(label) for line in panel.splitlines())
+
+
+async def test_the_energy_panel_shows_burn_and_how_it_was_derived(
+    make_app, make_cfg, db
+):
+    """The multiplier stays on screen deliberately. A factor rescales every calorie
+    judgement for its day, so an inferred number with nothing to make you doubt it
+    would quietly become the baseline for everything."""
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        text = _energy(app)
+    assert f"{_BMR:,}" in _row(text, "BMR"), f"resting BMR is gone: {text!r}"
+    activity = _row(text, "activity")
+    assert "×1.2" in activity, f"the multiplier is not on screen: {activity!r}"
+    assert "profile" in activity, f"nothing says where it came from: {activity!r}"
+    burn = _row(text, "burn")
+    assert "−" in burn and f"{_DESK_BURN:,}" in burn, f"burn line is wrong: {burn!r}"
+    assert "-936" in _row(text, "net"), f"net is not 1,200 − 2,136: {text!r}"
+    # The arithmetic has to read correctly top to bottom: BMR is a term of `burn`,
+    # not a term of `net`, so it must not carry the minus sign any more.
+    assert "−" not in _row(text, "BMR"), f"BMR is still subtracted from intake: {text!r}"
+
+
+async def test_without_a_level_the_energy_panel_is_untouched(make_app, make_cfg, db):
+    """Opt-in, all the way down: no level and nothing logged means `net` sits against
+    resting BMR exactly as it did before any of this existed."""
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
+    app = make_app(cfg=_profile(make_cfg))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        text = _energy(app)
+    bmr = _row(text, "BMR")
+    assert "−" in bmr and f"{_BMR:,}" in bmr, f"BMR is not the subtrahend: {bmr!r}"
+    assert _has_no_row(text, "burn"), f"a burn line with no factor to build it: {text!r}"
+    assert _has_no_row(text, "activity"), f"an activity line, no factor: {text!r}"
+    assert "-580" in _row(text, "net"), f"net is not 1,200 − 1,780: {text!r}"
+
+
+async def test_a_logged_factor_says_it_was_logged(make_app, make_cfg, db):
+    """"profile" and "logged" are different claims, and the second one is the one
+    worth doubting."""
+    from daylogs.body import add_activity
+
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
+    add_activity(db, description="gym 1h", date=DAY, at=3, factor=1.6,
+                 source="estimated")
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        text = _energy(app)
+    activity = _row(text, "activity")
+    assert "×1.6" in activity and "logged" in activity, f"origin: {activity!r}"
+    assert "profile" not in activity, f"claims the baseline it superseded: {activity!r}"
+    assert f"{_GYM_BURN:,}" in _row(text, "burn"), f"burn ignored the log: {text!r}"
+
+
+async def test_percent_of_maintenance_is_against_burn_not_resting_bmr(
+    make_app, make_cfg, db
+):
+    """Otherwise one panel measures the same day against two different baselines.
+    2,136 kcal is exactly 100% of a desk day's burn and 120% of resting BMR, so the
+    number itself says which one was used."""
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="lots", kcal=_DESK_BURN, source="labeled", date=DAY, at=2)
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        text = _energy(app)
+    assert "100% of maintenance" in text, f"not measured against burn: {text!r}"
+
+
+async def test_the_horizon_average_net_is_per_day(make_app, make_cfg, db):
+    """One gym session must not restate a whole window's average net. Measuring the
+    window's average intake against *today's* burn would say −1,348 here, and
+    against resting BMR −280; per day it is −992.
+    """
+    from daylogs.body import add_activity
+
+    add_weight(db, kg=80.0, date="2026-09-02", at=1)
+    add_food(db, description="a", kcal=2000, source="labeled", date="2026-09-02", at=2)
+    add_food(db, description="b", kcal=1000, source="labeled", date=DAY, at=3)
+    add_activity(db, description="gym", date=DAY, at=4, factor=1.6, source="estimated")
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        text = _energy(app)
+    flat = text.replace("−", "-")
+    assert "-992" in flat, f"average net is not the mean of per-day nets: {text!r}"
+    assert "-1,348" not in flat and "-280" not in flat
+
+
+async def test_the_food_header_measures_against_burn(make_app, make_cfg, db):
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert f"{_DESK_BURN:,} burn" in head, f"header still on resting BMR: {head!r}"
+    assert "BMR" not in head
+    assert "-936 net" in head.replace("−", "-"), f"net is wrong: {head!r}"
+
+
+# ── BMI ──────────────────────────────────────────────────────────────────
+
+
+async def test_the_weight_header_carries_bmi(make_app, make_cfg, db):
+    """A bare number: no band and no colour. "overweight" is a judgement this app
+    does not otherwise make."""
+    add_weight(db, kg=81.0, date=DAY, at=1)
+    app = make_app(cfg=make_cfg(height_cm=180))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        head = str(app.query_one("#weight-head").content)
+    assert "BMI 25.0" in head, f"no BMI on the weight header: {head!r}"
+
+
+async def test_the_weight_header_omits_bmi_without_a_height(make_app, db):
+    add_weight(db, kg=81.0, date=DAY, at=1)
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _energy_on(app)
+        await pilot.pause()
+        head = str(app.query_one("#weight-head").content)
+    assert "BMI" not in head, f"BMI with no height to compute it from: {head!r}"
+
+
+# ── the profile carries the level ─────────────────────────────────────────
+
+
+async def test_h_sets_the_ordinary_day_level(make_app, db, type_into, tmp_path):
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("h")
+        await type_into(pilot, "180 male 1996-01-01 desk")
+        await pilot.press("enter")
+        await pilot.pause()
+        cfg = app.cfg
+    assert cfg.activity == "desk", f"the level did not reach config: {cfg.activity!r}"
+    assert "activity" in (tmp_path / "config.toml").read_text()
+
+
+async def test_the_profile_prefill_carries_the_level(make_app, type_into):
+    """What you can see is what you can edit — a prefill that drops a field silently
+    clears it on the next submit."""
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("h")
+        await type_into(pilot, "180 male 1996-01-01 heavy")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("h")
+        await pilot.pause()
+        prefill = app.prompt.value
+    assert "heavy" in prefill, f"the level is missing from the prefill: {prefill!r}"
+
+
+async def test_a_complete_profile_with_no_level_names_the_missing_level(
+    make_app, db, type_into
+):
+    """An empty state names the fix. Resting BMR is not maintenance, and nothing
+    else on screen would tell you a level is what turns one into the other."""
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    app = make_app()
+    said = []
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        app.notify = lambda msg, **kw: said.append(msg)
+        await pilot.press("h")
+        await type_into(pilot, "180 male 1996-01-01")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert said, "saving a profile said nothing at all"
+    assert "desk" in said[-1], f"the level is not named as the next step: {said[-1]!r}"

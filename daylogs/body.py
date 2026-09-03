@@ -281,3 +281,171 @@ def _delete(conn, table: str, id: int) -> dict | None:
         return None
     conn.execute(f"DELETE FROM {table} WHERE id = ?", (int(id),))
     return dict(row)
+
+
+# ── activity: what a day cost, above resting ─────────────────────────────
+# Standard PAL multipliers, *re-described*. The textbook labels bake habitual
+# exercise into the band ("moderate: exercise 3-5 days a week"), and using those as
+# a baseline while also logging gym days would count the exercise twice. So a level
+# here means a day with **no logged activity**, and the wording describes
+# occupational movement instead. Anyone comparing against an online TDEE calculator
+# will get a different answer for the same word; double-counting exercise is the
+# worse error. 1.9 is omitted deliberately — that band is athletic training, which is
+# a logged activity, not an ordinary day.
+ACTIVITY_LEVELS: dict[str, float] = {
+    "desk": 1.2,
+    "light": 1.375,
+    "active": 1.55,
+    "heavy": 1.725,
+}
+
+# The physiological range a whole-day PAL can occupy. Enforced on anything inferred,
+# because a wrong factor does not misreport one row — it silently rescales every
+# calorie judgement for that day, and a hallucinated 4.0 would triple the baseline.
+FACTOR_MIN, FACTOR_MAX = 1.2, 1.9
+
+
+def baseline_factor(cfg) -> float | None:
+    """The profile's ordinary-day multiplier, or None if it is unset.
+
+    Deliberately not defaulted. Assuming `desk` for everyone would raise maintenance
+    by 20% and silently restate every number already on screen and in every past
+    digest; an absent setting is shown as absent, the way a missing height is.
+
+    An unrecognised keyword also returns None rather than raising: `config.toml` is
+    hand-edited, and a typo there must not stop the app.
+    """
+    return ACTIVITY_LEVELS.get(getattr(cfg, "activity", None) or "")
+
+
+def add_activity(
+    conn, *, description: str, date: str, at: int, factor: float | None, source: str
+) -> int:
+    """Log one activity. `factor` is the whole day's PAL as inferred for this entry."""
+    if not description.strip():
+        raise BodyError("say what you did")
+    if factor is not None and not (FACTOR_MIN <= factor <= FACTOR_MAX):
+        raise BodyError(f"an activity factor must be between {FACTOR_MIN} and {FACTOR_MAX}")
+    cur = conn.execute(
+        "INSERT INTO activity (date, logged_at, description, factor, source)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (_check_date(date), int(at), description.strip(), factor, source),
+    )
+    return int(cur.lastrowid)
+
+
+def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
+    """A day's activities, oldest first — the order they happened."""
+    return list(
+        conn.execute(
+            "SELECT * FROM activity WHERE date = ? ORDER BY logged_at ASC",
+            (_check_date(date),),
+        )
+    )
+
+
+def resolved_factor(conn, cfg, *, date: str) -> tuple[float | None, str | None]:
+    """`(multiplier, where it came from)` for `date` — `"logged"` or `"profile"`.
+
+    Three steps, each a real state:
+
+    1. the latest activity row carrying a factor — an inference over what you did;
+    2. otherwise the profile baseline, which is the common case and needs no input;
+    3. otherwise `(None, None)`, and `net` sits against resting BMR as it did before.
+
+    Latest-wins rather than first: re-logging supersedes, which is the same rule the
+    weight series applies to two weigh-ins on one day. A row whose factor is NULL —
+    an inference that never landed — falls through to the baseline rather than
+    poisoning the day with nothing, and reports the baseline's origin, not the log's.
+
+    The origin comes back because it reaches the screen. A factor rescales every
+    calorie judgement for its day, and a multiplier with nothing to make you doubt it
+    quietly becomes the baseline for everything.
+    """
+    row = conn.execute(
+        "SELECT factor FROM activity WHERE date = ? AND factor IS NOT NULL"
+        " ORDER BY logged_at DESC LIMIT 1",
+        (_check_date(date),),
+    ).fetchone()
+    if row is not None:
+        return float(row["factor"]), "logged"
+    base = baseline_factor(cfg)
+    return (base, "profile") if base is not None else (None, None)
+
+
+def day_factor(conn, cfg, *, date: str) -> float | None:
+    """The multiplier to apply to BMR for `date`, or None if there is nothing to say.
+
+    One resolution, two callers: only the ENERGY panel wants the origin. Resolving it
+    twice is how a header and a panel start disagreeing about the same day.
+    """
+    return resolved_factor(conn, cfg, date=date)[0]
+
+
+def compute_tdee(bmr: int | None, factor: float | None) -> int | None:
+    """What the day actually cost: resting expenditure scaled by activity.
+
+    None whenever either input is missing, for the same reason `compute_bmr` returns
+    None on a missing weight — a maintenance figure resting on a guess is worse than
+    no figure, because it looks equally authoritative.
+    """
+    if bmr is None or factor is None:
+        return None
+    return round(bmr * factor)
+
+
+def day_tdee(conn, cfg, *, date: str) -> int | None:
+    """What `date` cost: that day's resting BMR, scaled by that day's factor.
+
+    The one place that composition lives. Four surfaces read it — the ENERGY panel,
+    the FOOD header, the Day tab's BODY block and the digest payload — and four
+    separate compositions is four chances for one panel to measure against two
+    different baselines.
+
+    The weight is the latest on or before `date`, the rule every other reader
+    follows: a week-old weigh-in is the best available answer. A day before the first
+    weigh-in has no BMR and therefore no burn.
+    """
+    latest = latest_weight(conn, on_or_before=date)
+    bmr = compute_bmr(cfg, latest["kg"] if latest else None, today=date)
+    return compute_tdee(bmr, day_factor(conn, cfg, date=date))
+
+
+def net_series_between(
+    conn, cfg, *, start: str | None, end: str
+) -> list[tuple[str, int]]:
+    """Daily `intake − that day's burn`, ascending, for the days that have both.
+
+    Per day, not "the window's average intake minus today's burn": a factor describes
+    one day, so a single gym session must not restate a month of net. Days with no
+    food are absent — a logging gap is not a fast, the same rule
+    `kcal_series_between` follows — and so are days with no resolvable burn, because
+    showing intake as if it were net reads as an enormous surplus.
+    """
+    return [
+        (date, kcal - tdee)
+        for date, kcal in kcal_series_between(conn, start=start, end=end)
+        if (tdee := day_tdee(conn, cfg, date=date)) is not None
+    ]
+
+
+def net_average(conn, cfg, *, start: str | None, end: str) -> int | None:
+    """Mean net over the days that have both an intake and a burn."""
+    series = net_series_between(conn, cfg, start=start, end=end)
+    if not series:
+        return None
+    return round(sum(v for _, v in series) / len(series))
+
+
+def bmi(cfg, kg: float | None) -> float | None:
+    """Weight over height squared, to one decimal. None without both.
+
+    Returned as a bare number: no band, no colour. "over" / "obese" is a judgement
+    this app does not otherwise make, and it is a restatement of weight rather than a
+    second fact — which is also why there is no BMI chart. It would be the weight
+    curve times a constant.
+    """
+    if kg is None or not cfg.height_cm:
+        return None
+    metres = float(cfg.height_cm) / 100
+    return round(float(kg) / (metres * metres), 1)

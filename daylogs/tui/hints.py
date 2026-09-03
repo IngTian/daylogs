@@ -8,9 +8,11 @@ to use it.
 Every prompt now shows three things, using the three slots the bordered input
 already has and no extra screen rows:
 
-    ╭─ profile › ───────────────────────────────────────╮
-    │ 180 male 1990-01-01                               │   <- example, greyed
-    ╰─ height · m/f · birthday — any order, partial ok ─╯   <- grammar, persistent
+    ╭─ profile › ──────────────────────────────────────────────────────────────╮
+    │ 180 male 1990-01-01 desk                                                 │
+    ╰─ height · m/f · birthday · ordinary day: desk/light/active/heavy ─────────╯
+
+(example inside, greyed; grammar below, persistent)
 
 The example is the placeholder, so it disappears as soon as you type — which is
 correct, it is scaffolding. The grammar is the border subtitle and stays put,
@@ -48,7 +50,17 @@ HINTS: tuple[Hint, ...] = (
     # sigil — but this prompt is not parsed by the grammar (photo.resolve_path takes
     # the whole line), so it is safe and must be left alone.
     Hint("photo path", "~/Downloads/lunch.jpg", "a path, or drag the file in"),
-    Hint("profile", "180 male 1990-01-01", "height · m/f · birthday — any order"),
+    # The four levels are *printed* rather than tab-completed, and deliberately so.
+    # Declaring the bare-word sigil here would make `complete` treat every plain token
+    # as a level candidate, and `refresh_candidates` replaces the grammar with
+    # "no match" whenever nothing matches — so typing a height, a sex or a birthday
+    # (three of the four fields) would answer as though the input were being rejected.
+    # A closed vocabulary of four words is fully discoverable by being written down.
+    Hint(
+        "profile",
+        "180 male 1990-01-01 desk",
+        "height · m/f · birthday · ordinary day: desk/light/active/heavy — any order",
+    ),
     # ── money ────────────────────────────────────────────────────────────
     Hint(
         "expense",

@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 from daylogs import money, sigil
+from daylogs.body import ACTIVITY_LEVELS
 from daylogs.categories import FALLBACK_SLUG, get
 from daylogs.fmt import hhmm
 
@@ -360,14 +361,21 @@ _MIN_CM, _MAX_CM = 90.0, 250.0
 class ProfileInput:
     """Every field optional: `profile › 181` should change only the height.
 
-    These three exist solely to compute BMR, and BMR is the one number that makes
+    The first three exist solely to compute BMR, and BMR is the one number that makes
     a calorie count mean anything. Editing config.toml by hand to get it was the
     only way, which is why the ENERGY panel sat empty.
+
+    `activity` says what an *ordinary* day looks like, which is what turns resting
+    BMR into a real maintenance figure. It belongs in the profile rather than being
+    logged daily because "sat at a desk" is true almost every day, and a field that
+    must be retyped daily is one that gets skipped — leaving `net` measured against
+    resting expenditure, which is the thing it exists to fix.
     """
 
     height_cm: float | None = None
     sex: str | None = None
     birthday: str | None = None
+    activity: str | None = None
 
     def fields(self) -> dict[str, float | str]:
         return {
@@ -376,6 +384,7 @@ class ProfileInput:
                 ("height_cm", self.height_cm),
                 ("sex", self.sex),
                 ("birthday", self.birthday),
+                ("activity", self.activity),
             )
             if v is not None
         }
@@ -391,10 +400,16 @@ def parse_profile(raw: str) -> ProfileInput:
     height: float | None = None
     sex: str | None = None
     birthday: str | None = None
+    activity: str | None = None
     for word in raw.split():
         low = word.lower()
         if low in _SEX:
             sex = _SEX[low]
+            continue
+        # A level keyword cannot be mistaken for anything else here: the other three
+        # fields are a number, `male`/`female`, and an ISO date.
+        if low in ACTIVITY_LEVELS:
+            activity = low
             continue
         if (m := _PROFILE_DATE.match(low)) is not None:
             try:
@@ -408,7 +423,14 @@ def parse_profile(raw: str) -> ProfileInput:
                 raise ParseError(f"{m[1]} cm is not a plausible height")
             height = value
             continue
-        raise ParseError(f"don't know what {word!r} is — try 180 male 1990-01-01")
-    if height is None and sex is None and birthday is None:
-        raise ParseError("give a height, a sex, or a birthday — e.g. 180 male 1990-01-01")
-    return ProfileInput(height_cm=height, sex=sex, birthday=birthday)
+        raise ParseError(
+            f"don't know what {word!r} is — try 180 male 1990-01-01 desk"
+        )
+    if height is None and sex is None and birthday is None and activity is None:
+        raise ParseError(
+            "give a height, a sex, a birthday or an ordinary-day level — "
+            "e.g. 180 male 1990-01-01 desk"
+        )
+    return ProfileInput(
+        height_cm=height, sex=sex, birthday=birthday, activity=activity
+    )

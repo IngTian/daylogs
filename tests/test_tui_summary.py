@@ -633,3 +633,63 @@ async def test_burn_is_plain_when_spending_is_behind_the_month(make_app, db):
         await pilot.pause()
         line = _line(_panel(app, "money"), "burn")
     assert WARN not in line, f"24% spent on day 30 must not warn: {line!r}"
+
+
+# ── the Day tab's BODY panel follows the same baseline ────────────────────
+
+SEP3 = dt.datetime(2026, 9, 3, 9, 0, tzinfo=TZ)
+
+
+def _profiled(make_cfg, **kw):
+    return make_cfg(height_cm=180, sex="male", birthday="1996-01-01", **kw)
+
+
+async def _day_body(make_app, cfg):
+    app = make_app(cfg=cfg, now=lambda: SEP3)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        return _panel(app, "body")
+
+
+async def test_the_body_panel_measures_against_burn_when_there_is_a_level(
+    make_app, db, make_cfg
+):
+    """The same substitution the Body tab's ENERGY panel makes, from the same
+    data-layer call. Two panels resolving maintenance separately is how they start
+    disagreeing about the same day."""
+    from daylogs.body import add_food, add_weight
+
+    add_weight(db, kg=80.0, date="2026-09-03", at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled",
+             date="2026-09-03", at=2)
+    panel = await _day_body(make_app, _profiled(make_cfg, activity="desk"))
+    assert "2,136 burn" in panel, f"still on resting BMR: {panel!r}"
+    assert "BMR" not in panel, f"names a baseline it is not using: {panel!r}"
+    assert "-936" in _line(panel, "net"), f"net is not 1,200 − 2,136: {panel!r}"
+
+
+async def test_the_body_panel_keeps_resting_bmr_with_no_level(make_app, db, make_cfg):
+    from daylogs.body import add_food, add_weight
+
+    add_weight(db, kg=80.0, date="2026-09-03", at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled",
+             date="2026-09-03", at=2)
+    panel = await _day_body(make_app, _profiled(make_cfg))
+    assert "1,780 BMR" in panel, f"the old line is gone: {panel!r}"
+    assert "burn" not in panel
+
+
+async def test_the_body_panel_shows_bmi(make_app, db, make_cfg):
+    from daylogs.body import add_weight
+
+    add_weight(db, kg=81.0, date="2026-09-03", at=1)
+    panel = await _day_body(make_app, make_cfg(height_cm=180))
+    assert "25.0" in _line(panel, "BMI"), f"no BMI, or the wrong one: {panel!r}"
+
+
+async def test_the_body_panel_omits_bmi_without_a_height(make_app, db, make_cfg):
+    from daylogs.body import add_weight
+
+    add_weight(db, kg=81.0, date="2026-09-03", at=1)
+    panel = await _day_body(make_app, make_cfg())
+    assert "BMI" not in panel, f"BMI with no height to compute it from: {panel!r}"

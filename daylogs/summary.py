@@ -68,8 +68,16 @@ food "didn't move the scale" — different days.
   is present, one line on the overnight change and its likely explanation
   given the food (carb-heavy → glycogen/water; salty → sodium; high protein
   and low carb → typically flat-to-down).
-- When `bmr` is present, one line: `Net kcal: <net_kcal> (in <kcal_in>,
-  BMR −<bmr>)`. Skip it when bmr is null.
+- When `tdee` is present, one line: `Net kcal: <net_kcal> (in <kcal_in>,
+  burn −<tdee>)`. `tdee` is resting `bmr` scaled by `activity_factor` — what
+  the day actually cost — and it is the baseline `net_kcal` is measured
+  against, so do not also compare the intake to `bmr`. When `tdee` is null but
+  `bmr` is present, the same line against resting expenditure instead: `(in
+  <kcal_in>, BMR −<bmr>)`. Skip it when both are null.
+- `activity_source` says where `activity_factor` came from. `profile` is the
+  user's ordinary day and is not news — do not remark on it. `logged` means
+  they recorded something that departed from it, and
+  `payload.body.activity` lists what; that is worth one line.
 - Food: list each entry briefly. If `source` is mostly `estimated`, hedge the
   calorie total; if mostly `labeled`, treat it as reliable.
 
@@ -117,6 +125,10 @@ def build_payload(conn, cfg, *, date: str) -> dict:
 
     kcal_in = body.day_kcal(conn, date=date)
     bmr = body.compute_bmr(cfg, same_kg, today=date)
+    # Through the data layer, not multiplied here, so the digest and the two panels
+    # cannot report different maintenance for the same day.
+    factor, factor_source = body.resolved_factor(conn, cfg, date=date)
+    tdee = body.day_tdee(conn, cfg, date=date)
     summary = money.summarize_month(conn, month=month, today=date, cfg=cfg)
 
     payload: dict = {
@@ -132,8 +144,19 @@ def build_payload(conn, cfg, *, date: str) -> dict:
                 else None
             ),
             "bmr": bmr,
+            "activity_factor": factor,
+            "activity_source": factor_source,
+            "tdee": tdee,
             "kcal_in": kcal_in,
-            "net_kcal": (kcal_in - bmr) if bmr is not None else None,
+            # Against the day's real cost when there is one, and against resting
+            # expenditure when there is not. Not defaulting the factor is what keeps
+            # the second case a real state rather than a silent 20% restatement of
+            # every figure in every past digest.
+            "net_kcal": (
+                (kcal_in - tdee)
+                if tdee is not None
+                else ((kcal_in - bmr) if bmr is not None else None)
+            ),
             "food": [
                 {
                     "time": hhmm(r["ate_at"]),
@@ -142,6 +165,17 @@ def build_payload(conn, cfg, *, date: str) -> dict:
                     "source": r["source"],
                 }
                 for r in body.list_food(conn, date=date)
+            ],
+            # Only days that departed from the baseline have rows here, so an empty
+            # list means an ordinary day, not a missing one.
+            "activity": [
+                {
+                    "time": hhmm(r["logged_at"]),
+                    "description": r["description"],
+                    "factor": r["factor"],
+                    "source": r["source"],
+                }
+                for r in body.list_activity(conn, date=date)
             ],
         },
         "money": {

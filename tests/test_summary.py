@@ -233,3 +233,74 @@ async def test_generate_does_not_clobber_an_existing_report_on_failure(db, tmp_p
     with pytest.raises(ClaudeError):
         await generate(db, _cfg(tmp_path), date="2026-08-26", runner=runner)
     assert get_report(db, "2026-08-26")["content"] == "the good one"
+
+
+# ── the day factor in the digest ─────────────────────────────────────────
+# `net_kcal` used to be intake against *resting* expenditure, so a digest called a
+# sedentary day a deficit it wasn't. These pin the substitution and — just as
+# important — pin that a day with no factor still reads exactly as it did, because
+# forty-three reports were generated against that wording.
+
+
+def test_the_payload_carries_the_day_factor_and_the_burn_it_produces(db, tmp_path):
+    add_weight(db, kg=80.0, date="2026-08-26", at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date="2026-08-26", at=2)
+    cfg = _cfg(tmp_path, height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
+    b = build_payload(db, cfg, date="2026-08-26")["body"]
+    assert b["bmr"] == 1780
+    assert b["activity_factor"] == 1.2
+    assert b["activity_source"] == "profile"
+    assert b["tdee"] == 2136
+    assert b["net_kcal"] == 1200 - 2136
+
+
+def test_the_payload_nets_against_resting_bmr_with_no_factor(db, tmp_path):
+    add_weight(db, kg=80.0, date="2026-08-26", at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date="2026-08-26", at=2)
+    cfg = _cfg(tmp_path, height_cm=180, sex="male", birthday="1996-01-01")
+    b = build_payload(db, cfg, date="2026-08-26")["body"]
+    assert (b["activity_factor"], b["activity_source"], b["tdee"]) == (None, None, None)
+    assert b["net_kcal"] == 1200 - b["bmr"]
+
+
+def test_the_payload_lists_the_days_activities(db, tmp_path):
+    from daylogs.body import add_activity
+    from daylogs.fmt import hhmm
+
+    add_weight(db, kg=80.0, date="2026-08-26", at=1)
+    add_activity(db, description="gym 1h", date="2026-08-26", at=1788010000, factor=1.6,
+                 source="estimated")
+    cfg = _cfg(tmp_path, height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
+    b = build_payload(db, cfg, date="2026-08-26")["body"]
+    assert b["activity"] == [
+        {
+            "time": hhmm(1788010000),
+            "description": "gym 1h",
+            "factor": 1.6,
+            "source": "estimated",
+        }
+    ]
+    assert b["activity_source"] == "logged"
+    assert b["tdee"] == round(1780 * 1.6)
+
+
+def test_the_payload_has_no_activity_rows_on_an_ordinary_day(db, tmp_path):
+    cfg = _cfg(tmp_path, activity="desk")
+    assert build_payload(db, cfg, date="2026-08-26")["body"]["activity"] == []
+
+
+def test_the_payload_does_not_carry_bmi(db, tmp_path):
+    """BMI is a restatement of weight, not a second fact, and putting it in front of
+    the model invites exactly the banded judgement — "overweight" — that this app
+    deliberately never makes."""
+    add_weight(db, kg=80.0, date="2026-08-26", at=1)
+    cfg = _cfg(tmp_path, height_cm=180, sex="male", birthday="1996-01-01")
+    assert "bmi" not in build_payload(db, cfg, date="2026-08-26")["body"]
+
+
+def test_the_prompt_describes_burn_without_dropping_resting_bmr():
+    """Extended, not replaced. A day with no level has no `tdee`, and the prompt still
+    has to know what to do with it."""
+    assert "tdee" in SYSTEM_PROMPT
+    assert "activity_source" in SYSTEM_PROMPT
+    assert "BMR −<bmr>" in SYSTEM_PROMPT

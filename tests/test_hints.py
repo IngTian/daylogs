@@ -88,9 +88,29 @@ def test_every_example_is_a_line_the_parser_accepts(label):
 
 
 def test_the_profile_example_parses_too():
-    """parse_profile takes no `now`, so it sits outside the parametrized case."""
+    """parse_profile takes no `now`, so it sits outside the parametrized case. The
+    example carries all four fields, including the level — an example that omits the
+    field the slice added is how `profile` was undiscoverable in the first place."""
     p = parse_profile(hints.for_label("profile").example)
-    assert p.height_cm and p.sex and p.birthday
+    assert p.height_cm and p.sex and p.birthday and p.activity
+
+
+def test_the_profile_grammar_names_every_ordinary_day_level():
+    """The closed vocabulary is written down rather than tab-completed, so the
+    grammar line is the only place it can be discovered."""
+    from daylogs.body import ACTIVITY_LEVELS
+
+    grammar = hints.for_label("profile").grammar
+    for level in ACTIVITY_LEVELS:
+        assert level in grammar, f"{level!r} is undiscoverable: {grammar!r}"
+
+
+def test_profile_declares_no_bare_word_vocabulary():
+    """Guards a deliberate omission. Declaring the empty sigil would make `complete`
+    treat "180", "male" and a birthday as level candidates, and `refresh_candidates`
+    replaces the grammar with "no match" when nothing matches — so three of the four
+    fields would read as rejected while being typed correctly."""
+    assert hints.vocab_for(hints.for_label("profile")) == {}
 
 
 def test_labels_without_a_parser_are_deliberate_not_forgotten():
