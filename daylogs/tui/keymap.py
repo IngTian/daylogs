@@ -90,6 +90,10 @@ KEYMAP: tuple[Key, ...] = (
     Key("f", "food", "food", "body", "write"),
     Key("p", "photo", "photo", "body", "write"),
     Key("h", "profile", "profile", "body", "write"),
+    # Only for a day that departs from the profile's ordinary day, which is why there
+    # is no daily prompt for it: a field you must retype every day is one that gets
+    # skipped, and then `net` sits on the wrong baseline.
+    Key("a", "activity", "activity", "body", "write"),
     # bind=False for the same reason as money's: a focused DataTable converts
     # enter into RowSelected before any binding sees it.
     Key("enter", "edit", "activate", "body", "nav", bind=False),

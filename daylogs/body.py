@@ -334,6 +334,39 @@ def add_activity(
     return int(cur.lastrowid)
 
 
+def update_activity(conn, id: int, **fields) -> bool:
+    """Edit a logged activity. Only the columns the table displays are reachable.
+
+    `source` is deliberately absent: it is provenance the digest reads to know whether
+    a number was inferred, not something editing a description should rewrite — the
+    same stance `update_food` takes.
+
+    A factor is not clearable here. `_update` drops None values, so a line that names
+    no `=factor` leaves the stored one alone rather than blanking it. That is on
+    purpose: a row with no factor is an inference that never landed, not a state
+    anyone would choose, and it is also what keeps such a row editable at all — its
+    rendered line carries no `=`, so treating that as "clear it" would make its
+    description unfixable. `x` is how a row goes away.
+    """
+    if fields.get("factor") is not None and not (
+        FACTOR_MIN <= fields["factor"] <= FACTOR_MAX
+    ):
+        raise BodyError(f"an activity factor must be between {FACTOR_MIN} and {FACTOR_MAX}")
+    if "description" in fields and not (fields["description"] or "").strip():
+        raise BodyError("say what you did")
+    return _update(
+        conn,
+        "activity",
+        id,
+        fields,
+        allowed={"description", "factor", "date", "logged_at"},
+    )
+
+
+def delete_activity(conn, id: int) -> dict | None:
+    return _delete(conn, "activity", id)
+
+
 def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
     """A day's activities, oldest first — the order they happened."""
     return list(

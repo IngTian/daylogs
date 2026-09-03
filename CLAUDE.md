@@ -44,6 +44,7 @@ daylogs/
   log.py      rotating file log under ~/.daylogs/logs/
   tui/        app shell, footer prompt, three tabs, pure text widgets
               tab order: Day · Body · Money; Day's scope id is still `summary`
+              Body sub-views: weight · food · activity (each name is its table)
     keymap.py   every key, as data — generates bindings, footer and help
     hints.py    every prompt's example and grammar, as data
     common.py   PanelTab: on_resize + panel_width, shared by the two big tabs
@@ -96,6 +97,18 @@ appended prose where it was convenient rather than editing the map.
   The level keywords are standard PAL bands **re-described** to mean "a day with
   nothing logged" — the textbook labels bake habitual exercise in, and using those
   while also logging hard days counts the exercise twice.
+- **A failed activity inference still records the activity, with a NULL factor.**
+  The description is the user's data and the multiplier is a guess; losing the first
+  because the second failed is the worse outcome. That NULL is the state `db.py` and
+  `resolved_factor` already describe — the day falls back to the profile baseline,
+  not to resting BMR. It is also why a factor is **not clearable** through the edit
+  prompt: `_update` drops None, so a line with no `=` leaves the stored factor
+  alone, which is what keeps a factorless row's description fixable at all.
+- **Only the entry path infers a factor; an edit never does.** Fixing a typo in a
+  description must not silently re-roll the number the whole day is measured
+  against. The activity worker also has its **own** `@work` group: sharing the food
+  estimate's would mean logging a gym session cancelled a meal estimate still
+  running.
 - **Net over a window is computed per day, never as one subtraction.** A factor
   describes a single day, so `avg_in − today's burn` lets one gym session restate a
   whole month. `body.net_series_between` pairs each day's intake with that day's own

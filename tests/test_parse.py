@@ -7,12 +7,14 @@ import pytest
 from daylogs.categories import slugs
 from daylogs.parse import (
     ParseError,
+    parse_activity,
     parse_budget,
     parse_expense,
     parse_food,
     parse_profile,
     parse_recurring,
     parse_weigh,
+    render_activity,
     render_budget,
     render_expense,
     render_food,
@@ -630,3 +632,129 @@ def test_an_impossible_date_is_rejected():
 def test_an_impossible_time_is_rejected():
     with pytest.raises(ParseError, match="not a valid time"):
         resolve_when(["25:00"], now=NOW)
+
+
+# ── activity ─────────────────────────────────────────────────────────────
+# One field, `=`, carrying the whole day's PAL multiplier. It accepts a level keyword
+# as well as a number because a raw PAL is unreadable to a human, and the four
+# keywords are already this app's vocabulary for the same quantity.
+
+
+def A(raw):
+    return parse_activity(raw, now=NOW)
+
+
+def test_activity_reads_what_you_did():
+    r = A("gym 1h")
+    assert (r.description, r.factor) == ("gym 1h", None)
+
+
+def test_omitting_the_factor_asks_for_an_estimate():
+    """The same shape food uses: no `=` means Claude is asked, and the answer comes
+    back in a confirm prompt rather than being written blind."""
+    assert A("gym 1h and a long walk").factor is None
+
+
+def test_a_level_keyword_resolves_to_its_multiplier():
+    assert A("gym 1h =active").factor == 1.55
+    assert A("desk all day =desk").factor == 1.2
+
+
+def test_a_level_keyword_is_case_insensitive():
+    assert A("gym =ACTIVE").factor == 1.55
+
+
+def test_a_number_is_taken_as_the_multiplier():
+    assert A("gym 1h =1.45").factor == 1.45
+
+
+def test_a_three_decimal_factor_survives():
+    """`light` is 1.375. `to_amount` would reject a third decimal place, which is
+    correct for money and wrong for a PAL, so the factor has its own rule."""
+    assert A("errands =1.375").factor == 1.375
+
+
+def test_the_range_ends_are_accepted():
+    assert A("in bed =1.2").factor == 1.2
+    assert A("race day =1.9").factor == 1.9
+
+
+@pytest.mark.parametrize("bad", ["1.19", "1.91", "4.0", "0", "-1.4", "inf", "nan"])
+def test_a_factor_outside_the_physiological_range_is_rejected(bad):
+    """A wrong factor does not misreport one row — it rescales every calorie
+    judgement for the day, so it is rejected at the grammar as well as at the write."""
+    with pytest.raises(ParseError, match="1.2"):
+        A(f"gym ={bad}")
+
+
+def test_a_decimal_comma_is_rejected_with_the_dot_spelled_out():
+    """The same rule amounts follow. `=1,45` silently becoming 145 would be a factor
+    a hundred times too large."""
+    with pytest.raises(ParseError, match=r"1\.45"):
+        A("gym =1,45")
+
+
+def test_a_word_that_is_not_a_level_is_rejected():
+    with pytest.raises(ParseError, match="desk"):
+        A("gym =hard")
+
+
+def test_a_repeated_factor_is_an_error():
+    with pytest.raises(ParseError, match="twice"):
+        A("gym =1.4 =1.6")
+
+
+def test_activity_needs_a_description():
+    with pytest.raises(ParseError, match="what you did"):
+        A("=1.4")
+
+
+def test_activity_takes_a_date_and_a_time():
+    r = A("gym 1h @2026-08-20/07:30")
+    assert r.date == "2026-08-20"
+    assert datetime.fromtimestamp(r.at, TZ).strftime("%H:%M") == "07:30"
+
+
+def test_activity_rejects_unsupported_sigils():
+    with pytest.raises(ParseError, match="does not have.*category"):
+        A("gym !restaurant")
+    with pytest.raises(ParseError, match="does not have.*note"):
+        A("gym ~felt good")
+    with pytest.raises(ParseError, match="does not have.*cycle"):
+        A("gym #monthly")
+
+
+ACTIVITY_ROWS = [
+    dict(description="gym 1h", factor=1.45, date="2026-08-20", logged_at=1787223943),
+    dict(description="errands", factor=1.375, date="2026-08-20", logged_at=1787223943),
+    dict(description="in bed, unwell", factor=1.2, date="2026-08-20", logged_at=1787223943),
+    # A row whose inference never landed. It has to round-trip too, or opening the
+    # edit prompt on it would invent a factor.
+    dict(description="long walk", factor=None, date="2026-08-20", logged_at=1787223943),
+    # The description is the escaping hazard: a leading sigil, and a bare number.
+    dict(description="=squats", factor=1.5, date="2026-08-20", logged_at=1787223943),
+    dict(description="10000", factor=1.5, date="2026-08-20", logged_at=1787223943),
+]
+
+
+@pytest.mark.parametrize(
+    "row", ACTIVITY_ROWS, ids=[str(r["description"])[:14] for r in ACTIVITY_ROWS]
+)
+def test_activity_round_trips(row):
+    got = A(render_activity(row))
+    assert got.description == row["description"]
+    assert got.factor == row["factor"]
+    assert got.date == row["date"]
+    # `at` is deliberately not asserted, exactly as `test_food_round_trips` does not
+    # assert it, and for a reason worth writing down rather than rediscovering:
+    # `render_*` formats the clock through `fmt.hhmm`, which is **system** local time,
+    # while the parsers resolve `@HH:MM` in the injected `now`'s zone (`cfg.timezone`).
+    # Those agree only when the two zones agree, so asserting the timestamp here fails
+    # under `TZ=UTC` against the default Toronto config — a pre-existing mismatch this
+    # slice neither introduces nor fixes.
+    #
+    # The seconds cannot survive a render either way: the grammar's only time token is
+    # `HH:MM`. They matter — `logged_at` is the tie-breaker `resolved_factor` uses to
+    # pick a day's latest inference — which is why the edit path goes through
+    # `body.restamp`, whose own tests pin that it returns None when the minute did not
+    # move rather than rewriting the column.

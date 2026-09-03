@@ -123,6 +123,7 @@ figures above them are always today's.
 | `w` | weigh in |
 | `f` | log food |
 | `p` | log food from a photo |
+| `a` | log an activity — only for a day that departs from your ordinary one |
 | `h` | set height, sex, birthday and your ordinary-day level (for BMR, maintenance and BMI) |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
@@ -149,6 +150,9 @@ figures above them are always today's.
 | `weigh ›` | `78.2 post-run @07:30` | with a note, at a time |
 | `food ›` | `chicken salad =610` | labelled — no LLM call |
 | `food ›` | `chicken salad` | Claude estimates; review and accept |
+| `activity ›` | `gym 1h =active` | the whole day was an `active` day — no LLM call |
+| `activity ›` | `gym 1h =1.45` | the same, as a multiplier |
+| `activity ›` | `gym 1h` | Claude estimates the day's factor; review and accept |
 | `expense ›` | `12.40 lunch !restaurant` | amount, description, category |
 | `expense ›` | `127 Grocery Item X !grocery ~receipt in wallet` | with a note |
 | `expense ›` | `-24.99 returned shoes !grocery` | a refund |
@@ -330,6 +334,32 @@ A factor rescales every calorie judgement for its day, so it says whether it cam
 from your `profile` or was `logged`, rather than arriving as a number with nothing
 to make you doubt it. The window average underneath is computed **per day** against
 that day's own burn, so one hard day can't restate a whole month.
+
+### Days that depart from the ordinary one
+
+`a` logs an activity — and only then. An ordinary day needs no entry at all, which is
+the entire reason the baseline lives in the profile.
+
+`gym 1h =active` states the day's level outright and writes immediately. Omit the `=`
+and Claude is asked instead, given your ordinary day *and everything already logged
+for that day* — "a desk job at ×1.2, and today they also did gym 1h and a long walk"
+is a far better-posed question than "estimate a multiplier". The answer arrives in a
+review line you can correct before it lands, and is clamped to 1.2–1.9.
+
+What is stored is the **whole day's** multiplier, not the session's own contribution:
+a PAL describes a day and is not additive, so `gym` plus `walked` is not 1.375 + 1.2.
+Log again and the newer row wins, the same last-reading-wins rule two weigh-ins on one
+day follow — so correcting a day means logging it again, and the earlier rows stay as a
+record of what was believed when.
+
+If the estimate fails — no CLI, a timeout — the activity is still recorded, with no
+factor, and the day falls back to your ordinary-day level. What you did is your data;
+the multiplier is a guess, and losing the first because the second failed would be the
+worse outcome.
+
+`tab` reaches the **activity** view, where the day's rows are listed with their
+factors, `enter` edits one and `x` deletes it. A row whose estimate never landed shows
+a `—`.
 
 **BMI** shows as a bare number beside your weight. No band, no colour and no chart:
 "overweight" is a judgement daylogs doesn't make, and a BMI chart would be the

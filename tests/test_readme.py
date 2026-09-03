@@ -13,6 +13,7 @@ import pytest
 
 from daylogs.categories import slugs
 from daylogs.parse import (
+    parse_activity,
     parse_budget,
     parse_expense,
     parse_food,
@@ -27,6 +28,7 @@ NOW = dt.datetime(2026, 8, 28, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
 PARSERS = {
     "weigh ›": parse_weigh,
     "food ›": parse_food,
+    "activity ›": parse_activity,
     "expense ›": parse_expense,
     "budget ›": parse_budget,
     "recurring ›": parse_recurring,
@@ -92,6 +94,10 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
         assert result.category == "subscriptions", msg
     if "=610" in example:
         assert result.kcal == 610, "=610 → kcal must be 610"
+    if "=active" in example:
+        assert result.factor == 1.55, "=active → factor must be the active multiplier"
+    if "=1.45" in example:
+        assert result.factor == 1.45, "=1.45 → factor must be 1.45"
     if "#monthly" in example:
         assert result.cycle == "monthly", "#monthly → cycle must be 'monthly'"
     if example.startswith("-"):

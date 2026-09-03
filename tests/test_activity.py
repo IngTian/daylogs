@@ -21,10 +21,12 @@ from daylogs.body import (
     compute_tdee,
     day_factor,
     day_tdee,
+    delete_activity,
     list_activity,
     net_average,
     net_series_between,
     resolved_factor,
+    update_activity,
 )
 from daylogs.config import Config
 
@@ -358,3 +360,76 @@ def test_activities_are_listed_oldest_first(db):
     add_activity(db, description="second", date=D, at=200, factor=1.3, source="estimated")
     add_activity(db, description="first", date=D, at=100, factor=1.3, source="estimated")
     assert [r["description"] for r in list_activity(db, date=D)] == ["first", "second"]
+
+
+# ── editing and deleting a logged activity ───────────────────────────────
+
+
+def test_an_activity_can_be_edited(db):
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    assert update_activity(db, rid, description="gym 90m", factor=1.6) is True
+    row = list_activity(db, date=D)[0]
+    assert (row["description"], row["factor"]) == ("gym 90m", 1.6)
+
+
+def test_an_edit_cannot_set_an_impossible_factor(db):
+    """The same clamp the insert has. An edit is a write, and a write that skips the
+    clamp is a hole in it."""
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    with pytest.raises(BodyError):
+        update_activity(db, rid, factor=4.0)
+    assert list_activity(db, date=D)[0]["factor"] == 1.4, "the row was written anyway"
+
+
+def test_an_edit_cannot_blank_the_description(db):
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    with pytest.raises(BodyError):
+        update_activity(db, rid, description="   ")
+
+
+def test_an_edit_cannot_reach_provenance(db):
+    """`source` is what the digest reads to know whether a number was inferred. It is
+    not something editing a description should rewrite — the same stance food takes."""
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    with pytest.raises(BodyError):
+        update_activity(db, rid, source="labeled")
+
+
+def test_an_edit_that_names_no_factor_leaves_the_stored_one_alone(db):
+    """A factor is not clearable through the prompt, unlike an expense's note. A row
+    with no factor is a failed inference, not a state anyone would choose, so the way
+    to remove one is `x`. This is also what keeps such a row editable at all: its
+    rendered line carries no `=`, and treating that as "clear it" or as an error would
+    make the description unfixable."""
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    update_activity(db, rid, description="gym, upper body")
+    row = list_activity(db, date=D)[0]
+    assert (row["description"], row["factor"]) == ("gym, upper body", 1.4)
+
+
+def test_deleting_an_activity_hands_back_the_row_for_undo(db):
+    rid = add_activity(db, description="gym", date=D, at=100, factor=1.4,
+                       source="estimated")
+    row = delete_activity(db, rid)
+    assert row["id"] == rid and row["description"] == "gym"
+    assert list_activity(db, date=D) == []
+
+
+def test_deleting_an_activity_that_is_gone_returns_none(db):
+    assert delete_activity(db, 9999) is None
+
+
+def test_deleting_the_latest_inference_restores_the_earlier_one(db, tmp_path):
+    """Latest-wins means a delete has to fall back, not fall through to the baseline."""
+    cfg = _cfg(tmp_path, activity="desk")
+    add_activity(db, description="gym", date=D, at=100, factor=1.5, source="estimated")
+    rid = add_activity(db, description="hike", date=D, at=200, factor=1.7,
+                       source="estimated")
+    assert day_factor(db, cfg, date=D) == 1.7
+    delete_activity(db, rid)
+    assert day_factor(db, cfg, date=D) == 1.5

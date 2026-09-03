@@ -46,6 +46,21 @@ HINTS: tuple[Hint, ...] = (
     Hint("weigh", "78.2 post-run", f"kg · words are the note · {WHEN}"),
     Hint("food", "chicken salad =610", f"what you ate · =kcal (omit to estimate) · {WHEN}"),
     Hint("confirm food", "chicken salad =610", "Claude's estimate — fix =kcal, then enter"),
+    # `=` carries the whole *day's* multiplier, not this activity's own contribution —
+    # a PAL describes a day and is not additive. The four levels are written out for
+    # the same reason as in `profile`: declaring the sigil's vocabulary would make the
+    # prompt answer "no match" while a perfectly valid `=1.45` was being typed.
+    Hint(
+        "activity",
+        "gym 1h =active",
+        "what you did · =desk/light/active/heavy or =1.45 (omit → estimate) · "
+        f"{WHEN}",
+    ),
+    Hint(
+        "confirm activity",
+        "gym 1h =1.45",
+        "Claude's estimate of the whole day — fix =factor, then enter",
+    ),
     # The photo-path example begins with `~`, which the tokeniser would read as a
     # sigil — but this prompt is not parsed by the grammar (photo.resolve_path takes
     # the whole line), so it is safe and must be left alone.
