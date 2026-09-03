@@ -28,6 +28,8 @@ def braille_line(
     width: int,
     height: int,
     positions: list[float] | None = None,
+    low: float | None = None,
+    high: float | None = None,
 ) -> list[str]:
     """`height` rows of `width` braille cells, top row first.
 
@@ -37,13 +39,19 @@ def braille_line(
     a day apart drew a smooth month-long climb across a month-wide panel. Any
     caller plotting a dated series should pass positions; the index default is for
     genuinely undated series.
+
+    `low`/`high` override the vertical extent, which the series otherwise derives from
+    itself. A self-fitted range is right for weight — it only means anything relative
+    to itself — and wrong for a signed series, where the reader needs to see where zero
+    falls. A value outside the given extent is clipped by `plot`, not an error.
     """
     grid = [[0] * max(width, 0) for _ in range(max(height, 0))]
     if not values or width <= 0 or height <= 0:
         return ["".join(chr(BLANK + c) for c in row) for row in grid]
 
     dot_w, dot_h = width * 2, height * 4
-    lo, hi = min(values), max(values)
+    lo = min(values) if low is None else low
+    hi = max(values) if high is None else high
     span = (hi - lo) or 1.0
 
     last = max(len(values) - 1, 1)
@@ -71,6 +79,20 @@ def braille_line(
     return ["".join(chr(BLANK + c) for c in row) for row in grid]
 
 
+def _zero_row(lo: float, hi: float, height: int) -> int | None:
+    """Which chart row holds the value 0, when that needs marking.
+
+    `None` unless zero falls *strictly inside* the extent. When it lands on the top or
+    bottom row the extent label already reads `0`, and a rule there would say the same
+    thing twice.
+    """
+    if not lo < 0 < hi or height < 3:
+        return None
+    dot_h = height * 4
+    row = int((1 - (0 - lo) / ((hi - lo) or 1.0)) * (dot_h - 1)) // 4
+    return row if 0 < row < height - 1 else None
+
+
 def frame_chart(
     values: list[float],
     *,
@@ -80,28 +102,44 @@ def frame_chart(
     x_labels: tuple[str, ...] = (),
     unit: str = "",
     positions: list[float] | None = None,
+    include_zero: bool = False,
 ) -> list[str]:
     """Chart rows plus a y-axis, an axis rule, and an x-label row.
 
     The y labels describe the extent of `values` as passed in — the caller's
     window. v1 plotted the last 30 entries while labelling min/max as though they
     described the requested window, which made the chart quietly wrong.
+
+    `include_zero` pulls 0 into that extent, for a series whose sign is the point.
+    A signed net fitted to its own min and max is unreadable: a month of deficits and
+    a month of surpluses draw the identical picture. Pulling zero in fixes all three
+    cases at once — an all-deficit series gets `0` as its top label, an all-surplus one
+    gets it at the bottom, and only a series that actually crosses zero needs a rule,
+    which is drawn on the y-axis as `┼` rather than in braille. Braille dots would be
+    indistinguishable from the data.
     """
     total = ylabel_width + 1 + width
     if not values:
         return [f"{'':>{ylabel_width}} │ no data yet".ljust(total)[:total]]
 
     hi, lo = max(values), min(values)
+    if include_zero:
+        hi, lo = max(hi, 0.0), min(lo, 0.0)
+    zero = _zero_row(lo, hi, height) if include_zero else None
     rows: list[str] = []
-    plotted = braille_line(values, width=width, height=height, positions=positions)
+    plotted = braille_line(
+        values, width=width, height=height, positions=positions, low=lo, high=hi
+    )
     for i, line in enumerate(plotted):
         if i == 0:
             label = f"{hi:g}{unit}"
         elif i == height - 1:
             label = f"{lo:g}{unit}"
+        elif i == zero:
+            label = "0"
         else:
             label = ""
-        rows.append(f"{label:>{ylabel_width}}│{line}")
+        rows.append(f"{label:>{ylabel_width}}{'┼' if i == zero else '│'}{line}")
 
     rows.append(f"{'':>{ylabel_width}}└{'─' * width}")
 

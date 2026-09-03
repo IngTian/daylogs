@@ -317,3 +317,203 @@ async def test_a_three_day_axis_is_labelled_by_the_clock(make_app, db):
         chart_text = _chart(app)
     assert "00:00" in chart_text, f"no clock on the axis:\n{chart_text}"
     assert "24:00" in chart_text
+
+
+# ── the calories chart ───────────────────────────────────────────────────
+# One panel, three series, cycled by `c`. A fourth panel does not fit a 110-column
+# screen, and the axis, the horizon and the width arithmetic are already here.
+
+DAY = "2026-09-03"
+_PROFILE = dict(height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
+# 80 kg at 180 cm, male, 30: Mifflin-St Jeor gives 1,780, and a desk day 2,136.
+_DESK_BURN = 2136
+
+
+def _strip(app):
+    return str(app.query_one("#trend-title").content)
+
+
+BLANK = "⠀"
+
+
+def _plot_rows(text: str) -> list[str]:
+    """Just the plotted rows — not the `└───` rule or the x-label row beneath it."""
+    return [r for r in text.splitlines() if "│" in r or "┼" in r]
+
+
+def _floor_label(text: str) -> str:
+    return _plot_rows(text)[-1].replace("┼", "│").split("│")[0].strip()
+
+
+async def _at(app, date=DAY):
+    body = app.query_one("#body")
+    body.viewing_date = date
+    body.reload()
+    return body
+
+
+async def test_c_cycles_the_chart_through_weight_intake_and_net(make_app, db):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        body = app.query_one("#body")
+        assert body.chart_mode == "weight"
+        for expected in ("intake", "net", "weight"):
+            await pilot.press("c")
+            await pilot.pause()
+            assert body.chart_mode == expected, f"c did not reach {expected}"
+
+
+async def test_the_panel_names_every_series_and_marks_the_active_one(make_app, db):
+    """The same strip Body's sub-views and Money's panes use, so the key is
+    discoverable rather than something you have to be told about."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        strip = _strip(app)
+        for name in ("weight", "intake", "net"):
+            assert name in strip, f"{name} is missing from the strip: {strip!r}"
+        assert "[b]weight[/b]" in strip
+        await pilot.press("c")
+        await pilot.pause()
+        assert "[b]intake[/b]" in _strip(app)
+
+
+async def test_the_intake_chart_plots_the_daily_totals(make_app, db, make_cfg):
+    add_food(db, description="a", kcal=1500, source="labeled", date="2026-09-01", at=1)
+    add_food(db, description="b", kcal=2500, source="labeled", date="2026-09-02", at=2)
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "intake"
+        body.reload()
+        await pilot.pause()
+        text = _chart(app)
+    assert any(0x2800 <= ord(ch) <= 0x28FF for ch in text), f"no braille: {text!r}"
+    assert "2500" in text, f"the window's peak is not labelled: {text!r}"
+    # Calories are a magnitude, so the floor is zero rather than the series minimum —
+    # otherwise a run of similar days reads as a climb from nothing.
+    assert _floor_label(text) == "0", f"floor is not 0: {text!r}"
+
+
+async def test_the_net_chart_plots_intake_against_each_days_own_burn(make_app, db, make_cfg):
+    """The whole point of the series: a gym day must move only its own point. Against
+    a single day's burn every point would shift together."""
+    from daylogs.body import add_activity
+
+    add_weight(db, kg=80.0, date="2026-09-01", at=1)
+    add_food(db, description="a", kcal=2000, source="labeled", date="2026-09-01", at=2)
+    add_food(db, description="b", kcal=2000, source="labeled", date="2026-09-02", at=3)
+    add_activity(db, description="gym", date="2026-09-02", at=4, factor=1.6,
+                 source="estimated")
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "net"
+        body.reload()
+        await pilot.pause()
+        text = _chart(app)
+    # 2,000 − 2,136 = −136 on the desk day; 2,000 − 2,848 = −848 on the gym day.
+    assert "-848" in text, f"the deepest deficit is not labelled: {text!r}"
+    assert "-136" not in text or "-848" in text
+
+
+async def test_the_net_chart_shows_where_zero_falls(make_app, db, make_cfg):
+    """A deficit and a surplus draw the identical line without it."""
+    add_weight(db, kg=80.0, date="2026-09-01", at=1)
+    add_food(db, description="a", kcal=1000, source="labeled", date="2026-09-01", at=2)
+    add_food(db, description="b", kcal=3500, source="labeled", date="2026-09-02", at=3)
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "net"
+        body.reload()
+        await pilot.pause()
+        text = _chart(app)
+    assert "┼" in text, f"a signed chart with no zero reference: {text!r}"
+
+
+async def test_an_all_deficit_net_chart_puts_zero_at_the_ceiling(make_app, db, make_cfg):
+    add_weight(db, kg=80.0, date="2026-09-01", at=1)
+    add_food(db, description="a", kcal=1000, source="labeled", date="2026-09-01", at=2)
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "net"
+        body.reload()
+        await pilot.pause()
+        text = _chart(app)
+    assert text.splitlines()[0].split("│")[0].strip() == "0", f"no ceiling: {text!r}"
+    assert "┼" not in text, "a rule that repeats the extent label"
+
+
+async def test_the_weight_chart_keeps_fitting_itself(make_app, db):
+    """Anchored at zero a 70-75 kg series is a flat line at the top of the panel, so
+    weight must not inherit the calorie series' floor."""
+    for day, kg in (("2026-09-01", 80.0), ("2026-09-02", 79.5)):
+        add_weight(db, kg=kg, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.reload()
+        await pilot.pause()
+        text = _chart(app)
+    assert "79.5" in text, f"the series floor is not its own minimum: {text!r}"
+    assert "┼" not in text
+
+
+async def test_a_calorie_chart_with_nothing_logged_says_so(make_app, db, make_cfg):
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "net"
+        body.reload()
+        await pilot.pause()
+        assert "no data" in _chart(app).lower()
+
+
+async def test_the_chart_series_survives_a_horizon_change(make_app, db, make_cfg):
+    """`+`/`-` and `c` are independent axes of the same panel; zooming must not reset
+    which series you were reading."""
+    add_food(db, description="a", kcal=1500, source="labeled", date="2026-09-01", at=1)
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        body = app.query_one("#body")
+        await pilot.press("c")
+        await pilot.pause()
+        assert body.chart_mode == "intake"
+        await pilot.press("minus")
+        await pilot.pause()
+        assert body.chart_mode == "intake", "zooming reset the series"
+
+
+async def test_the_calorie_series_is_plotted_against_its_dates(make_app, db, make_cfg):
+    """The invariant the weight chart already follows. Two days inside a three-month
+    window belong at the right edge, not spread across it — index spacing rescales the
+    x-axis to the sample count and turns two days into a quarter-long trend."""
+    add_food(db, description="a", kcal=1500, source="labeled", date="2026-09-01", at=1)
+    add_food(db, description="b", kcal=2500, source="labeled", date="2026-09-02", at=2)
+    app = make_app(cfg=make_cfg(**_PROFILE))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
+        body = await _at(app)
+        body.chart_mode = "intake"
+        body.horizon = "3m"
+        body.reload()
+        await pilot.pause()
+        rows = _plot_rows(_chart(app))
+    plot = [r.replace("┼", "│").split("│", 1)[1] for r in rows]
+    width = len(plot[0])
+    left = {ch for r in plot for ch in r[: int(width * 0.75)]}
+    assert left <= {BLANK}, "two days were spread across a three-month window"
+    assert any(ch != BLANK for r in plot for ch in r[int(width * 0.75) :])

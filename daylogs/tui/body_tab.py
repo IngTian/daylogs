@@ -47,6 +47,11 @@ _ESTIMATING = "   estimating…"
 # table's name, which is what lets the row lookup, the edit prefill and the delete
 # handler stay one branch each instead of three.
 _VIEWS = ("weight", "food", "activity")
+# The series the TREND panel plots, in the order `c` walks them. One panel rather than
+# a fourth one: side by side, three panels do not fit 110 columns, and the axis, the
+# horizon and the width arithmetic already live here. Weight stays in the cycle because
+# it is the same question about the same window.
+_CHARTS = ("weight", "intake", "net")
 # How many weigh-ins the weight view lists. Shared with the header, which states
 # the number — a header quoting a different count than the query uses is the same
 # defect as a header naming the wrong view.
@@ -59,6 +64,10 @@ class BodyTab(PanelTab):
         self.viewing_date = ""
         self.table_mode = "food"
         self.horizon = _DEFAULT_HORIZON
+        # Which series the TREND panel plots. Independent of `horizon` and of
+        # `table_mode` on purpose: "what am I looking at" and "over what window" are
+        # two questions, and zooming must not reset the answer to the first.
+        self.chart_mode = "weight"
         self._pending: estimate.Estimate | None = None
         self._pending_photo: tuple[object, bool] | None = None
         self._ids: list[int] = []
@@ -90,7 +99,7 @@ class BodyTab(PanelTab):
         # right two-thirds of the screen empty.
         with Horizontal(classes="panel-row"):
             with Vertical(classes="panel", id="panel-trend"):
-                yield Static("TREND", classes="panel-title")
+                yield Static(id="trend-title", classes="panel-title")
                 yield Static(id="weight-chart", classes="chart")
             with Vertical(classes="panel", id="panel-energy"):
                 yield Static("ENERGY", classes="panel-title")
@@ -175,27 +184,12 @@ class BodyTab(PanelTab):
         # per-day collapse keeps the trend readable, because weight swings a kilo
         # inside a day. Over one to three days that collapse hides exactly what you
         # zoomed in for, so every reading is plotted.
-        if span.hourly:
-            moments = body.weight_points_between(conn, start=span.start, end=span.end)
-        else:
-            moments = [
-                (at, kg_) for _, kg_, at in
-                body.weight_series_between(conn, start=span.start, end=span.end)
-            ]
-        when = [self._local(at) for at, _ in moments]
-        ax = hz.axis(span, [w.date().isoformat() for w in when])
-        # Width from the panel, not a constant: a hardcoded width wider than the
-        # panel makes every chart row wrap, doubling its height and looking broken.
-        rows = chart.frame_chart(
-            [v for _, v in moments],
-            width=self._chart_width(),
-            height=_CHART_H,
-            ylabel_width=_YLABEL_W,
-            x_labels=ax.labels(),
-            unit="",
-            positions=ax.fractions_at(when),
+        self.query_one("#trend-title", Static).update(
+            "TREND   " + view_row(_CHARTS, self.chart_mode)
         )
-        self.query_one("#weight-chart", Static).update("\n".join(rows))
+        self.query_one("#weight-chart", Static).update(
+            "\n".join(self._chart_rows(conn, cfg, span))
+        )
 
         kcal = body.day_kcal(conn, date=date)
         bmr = body.compute_bmr(cfg, kg, today=date)
@@ -270,6 +264,64 @@ class BodyTab(PanelTab):
         of bug as the date traps this repo keeps hitting.
         """
         return dt.datetime.fromtimestamp(epoch, ZoneInfo(self.app.cfg.timezone))
+
+    def _chart_rows(self, conn, cfg, span) -> list[str]:
+        """The TREND panel's plot, for whichever series is selected.
+
+        All three share the axis, the horizon and the panel width; what differs is the
+        data and whether zero belongs in the vertical extent. Weight fits itself —
+        anchored at zero a 70-75 kg series is a flat line at the top of the panel —
+        while a calorie series is a magnitude from zero, and a signed net is unreadable
+        without knowing which side of zero it sits on.
+        """
+        # Width from the panel, not a constant: a hardcoded width wider than the panel
+        # makes every chart row wrap, doubling its height and looking broken.
+        common = dict(
+            width=self._chart_width(), height=_CHART_H, ylabel_width=_YLABEL_W, unit=""
+        )
+        if self.chart_mode == "weight":
+            # Plot against real time, not point index. Two readings a day apart were
+            # being spread across a month-wide panel as a smooth climb; at their true
+            # positions they sit together at the right edge with the unweighed weeks
+            # visibly empty, which is the honest picture.
+            #
+            # How many points depends on how wide the window is. Over a month the
+            # per-day collapse keeps the trend readable, because weight swings a kilo
+            # inside a day. Over one to three days that collapse hides exactly what you
+            # zoomed in for, so every reading is plotted.
+            if span.hourly:
+                moments = body.weight_points_between(conn, start=span.start, end=span.end)
+            else:
+                moments = [
+                    (at, kg_) for _, kg_, at in
+                    body.weight_series_between(conn, start=span.start, end=span.end)
+                ]
+            when = [self._local(at) for at, _ in moments]
+            ax = hz.axis(span, [w.date().isoformat() for w in when])
+            return chart.frame_chart(
+                [v for _, v in moments],
+                x_labels=ax.labels(),
+                positions=ax.fractions_at(when),
+                **common,
+            )
+
+        if self.chart_mode == "intake":
+            series = body.kcal_series_between(conn, start=span.start, end=span.end)
+        else:
+            # Each day against its own burn. `body.net_series_between` skips days with
+            # no food and days with no resolvable burn, so a gap stays a gap rather
+            # than plotting as a day of nothing eaten.
+            series = body.net_series_between(conn, cfg, start=span.start, end=span.end)
+        # A day is a day here, however wide the window: calories are totalled per day,
+        # so there is no finer resolution for an hourly horizon to reveal.
+        ax = hz.axis(span, [d for d, _ in series])
+        return chart.frame_chart(
+            [float(v) for _, v in series],
+            x_labels=ax.labels(),
+            positions=ax.fractions([d for d, _ in series]),
+            include_zero=True,
+            **common,
+        )
 
     def _chart_width(self) -> int:
         """Braille cells inside the trend panel, after the y labels and the axis."""
@@ -454,6 +506,12 @@ class BodyTab(PanelTab):
 
     def key_jump_now(self) -> None:
         self.viewing_date = self.app.today()
+        self.reload()
+
+    def key_next_chart(self) -> None:
+        """Walk the TREND panel's series. One key rather than three, and cycling
+        rather than a prompt, because it is the same shape as `tab` on the sub-views."""
+        self.chart_mode = _CHARTS[(_CHARTS.index(self.chart_mode) + 1) % len(_CHARTS)]
         self.reload()
 
     def key_zoom_in(self) -> None:
