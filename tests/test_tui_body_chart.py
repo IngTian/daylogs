@@ -105,7 +105,7 @@ async def test_zoom_changes_the_horizon_and_the_header_shows_the_span(make_app, 
 
 
 async def test_zoom_clamps_at_both_ends(make_app, db):
-    """Wrapping from `all` back to `1w` on a keypress reads as a glitch.
+    """Wrapping from `all` back to `1d` on a keypress reads as a glitch.
 
     Both ends, in one test: the old version only pressed one key and so only ever
     covered one clamp, which meant the other end was never exercised at all.
@@ -121,7 +121,7 @@ async def test_zoom_clamps_at_both_ends(make_app, db):
         assert body.horizon == "all", "zooming out must stop at the widest horizon"
         for _ in range(20):
             await pilot.press("plus")
-        assert body.horizon == "1w", "zooming in must stop at the narrowest horizon"
+        assert body.horizon == "1d", "zooming in must stop at the narrowest horizon"
 
 
 async def test_a_wider_window_shows_more_of_the_series(make_app, db):
@@ -262,3 +262,57 @@ async def test_delete_mentions_undo(make_app, db):
         await pilot.press("y")
         await pilot.pause()
     assert any("undo" in m for m in seen), f"no undo hint after deleting: {seen}"
+
+
+# ── hours: 1d and 3d plot every reading at its real time ─────────────────
+
+
+async def test_a_three_day_window_plots_both_of_a_days_weigh_ins(make_app, db):
+    """The point of items 1d/3d. On a month-wide window the per-day collapse keeps
+    one reading; zoomed in, both appear, at their own hours.
+    """
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/Toronto")
+    morning = int(dt.datetime(2026, 8, 28, 7, 0, tzinfo=tz).timestamp())
+    evening = int(dt.datetime(2026, 8, 28, 21, 0, tzinfo=tz).timestamp())
+    add_weight(db, kg=80.4, date="2026-08-28", at=morning)
+    add_weight(db, kg=79.8, date="2026-08-28", at=evening)
+
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 22, 0, tzinfo=tz))
+    async with app.run_test(size=(140, 34)) as pilot:
+        body = await go_body(pilot, app)
+        body.horizon = "1m"
+        body.reload()
+        await pilot.pause()
+        monthly = _chart(app)
+
+        body.horizon = "3d"
+        body.reload()
+        await pilot.pause()
+        three_day = _chart(app)
+
+    # 80.4 is the morning reading the daily collapse discards; only the zoomed view
+    # can show it, and its y-axis label is the evidence.
+    assert "80.4" not in monthly, "the month view should keep one point per day"
+    assert "80.4" in three_day, f"the morning reading is missing:\n{three_day}"
+    assert "79.8" in three_day
+
+
+async def test_a_three_day_axis_is_labelled_by_the_clock(make_app, db):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("America/Toronto")
+    add_weight(db, kg=80.0, date="2026-08-28",
+               at=int(dt.datetime(2026, 8, 28, 7, 0, tzinfo=tz).timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 22, 0, tzinfo=tz))
+    async with app.run_test(size=(140, 34)) as pilot:
+        body = await go_body(pilot, app)
+        body.horizon = "3d"
+        body.reload()
+        await pilot.pause()
+        chart_text = _chart(app)
+    assert "00:00" in chart_text, f"no clock on the axis:\n{chart_text}"
+    assert "24:00" in chart_text

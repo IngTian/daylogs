@@ -8,6 +8,7 @@ What lives here is key handling, the estimate review flow, and rendering.
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from textual import work
 from textual.app import ComposeResult
@@ -140,22 +141,34 @@ class BodyTab(PanelTab):
         head += f"   ·  {span.label}"
         self.query_one("#weight-head", Static).update(head)
 
-        points = body.weight_series_between(conn, start=span.start, end=span.end)
-        # Plot against real dates, not point index. Two readings a day apart were
+        # Plot against real time, not point index. Two readings a day apart were
         # being spread across a month-wide panel as a smooth climb; at their true
         # positions they sit together at the right edge with the unweighed weeks
         # visibly empty, which is the honest picture.
-        ax = hz.axis(span, [d for d, _ in points])
+        #
+        # How many points depends on how wide the window is. Over a month the
+        # per-day collapse keeps the trend readable, because weight swings a kilo
+        # inside a day. Over one to three days that collapse hides exactly what you
+        # zoomed in for, so every reading is plotted.
+        if span.hourly:
+            moments = body.weight_points_between(conn, start=span.start, end=span.end)
+        else:
+            moments = [
+                (at, kg_) for _, kg_, at in
+                body.weight_series_between(conn, start=span.start, end=span.end)
+            ]
+        when = [self._local(at) for at, _ in moments]
+        ax = hz.axis(span, [w.date().isoformat() for w in when])
         # Width from the panel, not a constant: a hardcoded width wider than the
         # panel makes every chart row wrap, doubling its height and looking broken.
         rows = chart.frame_chart(
-            [v for _, v in points],
+            [v for _, v in moments],
             width=self._chart_width(),
             height=_CHART_H,
             ylabel_width=_YLABEL_W,
             x_labels=ax.labels(),
             unit="",
-            positions=ax.fractions([d for d, _ in points]),
+            positions=ax.fractions_at(when),
         )
         self.query_one("#weight-chart", Static).update("\n".join(rows))
 
@@ -192,6 +205,16 @@ class BodyTab(PanelTab):
         line = self.query_one("#inbox-line", Static)
         line.update(f"{pending} photo{'s' if pending != 1 else ''} in inbox — press p")
         line.display = pending > 0
+
+    def _local(self, epoch: int) -> dt.datetime:
+        """An epoch as a wall-clock time in the configured zone.
+
+        The conversion belongs here rather than in `horizon`, which is pure and has
+        no business knowing about `cfg`. A UTC reading at 02:00 Toronto is the
+        previous evening locally, and plotting it on the wrong day is the same class
+        of bug as the date traps this repo keeps hitting.
+        """
+        return dt.datetime.fromtimestamp(epoch, ZoneInfo(self.app.cfg.timezone))
 
     def _chart_width(self) -> int:
         """Braille cells inside the trend panel, after the y labels and the axis."""

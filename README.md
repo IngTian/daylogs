@@ -103,7 +103,7 @@ group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
 | `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
-| `-` | zoom **out** — a longer horizon: `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
+| `-` | zoom **out** — a longer horizon: `1d` `3d` `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
 | `T` | change the theme — `tab` completes the list, and the choice is remembered |
 | `?` | the full keymap |
 | `u` | undo the last delete or edit |
@@ -205,12 +205,19 @@ that row's table shows, so what you can see is what you can edit.
 
 One list serves both tabs, so `+` and `-` mean the same thing everywhere:
 
-    1w · 1m · MTD · 3m · YTD · 1y · all
+    1d · 3d · 1w · 1m · MTD · 3m · YTD · 1y · all
 
-`1w`/`1m`/`3m`/`1y` look back from the day you're on; `MTD` and `YTD` run from the
-start of that month or year. `[` and `]` then step by one whole horizon — on `MTD`
-that's a calendar month, so you compare the same elapsed slice of the previous
+`1d`/`3d`/`1w`/`1m`/`3m`/`1y` look back from the day you're on; `MTD` and `YTD` run
+from the start of that month or year. `[` and `]` then step by one whole horizon — on
+`MTD` that's a calendar month, so you compare the same elapsed slice of the previous
 month rather than a ragged window.
+
+**At `1d` and `3d` the weight chart switches to a clock.** The axis is labelled in
+hours instead of dates, and every weigh-in is plotted at the time it was taken —
+so two readings on one day sit apart rather than on top of each other. Wider
+horizons keep one point per day, deliberately: weight swings a kilo inside a day,
+and plotting every reading across a month makes the trend noisier without telling
+you anything a shorter window wouldn't tell you better.
 
 `g 2026-06` lands on the **last** day of June, so under `MTD` you get all of it.
 

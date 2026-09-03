@@ -87,11 +87,18 @@ def weight_series(conn, *, end_date: str, days: int) -> list[tuple[str, float]]:
 
 def weight_series_between(
     conn, *, start: str | None, end: str
-) -> list[tuple[str, float]]:
+) -> list[tuple[str, float, int]]:
     """One point per day between `start` and `end` inclusive, ascending.
-    `start=None` means unbounded. Same last-reading-wins rule as weight_series."""
+
+    `start=None` means unbounded. Same last-reading-wins rule as weight_series.
+
+    Returns `(date, kg, measured_at)`. The timestamp comes along so the chart can
+    place a day's point at the hour it was taken rather than at midnight — the
+    collapse is about how many points there are, not about pretending they all
+    happened at once. Use `weight_points_between` when every reading is wanted.
+    """
     sql = """
-        SELECT date, kg FROM weight w
+        SELECT date, kg, measured_at FROM weight w
         WHERE date <= ?
           AND measured_at = (
               SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
@@ -102,7 +109,28 @@ def weight_series_between(
         sql += " AND date >= ?"
         args.append(_check_date(start))
     sql += " GROUP BY date ORDER BY date ASC"
-    return [(r["date"], r["kg"]) for r in conn.execute(sql, args)]
+    return [(r["date"], r["kg"], r["measured_at"]) for r in conn.execute(sql, args)]
+
+
+def weight_points_between(conn, *, start: str | None, end: str) -> list[tuple[int, float]]:
+    """*Every* reading between `start` and `end` inclusive, ascending by time.
+
+    The counterpart to `weight_series_between`, for windows short enough that the
+    time of day is a visible axis position (`horizon.HOURLY_MAX_DAYS`). Over a month
+    the per-day collapse is what keeps the trend readable — weight swings a kilo
+    within a day — but across three days that same collapse hides the thing you
+    zoomed in to see.
+
+    Returns `(measured_at, kg)` and no date: at this resolution the timestamp *is*
+    the position.
+    """
+    sql = "SELECT measured_at, kg FROM weight WHERE date <= ?"
+    args: list = [_check_date(end)]
+    if start is not None:
+        sql += " AND date >= ?"
+        args.append(_check_date(start))
+    sql += " ORDER BY measured_at ASC"
+    return [(r["measured_at"], r["kg"]) for r in conn.execute(sql, args)]
 
 
 def kcal_series_between(conn, *, start: str | None, end: str) -> list[tuple[str, int]]:

@@ -16,11 +16,12 @@ A = "2026-08-28"
 
 
 def _length(span):
-    """Inclusive day count.
+    """Inclusive day count, computed here rather than read from `Span.days`.
 
-    `Span.days()` was deleted as dead — nothing in the app ever read it — but the
-    boundary arithmetic it asserted is still worth guarding, so the tests compute
-    it themselves rather than keeping an accessor alive for their own benefit.
+    `Span.days` had been deleted as dead and came back with the `1d`/`3d` horizons,
+    which need it to decide whether a span is short enough to plot by the hour. These
+    tests keep computing it independently on purpose: asserting boundary arithmetic
+    against the same accessor the code uses would only prove it agrees with itself.
     """
     if span.start is None:
         return None
@@ -125,9 +126,11 @@ def test_ordinal_suffixes():
 
 # ── cycling ──────────────────────────────────────────────────────────────
 def test_cycle_order_and_clamping():
-    assert list(HORIZONS) == ["1w", "1m", "MTD", "3m", "YTD", "1y", "all"]
+    assert list(HORIZONS) == ["1d", "3d", "1w", "1m", "MTD", "3m", "YTD", "1y", "all"]
     assert next_horizon("1w", 1) == "1m"
-    assert next_horizon("1w", -1) == "1w"
+    assert next_horizon("1w", -1) == "3d", "3d sits between a day and a week"
+    assert next_horizon("3d", -1) == "1d"
+    assert next_horizon("1d", -1) == "1d"
     assert next_horizon("all", 1) == "all"
     assert next_horizon("MTD", -1) == "1m"
     assert next_horizon("nonsense", 1) == DEFAULT
@@ -220,9 +223,16 @@ def test_axis_for_an_unbounded_span_with_no_data_does_not_crash():
 
 
 def test_axis_single_day_span_is_safe():
+    """The date-only position stays 0.0: a bare date means midnight, and midnight is
+    the start of the axis.
+
+    The labels moved to hours when the `1d` horizon arrived — a one-day axis is a
+    day wide, so an hour scale says more than a date repeated three times, and the
+    tab header already carries the date. See
+    `test_a_single_day_axis_is_labelled_in_hours`.
+    """
     ax = hz.Axis("2026-08-28", "2026-08-28")
     assert ax.fraction("2026-08-28") == 0.0
-    assert ax.labels() == ("Aug 28",)
 
 
 def test_axis_labels_describe_the_span_ends_and_middle():
@@ -276,3 +286,126 @@ def test_goto_rejects_anything_else_with_guidance():
     for text in ("", "nope", "june", "2026", "15-06-2026"):
         with pytest.raises(hz.HorizonError, match="give a date like"):
             hz.resolve_goto(text)
+
+
+# ── 1d: the single-day window, and sub-day positions ────────────────────────
+
+
+def test_one_day_is_the_narrowest_horizon():
+    """Zooming in used to stop at a week, so there was no way to look at one day."""
+    assert hz.HORIZONS[0] == "1d"
+    assert hz.next_horizon("3d", -1) == "1d"
+    assert hz.next_horizon("1d", -1) == "1d", "zoom in must clamp, not wrap"
+
+
+def test_one_day_resolves_to_a_single_date():
+    span = hz.resolve("1d", anchor="2026-08-28")
+    assert (span.start, span.end) == ("2026-08-28", "2026-08-28")
+
+
+def test_brackets_step_one_day_on_the_one_day_horizon():
+    assert hz.shift("1d", "2026-08-28", -1) == "2026-08-27"
+    assert hz.shift("1d", "2026-08-28", 1) == "2026-08-29"
+
+
+def test_a_single_day_span_reads_as_one_date():
+    """"Aug 28 – Aug 28 2026" is what the range branch produces, and it reads as a
+    formatting bug rather than as a day."""
+    label = hz.resolve("1d", anchor="2026-08-28").label
+    assert "–" not in label, f"a one-day span rendered as a range: {label!r}"
+    assert "Aug 28" in label and "2026" in label
+
+
+def test_sub_day_positions_separate_two_readings_on_one_day():
+    """The point of item 3: on a one-day axis, morning sits left of evening."""
+    ax = hz.Axis("2026-08-28", "2026-08-28")
+    morning = ax.fraction_at(dt.datetime(2026, 8, 28, 7, 0))
+    evening = ax.fraction_at(dt.datetime(2026, 8, 28, 19, 0))
+    assert 0.0 <= morning < evening <= 1.0, f"{morning} !< {evening}"
+    assert morning == pytest.approx(7 / 24, abs=0.01)
+
+
+def test_sub_day_positions_add_to_the_day_offset_on_a_longer_axis():
+    ax = hz.Axis("2026-08-01", "2026-08-11")   # 10 days wide
+    noon_on_the_sixth = ax.fraction_at(dt.datetime(2026, 8, 6, 12, 0))
+    assert noon_on_the_sixth == pytest.approx(0.55, abs=0.01), "half a day past 0.5"
+
+
+def test_midnight_matches_the_date_only_position():
+    """Backwards compatibility: everything that positioned by date still lands
+    where it did, so a long horizon is unchanged."""
+    ax = hz.Axis("2026-08-01", "2026-08-11")
+    assert ax.fraction_at(dt.datetime(2026, 8, 6, 0, 0)) == ax.fraction("2026-08-06")
+
+
+def test_sub_day_positions_clamp_inside_the_axis():
+    ax = hz.Axis("2026-08-01", "2026-08-11")
+    assert ax.fraction_at(dt.datetime(2026, 7, 1, 12, 0)) == 0.0
+    assert ax.fraction_at(dt.datetime(2026, 8, 11, 23, 59)) == 1.0
+
+
+def test_fractions_at_maps_a_list():
+    ax = hz.Axis("2026-08-28", "2026-08-28")
+    out = ax.fractions_at(
+        [dt.datetime(2026, 8, 28, 6, 0), dt.datetime(2026, 8, 28, 18, 0)]
+    )
+    assert len(out) == 2 and out[0] < out[1]
+
+
+def test_a_single_day_axis_is_labelled_in_hours():
+    """A one-day axis is a day wide, so dates say nothing an hour scale doesn't say
+    better — and the tab header already carries the date."""
+    ax = hz.Axis("2026-08-28", "2026-08-28")
+    labels = ax.labels()
+    assert labels == ("00:00", "12:00", "24:00"), labels
+
+
+# ── 3d: hours across a few days ─────────────────────────────────────────────
+
+
+def test_three_days_sits_between_one_day_and_a_week():
+    assert list(hz.HORIZONS[:3]) == ["1d", "3d", "1w"]
+    assert hz.next_horizon("1w", -1) == "3d"
+    assert hz.next_horizon("3d", -1) == "1d"
+
+
+def test_three_days_resolves_to_three_inclusive_days():
+    span = hz.resolve("3d", anchor="2026-08-28")
+    assert (span.start, span.end) == ("2026-08-26", "2026-08-28")
+    assert span.days == 3
+
+
+def test_brackets_step_three_days():
+    assert hz.shift("3d", "2026-08-28", -1) == "2026-08-25"
+
+
+def test_spans_up_to_three_days_are_hourly_and_longer_ones_are_not():
+    assert hz.resolve("1d", anchor="2026-08-28").hourly is True
+    assert hz.resolve("3d", anchor="2026-08-28").hourly is True
+    assert hz.resolve("1w", anchor="2026-08-28").hourly is False
+    assert hz.resolve("all", anchor="2026-08-28").hourly is False, "unbounded is never hourly"
+
+
+def test_a_three_day_axis_is_labelled_with_weekday_and_clock():
+    ax = hz.Axis("2026-08-26", "2026-08-28")   # Wed - Fri
+    labels = ax.labels()
+    assert labels == ("Wed 00:00", "Thu 12:00", "Fri 24:00"), labels
+
+
+def test_the_last_afternoon_of_a_three_day_span_is_not_pinned_to_the_edge():
+    """With the exclusive divisor a long chart pins its newest point to the right,
+    which is right for "now" and wrong for a clock view: everything after midday on
+    the final day would collapse onto one column."""
+    ax = hz.Axis("2026-08-26", "2026-08-28")
+    noon = ax.fraction_at(dt.datetime(2026, 8, 28, 12, 0))
+    end = ax.fraction_at(dt.datetime(2026, 8, 28, 23, 59))
+    assert noon == pytest.approx(2.5 / 3, abs=0.01)
+    assert noon < end < 1.0 or end == pytest.approx(1.0, abs=0.001)
+    assert noon < 0.9, f"midday on the last day should not be at the edge: {noon}"
+
+
+def test_a_long_axis_still_pins_its_newest_point_to_the_right_edge():
+    """The behaviour the month-wide chart relies on, unchanged."""
+    span = hz.resolve("1m", anchor="2026-08-28")
+    ax = hz.axis(span, ["2026-08-28"])
+    assert ax.fraction_at(dt.datetime(2026, 8, 28, 18, 0)) == 1.0
