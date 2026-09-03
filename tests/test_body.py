@@ -18,7 +18,9 @@ from daylogs.body import (
     update_food,
     update_weight,
     weight_delta,
+    weight_points_between,
     weight_series,
+    weight_series_between,
 )
 from daylogs.config import Config
 
@@ -230,3 +232,41 @@ def test_restamp_handles_midnight():
     at = int(datetime(2026, 8, 20, 23, 59, 12).timestamp())
     out = restamp(at, date="2026-08-20", hhmm="00:00")
     assert datetime.fromtimestamp(out) == datetime(2026, 8, 20, 0, 0)
+
+
+# ── sub-day weight points (the 1d / 3d views) ────────────────────────────
+
+
+def test_weight_series_between_reports_when_each_daily_point_was_taken(db):
+    """One point per day is kept for long horizons, but the chart needs to know the
+    hour so it can place that point where it happened rather than at midnight."""
+    add_weight(db, kg=80.0, date="2026-08-27", at=1000, note="")
+    add_weight(db, kg=79.5, date="2026-08-27", at=2000, note="")
+    rows = weight_series_between(db, start="2026-08-27", end="2026-08-27")
+    assert len(rows) == 1, "the per-day collapse must survive"
+    date, kg, at = rows[0]
+    assert (date, kg, at) == ("2026-08-27", 79.5, 2000), "the latest reading wins"
+
+
+def test_weight_points_between_keeps_every_reading(db):
+    """The 1d and 3d views want each weigh-in, not one per day — otherwise there is
+    nothing for hour positions to separate."""
+    add_weight(db, kg=80.0, date="2026-08-27", at=1000, note="")
+    add_weight(db, kg=79.5, date="2026-08-27", at=2000, note="")
+    add_weight(db, kg=79.0, date="2026-08-28", at=3000, note="")
+    rows = weight_points_between(db, start="2026-08-27", end="2026-08-28")
+    assert [(at, kg) for at, kg in rows] == [(1000, 80.0), (2000, 79.5), (3000, 79.0)]
+
+
+def test_weight_points_between_respects_the_range(db):
+    add_weight(db, kg=90.0, date="2026-08-01", at=1, note="")
+    add_weight(db, kg=80.0, date="2026-08-27", at=2, note="")
+    rows = weight_points_between(db, start="2026-08-27", end="2026-08-28")
+    assert [kg for _, kg in rows] == [80.0]
+
+
+def test_weight_points_between_unbounded_start(db):
+    add_weight(db, kg=90.0, date="2026-08-01", at=1, note="")
+    add_weight(db, kg=80.0, date="2026-08-27", at=2, note="")
+    rows = weight_points_between(db, start=None, end="2026-08-28")
+    assert [kg for _, kg in rows] == [90.0, 80.0]

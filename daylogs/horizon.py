@@ -5,9 +5,13 @@ ranges (month/quarter/year/all) on Money — so `+` meant different things on
 different tabs and neither offered month-to-date or year-to-date. One list now
 serves both, which is both what was asked for and less to remember.
 
-A horizon plus an anchor date resolves to a `Span`. Rolling horizons (1w, 1m, 3m,
-1y) look back from the anchor; `MTD` and `YTD` run from the start of the anchor's
-month or year. Pure: no database, no Textual.
+A horizon plus an anchor date resolves to a `Span`. Rolling horizons (1d, 1w, 1m,
+3m, 1y) look back from the anchor; `MTD` and `YTD` run from the start of the
+anchor's month or year. Pure: no database, no Textual.
+
+`1d` is the narrow end, and it is what makes `Axis.fraction_at` worth having: on a
+one-day axis the time of day *is* the horizontal position, so two readings hours
+apart separate instead of stacking on one column.
 """
 
 from __future__ import annotations
@@ -17,12 +21,14 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 
-HORIZONS = ("1w", "1m", "MTD", "3m", "YTD", "1y", "all")
+HORIZONS = ("1d", "3d", "1w", "1m", "MTD", "3m", "YTD", "1y", "all")
 
 # Rolling look-back in days, for the horizons that are a fixed window.
-_LOOKBACK = {"1w": 7, "1m": 30, "3m": 90, "1y": 365}
+_LOOKBACK = {"1d": 1, "3d": 3, "1w": 7, "1m": 30, "3m": 90, "1y": 365}
 # How far one `[` / `]` press moves the anchor, in (months, days).
 _STEP = {
+    "1d": (0, 1),
+    "3d": (0, 3),
     "1w": (0, 7),
     "1m": (1, 0),
     "MTD": (1, 0),
@@ -31,6 +37,14 @@ _STEP = {
     "1y": (12, 0),
     "all": (0, 0),
 }
+
+_DAY_SECONDS = 24 * 3600
+
+# At or below this many days, a span is plotted and labelled by the hour: points
+# sit at their real time of day and the axis ticks are clock times. Above it, a day
+# is a column or two wide and sub-day precision is invisible, so the chart stays a
+# daily trend. Shared so the tab's query and the axis agree on where the line is.
+HOURLY_MAX_DAYS = 3
 
 DEFAULT = "MTD"
 
@@ -56,9 +70,33 @@ class Span:
             return f"{s.strftime('%B %Y').upper()} · to the {_ordinal(e.day)}"
         if self.horizon == "YTD":
             return f"{s.year} YTD · to {e.strftime('%b %-d')}"
+        # A one-day span through the range branch renders as "Aug 28 – Aug 28 2026",
+        # which reads as a formatting bug rather than as a day. Checked on the dates
+        # rather than on `horizon == "1d"`, so any span that happens to cover one
+        # day says so.
+        if s == e:
+            return f"{s.strftime('%a %b %-d %Y')}"
         if s.year == e.year:
             return f"{s.strftime('%b %-d')} – {e.strftime('%b %-d')} {e.year}"
         return f"{s.strftime('%b %-d %Y')} – {e.strftime('%b %-d %Y')}"
+
+    @property
+    def days(self) -> int | None:
+        """Inclusive day count, or None when unbounded."""
+        if self.start is None:
+            return None
+        s, e = dt.date.fromisoformat(self.start), dt.date.fromisoformat(self.end)
+        return (e - s).days + 1
+
+    @property
+    def hourly(self) -> bool:
+        """Short enough that the time of day is worth plotting.
+
+        The tab asks this to decide whether to fetch every reading or one per day:
+        a three-day window wants each weigh-in where it happened, a three-month one
+        wants a clean daily trend.
+        """
+        return self.days is not None and self.days <= HOURLY_MAX_DAYS
 
     def months(self) -> list[str]:
         """Calendar months the span touches, ascending. Empty means unbounded.
@@ -136,6 +174,42 @@ class Axis:
     def fractions(self, dates: list[str]) -> list[float]:
         return [self.fraction(d) for d in dates]
 
+    def fraction_at(self, when: dt.datetime) -> float:
+        """`when`'s position in [0, 1], to the hour rather than to the day.
+
+        A bare date means midnight, so `fraction_at` at midnight equals `fraction`
+        of the same date — every long horizon plots exactly where it did before, and
+        the extra precision only becomes visible once a day is more than a column or
+        two wide.
+
+        Reads `when`'s own components and never converts a timezone: this module is
+        pure, and the caller already knows which zone the clock is in. Hand it a
+        local datetime.
+        """
+        into_day = when.hour * 3600 + when.minute * 60 + when.second
+        left = dt.date.fromisoformat(self.left)
+        total_days = (dt.date.fromisoformat(self.right) - left).days
+        offset = (when.date() - left).days + into_day / _DAY_SECONDS
+        if self.hourly:
+            # Divide by the *inclusive* width, so the axis runs from the first day's
+            # 00:00 to the last day's 24:00. With the exclusive divisor used below,
+            # everything after midday on the final day would clamp to the right edge
+            # — which is what you want when the newest reading means "now" on a
+            # months-wide chart, and wrong when the point of the view is the clock.
+            return min(max(offset / (total_days + 1), 0.0), 1.0)
+        if total_days <= 0:
+            return 0.0
+        return min(max(offset / total_days, 0.0), 1.0)
+
+    @property
+    def hourly(self) -> bool:
+        """Whether this axis is narrow enough to be read as a clock."""
+        left = dt.date.fromisoformat(self.left)
+        return (dt.date.fromisoformat(self.right) - left).days + 1 <= HOURLY_MAX_DAYS
+
+    def fractions_at(self, moments: list[dt.datetime]) -> list[float]:
+        return [self.fraction_at(m) for m in moments]
+
     def labels(self) -> tuple[str, ...]:
         """Up to three ticks describing the axis, not the data.
 
@@ -145,7 +219,21 @@ class Axis:
         left = dt.date.fromisoformat(self.left)
         right = dt.date.fromisoformat(self.right)
         if left == right:
-            return (left.strftime("%b %d"),)
+            # One day wide, so an hour scale says more than the same date three
+            # times — and the tab header already carries the date.
+            return ("00:00", "12:00", "24:00")
+        if self.hourly:
+            # Two or three days: the clock still matters, but hours alone would not
+            # say which day. Weekday rather than date keeps each tick to nine
+            # characters — three dates plus times would collide on a half-width
+            # panel — and the header carries the dates.
+            midnight = dt.datetime.combine(left, dt.time())
+            mid = midnight + dt.timedelta(days=(right - left).days + 1) / 2
+            return (
+                f"{left.strftime('%a')} 00:00",
+                mid.strftime("%a %H:%M"),
+                f"{right.strftime('%a')} 24:00",
+            )
         mid = left + (right - left) / 2
         return tuple(d.strftime("%b %d") for d in (left, mid, right))
 

@@ -53,7 +53,10 @@ def test_widen_and_narrow_walk_the_horizon_list_and_clamp():
     assert seen[-1] == "all"
     for _ in range(len(HORIZONS) + 1):
         v.narrow()
-    assert v.horizon == "1w"
+    # `1d`, not the `1w` it started on: narrowing walks past the starting point and
+    # clamps at the narrow end, which is now 1d — the list gained 1d and 3d for the
+    # hour views.
+    assert v.horizon == "1d"
 
 
 # ── stepping ─────────────────────────────────────────────────────────────
