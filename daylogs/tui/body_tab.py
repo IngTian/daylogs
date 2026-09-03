@@ -19,7 +19,13 @@ from daylogs import body, estimate, parse, photo, sigil
 from daylogs import horizon as hz
 from daylogs.config import load_config, update_config
 from daylogs.fmt import hhmm, human_date
-from daylogs.parse import ParseError, parse_food, parse_profile, parse_weigh
+from daylogs.parse import (
+    ParseError,
+    parse_activity,
+    parse_food,
+    parse_profile,
+    parse_weigh,
+)
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style, view_row
@@ -36,9 +42,11 @@ _DEFAULT_HORIZON = "1m"
 # 60 seconds — so it vanished while you were still waiting, indistinguishable from
 # a dropped keypress. Same spacing convention as summary_tab's "generating…".
 _ESTIMATING = "   estimating…"
-# The two sub-views `tab` walks, in the order the strip draws them. Named so the
-# header, the strip and the toggle cannot disagree about what exists.
-_VIEWS = ("weight", "food")
+# The sub-views `tab` walks, in the order the strip draws them. Named so the header,
+# the strip and the toggle cannot disagree about what exists. Each name is also its
+# table's name, which is what lets the row lookup, the edit prefill and the delete
+# handler stay one branch each instead of three.
+_VIEWS = ("weight", "food", "activity")
 # How many weigh-ins the weight view lists. Shared with the header, which states
 # the number — a header quoting a different count than the query uses is the same
 # defect as a header naming the wrong view.
@@ -64,6 +72,14 @@ class BodyTab(PanelTab):
         # itself; a `finally` would clear it in the gap between the two and blink the
         # indicator off mid-estimate. Same shape as summary_tab's `busy`.
         self._estimating = False
+        # An activity factor is being inferred. A separate flag *and* a separate worker
+        # group from the food estimate: the two are unrelated questions, and sharing
+        # the exclusive group would mean logging a gym session silently killed a meal
+        # estimate you were still waiting on.
+        self._inferring = False
+        # The inferred factor waiting to be confirmed, so the confirm line can be
+        # submitted unchanged and still land a number.
+        self._pending_activity: estimate.Effort | None = None
         # The FOOD header without the estimate suffix, kept so the suffix can be
         # painted on and off without recomputing the line or touching the table.
         self._food_head = ""
@@ -106,6 +122,7 @@ class BodyTab(PanelTab):
         self._editing = None
         self._pending = None
         self._pending_photo = None
+        self._pending_activity = None
 
     def span(self) -> hz.Span:
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
@@ -115,7 +132,7 @@ class BodyTab(PanelTab):
         parts = [self.horizon]
         if date != self.app.today():
             parts.insert(0, human_date(date))
-        if self._estimating:
+        if self._estimating or self._inferring:
             parts.append(_ESTIMATING.strip())
         return " · ".join(parts)
 
@@ -204,6 +221,20 @@ class BodyTab(PanelTab):
             # whatever day is being viewed. Claiming the span here would be the same
             # class of lie this fixes.
             self._food_head = f"WEIGHT   {_WEIGHT_ROWS} most recent weigh-ins"
+        elif self.table_mode == "activity":
+            # The factor, its origin and the burn it produces — the same three facts
+            # the ENERGY panel shows, because this header sits above the rows that
+            # produced them and a header that omitted them would read as a bare log.
+            head = f"ACTIVITY   {human_date(date)}"
+            if factor is None:
+                # An empty state names the fix. Nothing logged and no baseline means
+                # there is no factor at all, and `h` is what changes that.
+                head += "   no day factor — press h to set an ordinary day"
+            else:
+                head += f"   day ×{factor:g} {origin}"
+                if burn is not None:
+                    head += f"   →  {burn:,} burn"
+            self._food_head = head
         else:
             label = human_date(date)
             if burn is not None:
@@ -319,6 +350,18 @@ class BodyTab(PanelTab):
             for r in body.list_weight(self.app.conn, limit=_WEIGHT_ROWS):
                 table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
                 self._ids.append(r["id"])
+        elif self.table_mode == "activity":
+            table.add_columns("time", "description", "factor", "src")
+            for r in body.list_activity(self.app.conn, date=date):
+                table.add_row(
+                    hhmm(r["logged_at"]),
+                    r["description"],
+                    # A dash, not a blank: an inference that never landed is a state
+                    # worth seeing, because the day quietly used the baseline instead.
+                    "—" if r["factor"] is None else f"×{r['factor']:g}",
+                    "lab" if r["source"] == "labeled" else "est",
+                )
+                self._ids.append(r["id"])
         else:
             table.add_columns("time", "description", "kcal", "src")
             for r in body.list_food(self.app.conn, date=date):
@@ -336,7 +379,8 @@ class BodyTab(PanelTab):
         if row is None or not (0 <= row < len(self._ids)):
             return None
         row_id = self._ids[row]
-        which = "weight" if self.table_mode == "weight" else "food"
+        # The view name is the table name, which is why this is not a three-way branch.
+        which = self.table_mode
         return self.app.conn.execute(
             f"SELECT * FROM {which} WHERE id = ?", (row_id,)
         ).fetchone()
@@ -362,6 +406,9 @@ class BodyTab(PanelTab):
     def key_food(self) -> None:
         self.app.prompt.open("food")
 
+    def key_activity(self) -> None:
+        self.app.prompt.open("activity")
+
     def key_activate(self) -> None:
         """enter edits the row under the cursor.
 
@@ -375,15 +422,24 @@ class BodyTab(PanelTab):
         if self.table_mode == "weight":
             self._editing = ("weight", row["id"])
             self.app.prompt.open("weigh", prefill=parse.render_weigh(row))
+        elif self.table_mode == "activity":
+            self._editing = ("activity", row["id"])
+            self.app.prompt.open("activity", prefill=parse.render_activity(row))
         else:
             self._editing = ("food", row["id"])
             self.app.prompt.open("food", prefill=parse.render_food(row))
 
     def key_next_subview(self) -> None:
-        self.table_mode = _VIEWS[(_VIEWS.index(self.table_mode) + 1) % len(_VIEWS)]
-        self.reload()
+        self._step_subview(1)
 
-    key_prev_subview = key_next_subview  # only two sub-views; direction is moot
+    def key_prev_subview(self) -> None:
+        self._step_subview(-1)
+
+    def _step_subview(self, delta: int) -> None:
+        """Walk the strip. Directional now that there are three views — while there
+        were two, `prev` was an alias for `next` and shift+tab happened to be right."""
+        self.table_mode = _VIEWS[(_VIEWS.index(self.table_mode) + delta) % len(_VIEWS)]
+        self.reload()
 
     def key_prev_period(self) -> None:
         self._shift_day(-1)
@@ -420,6 +476,9 @@ class BodyTab(PanelTab):
         mode = self.table_mode
         if mode == "weight":
             label = f"{row['kg']:g} kg on {row['date']}"
+        elif mode == "activity":
+            factor = "no factor" if row["factor"] is None else f"×{row['factor']:g}"
+            label = f"{row['description']} ({factor})"
         else:
             label = f"{row['description']} ({row['kcal']:,} kcal)"
         self.app.ask_confirm(
@@ -427,8 +486,12 @@ class BodyTab(PanelTab):
         )
 
     def _do_delete(self, mode: str, row_id: int) -> None:
-        table = "weight" if mode == "weight" else "food"
-        fn = body.delete_weight if mode == "weight" else body.delete_food
+        table = mode
+        fn = {
+            "weight": body.delete_weight,
+            "food": body.delete_food,
+            "activity": body.delete_activity,
+        }[mode]
         row = fn(self.app.conn, row_id)
         if row is None:
             return
@@ -454,7 +517,7 @@ class BodyTab(PanelTab):
 
     # ── workers ──────────────────────────────────────────────────────────
     def _paint_food_head(self) -> None:
-        suffix = _ESTIMATING if self._estimating else ""
+        suffix = _ESTIMATING if (self._estimating or self._inferring) else ""
         self.query_one("#food-head", Static).update(self._food_head + suffix)
 
     def _set_estimating(self, running: bool) -> None:
@@ -469,6 +532,12 @@ class BodyTab(PanelTab):
         by some other keypress mid-estimate would never be cleared.
         """
         self._estimating = running
+        self._paint_food_head()
+        self.app.refresh_footer()
+
+    def _set_inferring(self, running: bool) -> None:
+        """The activity-factor counterpart, repainting the same two places."""
+        self._inferring = running
         self._paint_food_head()
         self.app.refresh_footer()
 
@@ -533,6 +602,10 @@ class BodyTab(PanelTab):
             self._submit_food(value)
         elif label == "confirm food":
             self._submit_confirmed_food(value)
+        elif label == "activity":
+            self._submit_activity(value)
+        elif label == "confirm activity":
+            self._submit_confirmed_activity(value)
         elif label == "photo path":
             self._estimate_photo(photo.resolve_path(value), from_inbox=False)
         elif label == "go to date":
@@ -687,6 +760,122 @@ class BodyTab(PanelTab):
             if from_inbox:
                 photo.mark_processed(path, self.app.cfg.inbox_dir)
             self._pending_photo = None
+
+    def _submit_activity(self, value: str) -> None:
+        """Entry or edit, on one line. An edit updates; entry with no `=` asks Claude.
+
+        The two paths diverge on the missing factor deliberately. On entry, no number
+        means "work one out". On an edit it means "leave the stored one alone" — fixing
+        a typo in a description must not silently re-roll the number the day is
+        measured against, and it is also what keeps a factorless row editable, since
+        its rendered line carries no `=` to begin with.
+        """
+        r = parse_activity(value, now=self.app.now())
+        row_id = self._take_editing("activity")
+        if row_id is not None:
+            before = self.app.conn.execute(
+                "SELECT * FROM activity WHERE id = ?", (row_id,)
+            ).fetchone()
+            if before is None:
+                self.app.notify("that row is gone", timeout=3)
+                return
+            # Only restamp when the minute actually moved, so the seconds survive —
+            # `logged_at` is the tie-breaker `resolved_factor` uses to pick a day's
+            # latest inference, and the grammar's only time token is HH:MM.
+            at = body.restamp(before["logged_at"], date=r.date, hhmm=hhmm(r.at))
+            body.update_activity(
+                self.app.conn, row_id,
+                description=r.description, factor=r.factor, date=r.date,
+                logged_at=at,
+            )
+            self.app.undo_stack.push("activity", dict(before))
+            self.app.notify(f"{r.description} · u to undo", timeout=4)
+            self.reload()
+            return
+        if r.factor is None:
+            self._run_factor_estimate(r)
+            return
+        self._write_activity(r, source="labeled")
+
+    def _submit_confirmed_activity(self, value: str) -> None:
+        r = parse_activity(value, now=self.app.now())
+        if r.factor is None and self._pending_activity is not None:
+            r = type(r)(
+                description=r.description,
+                factor=self._pending_activity.factor,
+                date=r.date,
+                at=r.at,
+            )
+        self._pending_activity = None
+        self._write_activity(r, source="estimated")
+
+    def _write_activity(self, r, *, source: str) -> None:
+        body.add_activity(
+            self.app.conn,
+            description=r.description,
+            date=r.date,
+            at=r.at,
+            factor=r.factor,
+            source=source,
+        )
+        self.viewing_date = r.date
+        self.reload()
+        # The useful answer is not "saved" but what the day now costs. When there is no
+        # BMR the factor has nothing to scale, and saying so names the fix rather than
+        # letting the entry look like it did nothing.
+        burn = body.day_tdee(self.app.conn, self.app.cfg, date=r.date)
+        shown = "no factor" if r.factor is None else f"×{r.factor:g}"
+        if burn is None:
+            self.app.notify(
+                f"{r.description} · {shown} — press h for a height, sex and birthday"
+                " to turn it into a burn figure",
+                timeout=6,
+            )
+        else:
+            self.app.notify(f"{r.description} · {shown} · {burn:,} burn", timeout=4)
+
+    @work(exclusive=True, group="activity")
+    async def _run_factor_estimate(self, r) -> None:
+        """Infer the day's factor, then offer it for review.
+
+        Its own worker group, not the food estimate's: they are unrelated questions,
+        and sharing a group would mean logging a gym session cancelled a meal estimate
+        that was still running.
+
+        A failed inference still records what you did, with a NULL factor — the state
+        the schema and `resolved_factor` already handle, where the day falls back to
+        the profile baseline. The description is the user's data; the factor is a
+        guess, and losing the first because the second failed is the worse outcome.
+        """
+        self._set_inferring(True)
+        logged = [
+            row["description"]
+            for row in body.list_activity(self.app.conn, date=r.date)
+        ]
+        try:
+            effort = await estimate.factor_from_text(
+                # The day, not the entry: a PAL is not additive, so two sessions and
+                # one session are different days.
+                activities=[*logged, r.description],
+                baseline=self.app.cfg.activity,
+                runner=self.app.runner_json,
+                timeout_sec=self.app.cfg.estimate_timeout_sec,
+                model=self.app.cfg.claude_model,
+            )
+        except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
+            self._set_inferring(False)
+            self._write_activity(r, source="estimated")
+            self.app.notify_error(
+                f"factor estimate failed: {e} — logged with no factor, so the day"
+                " uses your ordinary-day level"
+            )
+            return
+        self._set_inferring(False)
+        self._pending_activity = effort
+        self.app.prompt.open(
+            "confirm activity",
+            f"{sigil.escape(r.description)} ={effort.factor:g}",
+        )
 
     def _write_food(self, r, *, source: str) -> None:
         body.add_food(

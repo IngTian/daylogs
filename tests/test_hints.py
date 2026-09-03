@@ -13,6 +13,7 @@ import pytest
 
 from daylogs.categories import slugs
 from daylogs.parse import (
+    parse_activity,
     parse_budget,
     parse_expense,
     parse_food,
@@ -34,6 +35,8 @@ PARSERS = {
     "weigh": parse_weigh,
     "food": parse_food,
     "confirm food": parse_food,
+    "activity": parse_activity,
+    "confirm activity": parse_activity,
     "expense": parse_expense,
     "budget": parse_budget,
     "recurring": parse_recurring,

@@ -109,6 +109,10 @@ async def test_tab_cycles_body_subview(make_app):
         await pilot.pause()
         body = app.query_one("#body")
         assert body.table_mode == "food"
+        # weight / food / activity, and food is the default, so `tab` reaches activity
+        # first and takes three presses to come back round.
+        await pilot.press("tab")
+        assert body.table_mode == "activity"
         await pilot.press("tab")
         assert body.table_mode == "weight"
         await pilot.press("tab")

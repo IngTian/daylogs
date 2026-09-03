@@ -237,7 +237,8 @@ async def test_weight_delete_confirm_names_the_reading(make_app, db):
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.pause()
-        await pilot.press("tab")
+        # shift+tab: weight is one step back along weight / food / activity.
+        await pilot.press("shift+tab")
         await pilot.pause()
         seen = []
         app.notify = lambda msg, **kw: seen.append(str(msg))

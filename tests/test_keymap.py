@@ -36,7 +36,7 @@ def test_scoped_write_keys_exist():
     body = {k.key for k in km.keys_for("body")}
     money = {k.key for k in km.keys_for("money")}
     summary = {k.key for k in km.keys_for("summary")}
-    assert {"w", "f", "p", "x"} <= body
+    assert {"w", "f", "p", "a", "x"} <= body
     assert {"e", "b", "s", "r", "x", "d", "c", "k", "slash", "G", "enter"} <= money
     assert "r" in summary
 
@@ -126,3 +126,11 @@ def test_labels_are_present_and_short():
     for k in km.KEYMAP:
         assert k.label, f"{k.key!r} has no label"
         assert len(k.label) <= 24
+
+
+def test_a_logs_an_activity_and_only_on_body():
+    """Body-scoped, not app: there is nothing to log an activity against on Money, and
+    an app-scope `a` would shadow any future tab's own use of the letter."""
+    assert km.lookup("a", "body").action == "activity"
+    assert km.lookup("a", "money") is None
+    assert km.lookup("a", "summary") is None

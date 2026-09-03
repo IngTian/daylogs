@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 
 from daylogs import money, sigil
-from daylogs.body import ACTIVITY_LEVELS
+from daylogs.body import ACTIVITY_LEVELS, FACTOR_MAX, FACTOR_MIN
 from daylogs.categories import FALLBACK_SLUG, get
 from daylogs.fmt import hhmm
 
@@ -109,6 +109,21 @@ class FoodInput:
 
 
 @dataclass(frozen=True)
+class ActivityInput:
+    """`factor` is the whole **day's** PAL, not this activity's own contribution.
+
+    A PAL multiplier describes a day and is not additive, so "gym" plus "walked" is
+    not 1.375 + 1.2. `None` means no number was given and one should be inferred —
+    the same shape food uses for a missing `=kcal`.
+    """
+
+    description: str
+    factor: float | None
+    date: str
+    at: int
+
+
+@dataclass(frozen=True)
 class ExpenseInput:
     amount: float
     description: str
@@ -181,6 +196,76 @@ def render_food(row) -> str:
         f"={int(row['kcal'])}",
         f"@{row['date']}/{hhmm(row['ate_at'])}",
     ])
+
+
+def to_factor(value: str) -> float:
+    """A whole-day activity multiplier, from a level keyword or a number.
+
+    The keyword form exists because a raw PAL number is unreadable to a human, and
+    the four levels are already this app's vocabulary for exactly this quantity. The
+    number form is what an inference returns, and what an expert would type.
+
+    Not routed through `to_amount`: that rejects a third decimal place, which is
+    right for money and wrong here — `light` is 1.375. The decimal-comma rule is
+    kept, though, because `=1,45` becoming 145 would be a factor a hundred times too
+    large, which is the same class of error as a $1,240 lunch.
+    """
+    low = value.lower()
+    if low in ACTIVITY_LEVELS:
+        return ACTIVITY_LEVELS[low]
+    if "," in value:
+        raise ParseError(f"={value}: use a dot for decimals, e.g. ={value.replace(',', '.')}")
+    try:
+        factor = float(value)
+    except ValueError as e:
+        raise ParseError(
+            f"={value}: give a level ({'/'.join(ACTIVITY_LEVELS)}) or a number, e.g. =1.45"
+        ) from e
+    # `nan` parses and compares False against both bounds, so this rejects it too.
+    if not FACTOR_MIN <= factor <= FACTOR_MAX:
+        raise ParseError(
+            f"={value}: a whole-day activity factor is between {FACTOR_MIN} and {FACTOR_MAX}"
+        )
+    return factor
+
+
+def parse_activity(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> ActivityInput:
+    """What you did, and optionally what the whole day came to.
+
+    `=` carries the day's multiplier; omitting it means "estimate this", exactly as
+    omitting `=kcal` does for food. There is no bare-number form: a description may
+    end in a number ("walk 5000"), which is the ambiguity the sigil grammar exists to
+    remove.
+    """
+    toks = _tokens(raw)
+    g = sigil.group(toks)
+    if not g.text:
+        raise ParseError("say what you did, e.g. gym 1h =active")
+    _reject_unsupported(g, frozenset(["@", "="]), "activity")
+    raw_factor = _single(g, "=", "factor")
+    when = resolve_when(g.by_sigil.get("@", []), now=now)
+    return ActivityInput(
+        description=g.text,
+        factor=to_factor(raw_factor) if raw_factor is not None else None,
+        date=when.date,
+        at=when.at,
+    )
+
+
+def render_activity(row) -> str:
+    """The inverse, for prefilling an edit.
+
+    The factor renders as a number rather than as the keyword that may have produced
+    it: 1.55 typed as `=active` and 1.55 inferred are the same stored value, and
+    guessing which word a number came from would put a claim in the line that the
+    database does not hold. A row whose inference never landed renders with no `=` at
+    all, so opening its edit prompt does not invent a factor.
+    """
+    parts = [sigil.escape(row["description"])]
+    if row["factor"] is not None:
+        parts.append(f"={row['factor']:g}")
+    parts.append(f"@{row['date']}/{hhmm(row['logged_at'])}")
+    return " ".join(parts)
 
 
 def _tokens(raw: str) -> list[sigil.Token]:

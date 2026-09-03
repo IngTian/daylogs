@@ -271,6 +271,10 @@ async def test_tab_toggles_the_table_mode(make_app):
         await pilot.pause()
         body = app.query_one("#body")
         assert body.table_mode == "food"
+        # Three views now, so `tab` walks rather than toggles, and it must come all the
+        # way back round rather than stopping at the end.
+        await pilot.press("tab")
+        assert body.table_mode == "activity"
         await pilot.press("tab")
         assert body.table_mode == "weight"
         await pilot.press("tab")
@@ -329,7 +333,7 @@ async def test_x_deletes_a_weight_row_in_weight_mode(make_app, db):
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.pause()
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.pause()
         await pilot.press("x")
         await pilot.press("y")
@@ -540,7 +544,9 @@ async def test_enter_on_a_weight_row_opens_it_prefilled(make_app, db):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")          # weight sub-view
+        # shift+tab, not tab: the strip is weight / food / activity and food is the
+        # default, so `weight` is one step *back* along it.
+        await pilot.press("shift+tab")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -555,7 +561,7 @@ async def test_editing_a_weight_updates_in_place(make_app, db, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -576,7 +582,7 @@ async def test_editing_a_weight_never_restamps_the_timestamp(make_app, db, type_
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -593,7 +599,7 @@ async def test_undoing_an_edit_restores_rather_than_duplicates(make_app, db, typ
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -614,7 +620,7 @@ async def test_a_bad_edit_keeps_the_text_and_changes_nothing(make_app, db, type_
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -698,7 +704,7 @@ async def test_a_rejected_edit_leaves_nothing_on_the_undo_stack(make_app, db, ty
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -717,7 +723,7 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         await pilot.press("escape")
@@ -770,7 +776,7 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -819,7 +825,7 @@ async def test_a_parse_error_during_edit_keeps_editing_armed(make_app, db, type_
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -840,7 +846,7 @@ async def test_editing_a_weight_can_clear_its_note(make_app, db, type_into):
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -858,7 +864,7 @@ async def test_editing_a_weight_with_unchanged_prefill_preserves_note(make_app, 
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
-        await pilot.press("tab")
+        await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
         # The prefill is "78.2 post-run @2026-08-27". Submit it unchanged.
@@ -1490,7 +1496,8 @@ async def test_the_table_header_names_the_view_it_is_showing(make_app, make_cfg,
         assert body.table_mode == "food"
         assert "FOOD" in _food_head(app)
 
-        await pilot.press("tab")
+        # shift+tab: weight is one step back along weight / food / activity.
+        await pilot.press("shift+tab")
         await pilot.pause()
         assert body.table_mode == "weight"
         head = _food_head(app)
@@ -1500,20 +1507,21 @@ async def test_the_table_header_names_the_view_it_is_showing(make_app, make_cfg,
     assert "BMR" not in head
 
 
-async def test_body_lists_both_views_with_the_active_one_marked(make_app, db):
-    """Money has always drawn its three panes as a visible row; Body had the same
-    two-way toggle and drew nothing, so `tab` was undiscoverable."""
+async def test_body_lists_every_view_with_the_active_one_marked(make_app, db):
+    """Money has always drawn its panes as a visible row; Body had the same toggle and
+    drew nothing, so `tab` was undiscoverable."""
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.pause()
         row = _view_row(app)
-    assert "weight" in row and "food" in row, f"not both views: {row!r}"
+    for view in ("weight", "food", "activity"):
+        assert view in row, f"{view} is missing from the strip: {row!r}"
     assert "[b]food[/b]" in row, f"the active view is not marked: {row!r}"
     assert "[b]weight[/b]" not in row
 
 
-async def test_tab_moves_the_mark_to_the_other_view(make_app, db):
+async def test_tab_moves_the_mark_along_the_strip(make_app, db):
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1521,7 +1529,7 @@ async def test_tab_moves_the_mark_to_the_other_view(make_app, db):
         await pilot.press("tab")
         await pilot.pause()
         row = _view_row(app)
-    assert "[b]weight[/b]" in row, f"the mark did not follow the tab: {row!r}"
+    assert "[b]activity[/b]" in row, f"the mark did not follow the tab: {row!r}"
     assert "[b]food[/b]" not in row
 
 
@@ -1764,3 +1772,363 @@ async def test_a_complete_profile_with_no_level_names_the_missing_level(
         await pilot.pause()
     assert said, "saving a profile said nothing at all"
     assert "desk" in said[-1], f"the level is not named as the next step: {said[-1]!r}"
+
+
+# ── a: logging a day that departs from the baseline ───────────────────────
+
+
+def _runner_factor(value, seen=None):
+    async def runner(**kwargs):
+        if seen is not None:
+            seen.update(kwargs)
+        return {"factor": value}
+    return runner
+
+
+def _act_rows(db, date=DAY):
+    from daylogs.body import list_activity
+    return list_activity(db, date=date)
+
+
+async def test_a_opens_the_activity_prompt(make_app):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await pilot.pause()
+        assert app.prompt.is_open and app.prompt.label == "activity"
+
+
+async def test_a_typed_factor_is_written_without_asking_claude(make_app, db, type_into):
+    """`=level` is the escape hatch and the no-LLM path, exactly as `=kcal` is for
+    food. It must not spawn a call."""
+    called = []
+
+    async def runner(**kwargs):
+        called.append(kwargs)
+        return {"factor": 1.9}
+
+    app = make_app(runner_json=runner)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h =active")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1
+    assert (rows[0]["description"], rows[0]["factor"]) == ("gym 1h", 1.55)
+    assert rows[0]["source"] == "labeled", "a typed number is not an estimate"
+    assert called == [], "asked Claude for a factor that was given"
+
+
+async def test_a_without_a_factor_asks_claude_and_offers_the_answer(
+    make_app, db, type_into
+):
+    app = make_app(runner_json=_runner_factor(1.45))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        label, value = app.prompt.label, app.prompt.value
+    assert label == "confirm activity", f"no review step: {label!r}"
+    assert "gym 1h" in value and "=1.45" in value, f"prefill is wrong: {value!r}"
+    assert _act_rows(db, app.today()) == [], "wrote the row before it was confirmed"
+
+
+async def test_confirming_an_inferred_factor_writes_it(make_app, db, type_into):
+    app = make_app(runner_json=_runner_factor(1.45))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1
+    assert (rows[0]["factor"], rows[0]["source"]) == (1.45, "estimated")
+
+
+async def test_a_confirm_line_with_the_factor_deleted_still_lands_the_estimate(
+    make_app, db, type_into
+):
+    """The prefill always carries the number, so a submitted line without one means it
+    was deleted — and falling back to the inferred value beats writing a NULL the user
+    did not ask for. The same rule `confirm food` follows for a deleted `=kcal`."""
+    app = make_app(runner_json=_runner_factor(1.45))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        app.prompt.value = "gym 1h"          # the factor, deleted
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1
+    assert rows[0]["factor"] == 1.45, f"the estimate was dropped: {rows[0]['factor']!r}"
+
+
+async def test_the_confirm_line_can_be_corrected_before_it_lands(
+    make_app, db, type_into
+):
+    app = make_app(runner_json=_runner_factor(1.45))
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        app.prompt.value = "gym 90m =1.7"
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert (rows[0]["description"], rows[0]["factor"]) == ("gym 90m", 1.7)
+
+
+async def test_the_question_is_about_the_whole_day_not_the_newest_entry(
+    make_app, db, type_into
+):
+    """A PAL is not additive, so two sessions and one session are different days. The
+    prompt has to carry both, and the profile's ordinary day too."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from daylogs.body import add_activity
+
+    add_activity(db, description="swim 2km", date=DAY, at=1, factor=1.5,
+                 source="estimated")
+    seen = {}
+    app = make_app(
+        runner_json=_runner_factor(1.6, seen),
+        height_cm=180, sex="male", birthday="1996-01-01", activity="desk",
+        now=lambda: dt.datetime(2026, 9, 3, 9, 0, tzinfo=ZoneInfo("America/Toronto")),
+    )
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+    assert "swim 2km" in seen["user_prompt"], "the day's earlier activity was dropped"
+    assert "gym 1h" in seen["user_prompt"]
+    assert "desk" in seen["user_prompt"], "the baseline was not sent"
+
+
+async def test_a_failed_inference_still_records_what_you_did(make_app, db, type_into):
+    """The description is your data; the factor is a guess. Losing "gym 1h" because
+    the CLI was missing would be the worse outcome, and a NULL factor is a state the
+    schema and `resolved_factor` already handle — the day falls back to the baseline."""
+    from daylogs.claude import ClaudeError
+
+    async def runner(**kwargs):
+        raise ClaudeError("no cli")
+
+    app = make_app(runner_json=runner)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1, "the activity was lost with the estimate"
+    assert rows[0]["factor"] is None
+    assert rows[0]["description"] == "gym 1h"
+
+
+async def test_a_bad_activity_line_keeps_the_text_and_writes_nothing(
+    make_app, db, type_into
+):
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym =9")
+        await pilot.press("enter")
+        await pilot.pause()
+        still_open, kept = app.prompt.is_open, app.prompt.value
+    assert still_open is True
+    assert kept == "gym =9"
+    assert _act_rows(db, app.today()) == []
+
+
+# ── the activity sub-view ────────────────────────────────────────────────
+
+
+async def test_activity_is_a_third_sub_view(make_app, db):
+    """Without it the table is invisible and its rows can only be superseded, never
+    removed."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        row = _view_row(app)
+    assert "activity" in row, f"the view strip does not list it: {row!r}"
+
+
+async def test_tab_and_shift_tab_walk_three_views_in_opposite_directions(make_app, db):
+    """With two views direction was moot and `prev` was an alias for `next`. With
+    three that alias would make shift+tab skip a pane."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        body = app.query_one("#body")
+        start = body.table_mode
+        await pilot.press("tab")
+        await pilot.pause()
+        forward = body.table_mode
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert body.table_mode == start, "shift+tab did not undo tab"
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert body.table_mode != forward, "shift+tab walks the same way as tab"
+
+
+async def test_the_activity_table_lists_the_days_rows(make_app, db):
+    from daylogs.body import add_activity
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        add_activity(db, description="gym 1h", date=app.today(), at=1, factor=1.45,
+                     source="estimated")
+        add_activity(db, description="long walk", date=app.today(), at=2, factor=None,
+                     source="estimated")
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.reload()
+        await pilot.pause()
+        table = app.query_one("#body-table")
+        cells = [str(c) for r in range(table.row_count)
+                 for c in table.get_row_at(r)]
+    assert any("gym 1h" in c for c in cells)
+    assert any("×1.45" in c for c in cells), f"the factor is not shown: {cells}"
+    assert any(c == "—" for c in cells), f"a factorless row needs a dash: {cells}"
+
+
+async def test_the_activity_header_names_the_days_factor_and_its_origin(
+    make_app, make_cfg, db
+):
+    from daylogs.body import add_activity
+
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_activity(db, description="gym", date=DAY, at=2, factor=1.6, source="estimated")
+    app = make_app(cfg=_profile(make_cfg, activity="desk"))
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.viewing_date = DAY
+        body.reload()
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert head.startswith("ACTIVITY"), f"the header names the wrong view: {head!r}"
+    assert "×1.6" in head and "logged" in head
+    assert f"{_GYM_BURN:,}" in head, f"the burn it produces is missing: {head!r}"
+
+
+async def test_the_activity_header_names_the_fix_when_there_is_no_factor(make_app, db):
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.reload()
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert "press h" in head, f"an empty state that names no fix: {head!r}"
+
+
+async def test_enter_edits_an_activity_row(make_app, db, type_into):
+    from daylogs.body import add_activity
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        add_activity(db, description="gym", date=app.today(), at=1, factor=1.4,
+                     source="estimated")
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.label == "activity", f"wrong prompt: {app.prompt.label!r}"
+        assert "gym" in app.prompt.value and "=1.4" in app.prompt.value
+        app.prompt.value = "gym, upper body =1.6"
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1, "an edit inserted a second row"
+    assert (rows[0]["description"], rows[0]["factor"]) == ("gym, upper body", 1.6)
+
+
+async def test_editing_an_activity_does_not_ask_claude(make_app, db, type_into):
+    """An edit with no `=` leaves the stored factor alone. Only the entry path infers,
+    or fixing a typo would silently re-roll the number."""
+    from daylogs.body import add_activity
+
+    called = []
+
+    async def runner(**kwargs):
+        called.append(kwargs)
+        return {"factor": 1.9}
+
+    app = make_app(runner_json=runner)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        add_activity(db, description="gym", date=app.today(), at=1, factor=1.4,
+                     source="estimated")
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = "gym, upper body"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert called == [], "an edit triggered an inference"
+    assert (rows[0]["description"], rows[0]["factor"]) == ("gym, upper body", 1.4)
+
+
+async def test_x_deletes_an_activity_and_u_restores_it(make_app, db):
+    from daylogs.body import add_activity
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        add_activity(db, description="gym", date=app.today(), at=1, factor=1.4,
+                     source="estimated")
+        body = app.query_one("#body")
+        body.table_mode = "activity"
+        body.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert _act_rows(db, app.today()) == [], "delete did nothing"
+        await pilot.press("u")
+        await pilot.pause()
+    rows = _act_rows(db, app.today())
+    assert len(rows) == 1 and rows[0]["factor"] == 1.4
