@@ -73,6 +73,10 @@ KEYMAP: tuple[Key, ...] = (
     Key("plus", "zoom in", "zoom_in", "app", "view"),
     Key("equals_sign", "zoom in", "zoom_in", "app", "view", footer=False),
     Key("minus", "zoom out", "zoom_out", "app", "view", footer=False),
+    # Uppercase, like `G` on Money: a shifted key for something done rarely, and it
+    # leaves `t` (jump to now) alone, which is pressed constantly. Off the footer —
+    # already full — and listed by `?`.
+    Key("T", "theme", "theme", "app", "view", footer=False),
     # ── app: meta ────────────────────────────────────────────────────────
     # pinned: `?` is how you discover everything else and `q` is how you leave.
     # Without pinning they sit last in the footer and are the first things a

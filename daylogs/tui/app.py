@@ -22,18 +22,20 @@ from textual.widgets import DataTable, Header, Input, TabbedContent, TabPane
 
 from daylogs import claude, summary
 from daylogs.body import BodyError
+from daylogs.config import update_config
 from daylogs.horizon import HorizonError
 from daylogs.money import MoneyError
 from daylogs.moneyview import ViewError
 from daylogs.parse import ParseError
 from daylogs.photo import PhotoError
-from daylogs.tui import hints, keymap
+from daylogs.tui import hints, keymap, themes
 from daylogs.tui.body_tab import BodyTab
 from daylogs.tui.footer import KeyFooter
 from daylogs.tui.help import HelpScreen
 from daylogs.tui.money_tab import MoneyTab
 from daylogs.tui.prompt import InlinePrompt
 from daylogs.tui.summary_tab import SummaryTab
+from daylogs.tui.themes import ThemeError
 from daylogs.undo import UndoStack
 
 log = logging.getLogger(__name__)
@@ -44,7 +46,15 @@ _TAB_OF = {"summary": "tab-summary", "body": "tab-body", "money": "tab-money"}
 # Every way a prompt entry can be rejected for being malformed rather than
 # broken. These re-open the prompt with the text intact; anything else is a bug
 # and propagates.
-RETRYABLE = (ParseError, MoneyError, BodyError, PhotoError, ViewError, HorizonError)
+RETRYABLE = (
+    ParseError,
+    MoneyError,
+    BodyError,
+    PhotoError,
+    ViewError,
+    HorizonError,
+    ThemeError,
+)
 
 
 class DaylogsApp(App):
@@ -120,6 +130,9 @@ class DaylogsApp(App):
 
     def on_mount(self) -> None:
         self.sub_title = self.now().strftime("%a %b %d")
+        # `resolve`, not `check`: a stale or misspelled name in config.toml must
+        # not stop the app over a cosmetic setting.
+        self.theme = themes.resolve(self.cfg.theme)
         self.refresh_tabs()
         self._active_tab().focus_default()
         self.refresh_footer()
@@ -263,6 +276,24 @@ class DaylogsApp(App):
     def app_goto(self) -> None:
         self.prompt.open("go to date")
 
+    def app_theme(self) -> None:
+        self.prompt.open("theme")
+
+    def _apply_theme(self, value: str) -> None:
+        """Set the theme and remember it. Raises ThemeError on an unknown name.
+
+        Handled here rather than in a tab's `handle_prompt` because it is the one
+        prompt that means the same thing on every tab — routing it through the
+        active tab would need the same method in all three.
+        """
+        name = themes.check(value)
+        self.theme = name
+        # update_config edits the file as text, so the user's comments and
+        # [[category]] blocks survive, and a new key lands above the first table
+        # header rather than inside it.
+        update_config(self.cfg.root / "config.toml", {"theme": name})
+        self.notify(f"theme {name}", timeout=2)
+
     def app_back(self) -> None:
         """`esc` unwinds one step. When the active tab has nothing to unwind,
         nothing happens — esc never quits."""
@@ -329,7 +360,12 @@ class DaylogsApp(App):
             return
         before = (self.prompt.is_open, self.prompt.label)
         try:
-            tab.handle_prompt(label, value)
+            # The one prompt that means the same thing on every tab, so it is
+            # answered here instead of in three identical handle_prompt branches.
+            if label == "theme":
+                self._apply_theme(value)
+            else:
+                tab.handle_prompt(label, value)
         except RETRYABLE as e:
             self.prompt.show_error(str(e))
             self.prompt.focus()

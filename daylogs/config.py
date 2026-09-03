@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _DEFAULT_TZ = "America/Toronto"
+# A Textual theme name. Duplicated as a literal rather than imported from
+# tui.themes on purpose: this module is pure — no textual, no database — and
+# importing the UI framework to load a config file would invert that. The two are
+# tied together by a test, not by an import.
+_DEFAULT_THEME = "gruvbox"
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,7 @@ class Config:
     sex: str | None = None
     birthday: str | None = None
     claude_model: str | None = None
+    theme: str = _DEFAULT_THEME
     summary_after_hour: int = 6
     summary_timeout_sec: int = 120
     estimate_timeout_sec: int = 60
@@ -67,6 +73,7 @@ def load_config(root: Path | None = None) -> Config:
         sex=_opt_str(raw.get("sex")),
         birthday=_opt_str(raw.get("birthday")),
         claude_model=_opt_str(raw.get("claude_model")),
+        theme=str(raw.get("theme") or _DEFAULT_THEME),
         summary_after_hour=int(raw.get("summary_after_hour", 6)),
         summary_timeout_sec=int(raw.get("summary_timeout_sec", 120)),
         estimate_timeout_sec=int(raw.get("estimate_timeout_sec", 60)),
