@@ -1,6 +1,7 @@
-"""SQLite connection + schema. Six tables, one idempotent DDL block.
+"""SQLite connection + schema. Seven tables, one idempotent DDL block.
 
-No migration framework: a clean schema starts at version 1, stamped in
+No migration framework: the DDL is CREATE TABLE IF NOT EXISTS throughout, so adding
+a table is additive on an existing database. The version is stamped in
 PRAGMA user_version so a future change has somewhere to hook.
 
 journal_mode=DELETE is deliberate. WAL's -wal/-shm sidecars can sync
@@ -13,11 +14,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: the activity table
 
 TABLES: tuple[str, ...] = (
     "weight",
     "food",
+    "activity",
     "expense",
     "recurring",
     "budget",
@@ -43,6 +45,26 @@ CREATE TABLE IF NOT EXISTS food (
   source      TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_food_date ON food(date);
+
+-- Only days that depart from the profile's baseline get rows here; an ordinary day
+-- needs no entry at all.
+--
+-- `factor` is the whole *day's* PAL as inferred when this row landed, not this
+-- activity's own contribution: a PAL multiplier describes a day and is not additive,
+-- so "gym" plus "walked" is not 1.375 + 1.2. The day's value is read from the row with
+-- the greatest `logged_at` — the same last-reading-wins rule the weight series applies
+-- to same-day weigh-ins — which also leaves an audit trail of what was believed when.
+-- NULL means no inference landed (no CLI, a timeout), and the day falls back to the
+-- profile baseline rather than to resting BMR.
+CREATE TABLE IF NOT EXISTS activity (
+  id          INTEGER PRIMARY KEY,
+  date        TEXT    NOT NULL,
+  logged_at   INTEGER NOT NULL,
+  description TEXT    NOT NULL,
+  factor      REAL,
+  source      TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_activity_date ON activity(date);
 
 CREATE TABLE IF NOT EXISTS expense (
   id          INTEGER PRIMARY KEY,

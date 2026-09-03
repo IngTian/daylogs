@@ -14,7 +14,7 @@ def _tables(conn):
 
 def test_creates_exactly_the_six_tables(db):
     assert _tables(db) == set(TABLES)
-    assert len(TABLES) == 6
+    assert len(TABLES) == 7
 
 
 def test_rows_are_mappings(db):
@@ -80,7 +80,9 @@ def test_recurring_name_unique(db):
 def test_table_names_lists_the_user_tables_in_a_stable_order(db):
     from daylogs.db import table_names
 
-    assert table_names(db) == ["budget", "expense", "food", "recurring", "report", "weight"]
+    assert table_names(db) == [
+        "activity", "budget", "expense", "food", "recurring", "report", "weight",
+    ]
 
 
 def test_table_names_hides_sqlite_internals(tmp_path):

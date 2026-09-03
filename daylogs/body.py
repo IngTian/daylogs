@@ -281,3 +281,114 @@ def _delete(conn, table: str, id: int) -> dict | None:
         return None
     conn.execute(f"DELETE FROM {table} WHERE id = ?", (int(id),))
     return dict(row)
+
+
+# ── activity: what a day cost, above resting ─────────────────────────────
+# Standard PAL multipliers, *re-described*. The textbook labels bake habitual
+# exercise into the band ("moderate: exercise 3-5 days a week"), and using those as
+# a baseline while also logging gym days would count the exercise twice. So a level
+# here means a day with **no logged activity**, and the wording describes
+# occupational movement instead. Anyone comparing against an online TDEE calculator
+# will get a different answer for the same word; double-counting exercise is the
+# worse error. 1.9 is omitted deliberately — that band is athletic training, which is
+# a logged activity, not an ordinary day.
+ACTIVITY_LEVELS: dict[str, float] = {
+    "desk": 1.2,
+    "light": 1.375,
+    "active": 1.55,
+    "heavy": 1.725,
+}
+
+# The physiological range a whole-day PAL can occupy. Enforced on anything inferred,
+# because a wrong factor does not misreport one row — it silently rescales every
+# calorie judgement for that day, and a hallucinated 4.0 would triple the baseline.
+FACTOR_MIN, FACTOR_MAX = 1.2, 1.9
+
+
+def baseline_factor(cfg) -> float | None:
+    """The profile's ordinary-day multiplier, or None if it is unset.
+
+    Deliberately not defaulted. Assuming `desk` for everyone would raise maintenance
+    by 20% and silently restate every number already on screen and in every past
+    digest; an absent setting is shown as absent, the way a missing height is.
+
+    An unrecognised keyword also returns None rather than raising: `config.toml` is
+    hand-edited, and a typo there must not stop the app.
+    """
+    return ACTIVITY_LEVELS.get(getattr(cfg, "activity", None) or "")
+
+
+def add_activity(
+    conn, *, description: str, date: str, at: int, factor: float | None, source: str
+) -> int:
+    """Log one activity. `factor` is the whole day's PAL as inferred for this entry."""
+    if not description.strip():
+        raise BodyError("say what you did")
+    if factor is not None and not (FACTOR_MIN <= factor <= FACTOR_MAX):
+        raise BodyError(f"an activity factor must be between {FACTOR_MIN} and {FACTOR_MAX}")
+    cur = conn.execute(
+        "INSERT INTO activity (date, logged_at, description, factor, source)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (_check_date(date), int(at), description.strip(), factor, source),
+    )
+    return int(cur.lastrowid)
+
+
+def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
+    """A day's activities, oldest first — the order they happened."""
+    return list(
+        conn.execute(
+            "SELECT * FROM activity WHERE date = ? ORDER BY logged_at ASC",
+            (_check_date(date),),
+        )
+    )
+
+
+def day_factor(conn, cfg, *, date: str) -> float | None:
+    """The multiplier to apply to BMR for `date`, or None if there is nothing to say.
+
+    Three steps, each a real state:
+
+    1. the latest activity row carrying a factor — an inference over what you did;
+    2. otherwise the profile baseline, which is the common case and needs no input;
+    3. otherwise None, and `net` sits against resting BMR exactly as it did before.
+
+    Latest-wins rather than first: re-logging supersedes, which is the same rule the
+    weight series applies to two weigh-ins on one day. A row whose factor is NULL —
+    an inference that never landed — falls through to the baseline rather than
+    poisoning the day with nothing.
+    """
+    row = conn.execute(
+        "SELECT factor FROM activity WHERE date = ? AND factor IS NOT NULL"
+        " ORDER BY logged_at DESC LIMIT 1",
+        (_check_date(date),),
+    ).fetchone()
+    if row is not None:
+        return float(row["factor"])
+    return baseline_factor(cfg)
+
+
+def compute_tdee(bmr: int | None, factor: float | None) -> int | None:
+    """What the day actually cost: resting expenditure scaled by activity.
+
+    None whenever either input is missing, for the same reason `compute_bmr` returns
+    None on a missing weight — a maintenance figure resting on a guess is worse than
+    no figure, because it looks equally authoritative.
+    """
+    if bmr is None or factor is None:
+        return None
+    return round(bmr * factor)
+
+
+def bmi(cfg, kg: float | None) -> float | None:
+    """Weight over height squared, to one decimal. None without both.
+
+    Returned as a bare number: no band, no colour. "over" / "obese" is a judgement
+    this app does not otherwise make, and it is a restatement of weight rather than a
+    second fact — which is also why there is no BMI chart. It would be the weight
+    curve times a constant.
+    """
+    if kg is None or not cfg.height_cm:
+        return None
+    metres = float(cfg.height_cm) / 100
+    return round(float(kg) / (metres * metres), 1)

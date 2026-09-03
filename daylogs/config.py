@@ -33,6 +33,9 @@ class Config:
     birthday: str | None = None
     claude_model: str | None = None
     theme: str = _DEFAULT_THEME
+    # A key of body.ACTIVITY_LEVELS: what an ordinary day looks like, so a day that
+    # matches it needs no entry. Deliberately not defaulted -- see the design note.
+    activity: str | None = None
     summary_after_hour: int = 6
     summary_timeout_sec: int = 120
     estimate_timeout_sec: int = 60
@@ -74,6 +77,7 @@ def load_config(root: Path | None = None) -> Config:
         birthday=_opt_str(raw.get("birthday")),
         claude_model=_opt_str(raw.get("claude_model")),
         theme=str(raw.get("theme") or _DEFAULT_THEME),
+        activity=_opt_str(raw.get("activity")),
         summary_after_hour=int(raw.get("summary_after_hour", 6)),
         summary_timeout_sec=int(raw.get("summary_timeout_sec", 120)),
         estimate_timeout_sec=int(raw.get("estimate_timeout_sec", 60)),
