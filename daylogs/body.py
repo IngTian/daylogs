@@ -45,12 +45,24 @@ def add_weight(conn, *, kg: float, date: str, at: int, note: str | None = None) 
     return int(cur.lastrowid)
 
 
-def list_weight(conn, *, since: str | None = None, limit: int = 200) -> list[sqlite3.Row]:
-    sql = "SELECT * FROM weight"
+def list_weight(
+    conn, *, since: str | None = None, until: str | None = None, limit: int = 200
+) -> list[sqlite3.Row]:
+    """Whole rows, newest first, optionally bounded at either end.
+
+    Both bounds, not just `since`: the Body table is filtered by the tab's span, and a
+    span has a right edge too. With a lower bound alone, viewing an older day listed
+    readings that had not happened yet — the same class of wrongness as a header
+    naming a window the query ignores.
+    """
+    sql = "SELECT * FROM weight WHERE 1=1"
     args: list = []
     if since:
-        sql += " WHERE date >= ?"
+        sql += " AND date >= ?"
         args.append(_check_date(since))
+    if until:
+        sql += " AND date <= ?"
+        args.append(_check_date(until))
     sql += " ORDER BY date DESC, measured_at DESC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))

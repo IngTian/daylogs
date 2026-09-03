@@ -224,6 +224,12 @@ horizons keep one point per day, deliberately: weight swings a kilo inside a day
 and plotting every reading across a month makes the trend noisier without telling
 you anything a shorter window wouldn't tell you better.
 
+The horizon drives the whole Body tab, not just the chart: the **weight** table lists
+the weigh-ins inside the window and its header names it, so `+` / `-` / `[` / `]` move
+the table and the plot together. The **food** and **activity** tables are per-day —
+they follow the day you're on rather than the window, because a day's meals are a day's
+meals.
+
 `g 2026-06` lands on the **last** day of June, so under `MTD` you get all of it.
 
 ### Reading money
