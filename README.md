@@ -124,6 +124,7 @@ figures above them are always today's.
 | `f` | log food |
 | `p` | log food from a photo |
 | `a` | log an activity — only for a day that departs from your ordinary one |
+| `c` | cycle the chart: weight → intake → net |
 | `h` | set height, sex, birthday and your ordinary-day level (for BMR, maintenance and BMI) |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
@@ -365,20 +366,41 @@ a `—`.
 "overweight" is a judgement daylogs doesn't make, and a BMI chart would be the
 weight curve times a constant.
 
-### The weight chart
+### The chart
 
 A braille line chart: 2×4 dots per cell, so an 8-row by 48-column chart carries
 96×32 dot resolution. The width follows the panel, so a wider terminal buys more
 horizontal detail.
 
+`c` cycles which series it plots — **weight**, **intake**, **net** — over whatever
+window `+` / `-` have set. The panel names all three and marks the one you're on, and
+the two controls are independent: zooming doesn't reset the series.
+
+`net` is intake against **each day's own burn**, so one hard day moves only its own
+point. It's a signed series, so zero has to be visible or a deficit and a surplus draw
+the same line — an all-deficit month puts `0` at the ceiling, an all-surplus one at the
+floor, and a month that crosses zero gets a `┼` on the axis at exactly that row.
+
+`intake` is anchored at zero, because calories are a magnitude: fitted to its own
+minimum, a run of similar days would read as a climb from nothing. Weight still fits
+its own range, for the opposite reason —
+
 Points sit at their real dates, not spread evenly across the panel. Two weigh-ins a
 day apart show up as two weigh-ins a day apart, with the weeks you didn't step on
 the scale visibly empty — a gap is information.
 
-It's a line rather than bars deliberately. Weight sits in a narrow band, and a
-bar or filled area implies a meaningful zero baseline — anchored at your minimum
-it would render as a solid block whose only readable feature is its top edge.
-Spend is a magnitude from zero, so bars stay correct there.
+it sits in a narrow band, and anchored at zero a 70–75 kg series is a flat line at the
+top of the panel.
+
+It's a line rather than bars deliberately. A bar or filled area implies a meaningful
+zero baseline; anchored at your minimum weight it would render as a solid block whose
+only readable feature is its top edge. Spend is a magnitude from zero, so bars stay
+correct there.
+
+Days with nothing logged are absent from the calorie series rather than plotted as
+zero — a logging gap is not a fast. `net` also skips days with no weigh-in behind
+them, because there is no BMR to scale and showing the intake bare would read as an
+enormous surplus.
 
 ### The daily summary
 

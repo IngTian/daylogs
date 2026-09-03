@@ -137,6 +137,16 @@ appended prose where it was convenient rather than editing the map.
   and callers colour whole finished lines; colouring first makes `len()` count
   colour codes and silently sheds real content. DataTable cells use `rich.Text`,
   not markup, because the table measures columns from the cell's own render.
+- **The TREND panel plots one series at a time, and only weight fits its own range.**
+  `c` cycles weight · intake · net over the window `+`/`-` already control; the two are
+  independent, so zooming must not reset the series. Weight is self-fitted because
+  anchored at zero a 70–75 kg band is a flat line at the top of the panel; both calorie
+  series pass `include_zero`, because a magnitude fitted to its own minimum reads as a
+  climb from nothing and a *signed* net fitted to itself draws the same line whether it
+  is a deficit or a surplus. The zero marker is a `┼` on the y-axis, never braille dots
+  — dots among the data are indistinguishable from data — and it appears only when zero
+  falls strictly inside the extent, because otherwise the extent label already says
+  `0`.
 - **A sparkline of a magnitude scales `from_zero`.** Fitting to the series' own
   min made six months of level rent land on the lowest glyph, so the
   second-largest spend category rendered as an empty floor. Weight, which only

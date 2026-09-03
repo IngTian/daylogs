@@ -98,6 +98,10 @@ KEYMAP: tuple[Key, ...] = (
     # enter into RowSelected before any binding sees it.
     Key("enter", "edit", "activate", "body", "nav", bind=False),
     Key("x", "delete", "delete", "body", "danger"),
+    # Which series the TREND panel plots. A view control, not a write: it changes what
+    # you are looking at over the window `+`/`-` already control, and the two are
+    # independent. Body-scoped, so it does not collide with Money's `c` (by cost).
+    Key("c", "chart", "next_chart", "body", "view"),
     # ── money ────────────────────────────────────────────────────────────
     Key("e", "expense", "expense", "money", "write"),
     Key("b", "budget", "budget", "money", "write"),

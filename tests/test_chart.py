@@ -141,3 +141,88 @@ def test_last_x_label_reaches_the_right_edge():
     label_row = out[-1]
     assert label_row.rstrip().endswith("Aug 28")
     assert label_row.index("Jul 30") < label_row.index("Aug 13") < label_row.index("Aug 28")
+
+
+# ── an explicit extent, and a zero reference ─────────────────────────────
+# A weight series means something relative to itself, so it fits its own min-max. A
+# calorie series does not: `net` is signed, and a chart that cannot show where zero
+# falls cannot tell a deficit from a surplus.
+
+
+def test_an_explicit_extent_overrides_the_series_own_range():
+    """Two charts drawn on the same axis have to be comparable, which they are not
+    when each fits itself."""
+    fitted = braille_line([4.0, 5.0], width=8, height=4)
+    forced = braille_line([4.0, 5.0], width=8, height=4, low=0.0, high=10.0)
+    assert fitted != forced
+
+
+def test_values_outside_an_explicit_extent_are_clipped_not_crashed():
+    rows = braille_line([-50.0, 500.0], width=8, height=4, low=0.0, high=10.0)
+    assert len(rows) == 4 and all(len(r) == 8 for r in rows)
+
+
+def test_include_zero_puts_zero_at_the_top_of_an_all_deficit_chart():
+    """The common case: every day under maintenance. Zero is the ceiling, so the top
+    label is what carries it and no mid-chart rule is needed."""
+    rows = frame_chart([-500.0, -900.0, -300.0], width=20, height=5, include_zero=True)
+    assert rows[0].split("│")[0].strip() == "0", f"top label is not zero: {rows[0]!r}"
+    assert "-900" in rows[4], f"bottom label is not the deepest deficit: {rows[4]!r}"
+
+
+def test_include_zero_puts_zero_at_the_bottom_of_an_all_surplus_chart():
+    rows = frame_chart([500.0, 900.0], width=20, height=5, include_zero=True)
+    assert rows[4].split("│")[0].strip() == "0", f"bottom label is not zero: {rows[4]!r}"
+    assert "900" in rows[0]
+
+
+def test_a_series_that_straddles_zero_gets_a_marked_zero_row():
+    """Only here is a rule needed, and it has to be on the axis rather than drawn in
+    braille — a dotted line among data dots would be indistinguishable from data."""
+    rows = frame_chart([-600.0, 600.0], width=20, height=5, include_zero=True)
+    marked = [r for r in rows if "┼" in r]
+    assert len(marked) == 1, f"expected exactly one zero row: {rows}"
+    assert marked[0].split("┼")[0].strip() == "0", f"zero row is unlabelled: {marked[0]!r}"
+    assert marked[0] is not rows[0] and marked[0] is not rows[4]
+
+
+def test_the_zero_row_sits_between_the_extremes():
+    rows = frame_chart([-600.0, 600.0], width=20, height=7, include_zero=True)
+    index = next(i for i, r in enumerate(rows) if "┼" in r)
+    assert 0 < index < 6, f"the zero row is at an extreme: {index}"
+
+
+def test_without_include_zero_nothing_is_marked_and_the_fit_is_unchanged():
+    """Weight must keep its own min-max fit: anchored at zero a 70-75 kg series is a
+    flat line at the top of the panel."""
+    plain = frame_chart([70.0, 75.0], width=20, height=5)
+    assert not any("┼" in r for r in plain)
+    assert "75" in plain[0] and "70" in plain[4]
+
+
+def test_include_zero_does_not_mark_a_row_when_zero_is_an_extreme():
+    """A `┼` on the top or bottom row would duplicate what the extent label says."""
+    rows = frame_chart([0.0, 900.0], width=20, height=5, include_zero=True)
+    assert not any("┼" in r for r in rows)
+
+
+def test_a_zero_that_rounds_onto_an_extreme_row_is_not_marked():
+    """The harder case, and the one the row guard actually exists for: zero is strictly
+    inside the extent, but so close to an end that it lands on the first or last row —
+    whose label is the extent, not zero. Marking it would claim zero sits at 1,000.
+    """
+    for values in ([-1000.0, 1.0], [-1.0, 1000.0]):
+        rows = frame_chart(values, width=20, height=5, include_zero=True)
+        marked = [r for r in rows if "┼" in r]
+        assert not marked, f"{values} marked a row whose label is the extent: {rows}"
+
+
+def test_frame_rows_stay_uniform_width_with_a_zero_row():
+    rows = frame_chart([-600.0, 600.0], width=20, height=5, include_zero=True,
+                       x_labels=("Aug 01", "Aug 30"))
+    assert len({len(r) for r in rows}) == 1, f"ragged rows: {[len(r) for r in rows]}"
+
+
+def test_a_flat_zero_series_does_not_divide_by_zero():
+    rows = frame_chart([0.0, 0.0], width=12, height=4, include_zero=True)
+    assert len(rows) == 6
