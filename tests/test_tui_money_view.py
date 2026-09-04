@@ -386,3 +386,115 @@ async def test_delete_on_a_group_header_is_refused(make_app, seeded):
         await pilot.press("x")
         await pilot.pause()
     assert any("group header" in m for m in seen), f"{seen}"
+
+
+# ── esc has to repaint what it changed ───────────────────────────────────
+
+
+async def test_escape_out_of_a_drilled_category_repaints_the_table(make_app, seeded):
+    """`esc` unwound `MoneyView` and then nothing redrew, so the table kept showing the
+    category you had just left while the footer chip already said you were out of it.
+
+    Every tab defines `key_back`, so the app-level handler that did the `reload()` was
+    never reached — the tab's own handler always won the lookup. It mutated state and
+    returned a bool to a caller that did not exist.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.filter_category = "grocery"
+        m.view.pane = "expenses"
+        m.reload()
+        await pilot.pause()
+        drilled = _cells(app)
+        assert all("grocery" in " ".join(row) for row in drilled), drilled
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert m.view.filter_category is None, "the view did not unwind"
+        assert m.view.pane == "categories"
+        after = _cells(app)
+    assert after != drilled, "esc changed the view and the table kept the old rows"
+    assert any("transport" in " ".join(row) for row in after), (
+        f"the categories pane did not come back: {after}"
+    )
+
+
+async def test_escape_out_of_a_text_filter_repaints_the_table(make_app, seeded):
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.pane = "expenses"
+        m.view.filter_text = "bus"
+        m.reload()
+        await pilot.pause()
+        filtered = _cells(app)
+        assert len(filtered) == 1, filtered
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert m.view.filter_text == ""
+        after = _cells(app)
+    assert len(after) > len(filtered), f"the filter cleared but the rows did not: {after}"
+
+
+async def test_escape_repaints_the_pane_strip_too(make_app, seeded):
+    """The strip bolds the active pane. Unwinding to `categories` without a repaint left
+    it bolding the pane you had left."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.filter_category = "grocery"
+        m.view.pane = "expenses"
+        m.reload()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        strip = str(app.query_one("#money-panes").content)
+    assert "[b]categories[/b]" in strip, f"the strip still marks the old pane: {strip!r}"
+
+
+async def test_escape_with_nothing_to_unwind_changes_nothing(make_app, seeded):
+    """esc never quits, and on a tab with nothing narrowed it is a no-op.
+
+    "No-op" includes not repainting. `_fill_table` clears the table with
+    `columns=True`, which resets the cursor to row 0 — so an unconditional reload would
+    silently throw away whichever row you had selected, the same hazard body_tab's
+    estimate indicator is written to avoid. That is why the repaint is guarded by
+    whether anything actually unwound.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        await pilot.pause()
+        table = app.query_one("#money-table")
+        assert table.row_count >= 2, f"the seed needs two rows to move between: {table.row_count}"
+        table.focus()
+        table.move_cursor(row=1)
+        await pilot.pause()
+        before, cursor = _cells(app), table.cursor_row
+        assert cursor == 1, "the cursor did not move, so the assertion below proves nothing"
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.is_running
+        assert _cells(app) == before
+        assert m.view.filter_category is None
+        assert table.cursor_row == cursor, "esc repainted and lost the selected row"
+
+
+async def test_escape_on_body_and_day_is_a_no_op(make_app, seeded):
+    """Neither tab narrows, so neither has anything to unwind — and esc must still not
+    quit, which is the property the binding exists for."""
+    from helpers import go_body, go_day
+
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.is_running
+        await go_day(pilot, app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.is_running

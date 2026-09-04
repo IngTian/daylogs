@@ -19,6 +19,7 @@ from daylogs.body import (
     bmi,
     compute_bmr,
     compute_tdee,
+    day_baseline,
     day_factor,
     day_tdee,
     delete_activity,
@@ -433,3 +434,62 @@ def test_deleting_the_latest_inference_restores_the_earlier_one(db, tmp_path):
     assert day_factor(db, cfg, date=D) == 1.7
     delete_activity(db, rid)
     assert day_factor(db, cfg, date=D) == 1.5
+
+
+# ── one baseline question, one answer ────────────────────────────────────
+# Six surfaces ask "what did this day cost". Two of them drifted: the food toast asked
+# `compute_bmr` while the header one line above it asked `day_tdee`, and the net series
+# required a *factor* rather than a baseline, so a profile with no level drew nothing.
+
+
+def test_the_days_baseline_is_burn_when_there_is_a_factor(db, tmp_path):
+    cfg = _bmr_cfg(tmp_path, activity="desk")
+    add_weight(db, kg=80.0, date=D, at=1)
+    assert day_baseline(db, cfg, date=D) == round(BMR_AT_80KG * 1.2)
+
+
+def test_the_days_baseline_falls_back_to_resting_bmr(db, tmp_path):
+    """No level set is a real state, and CLAUDE.md says every calorie figure then sits
+    against resting BMR "exactly as it did before" — which means a baseline exists, so
+    anything keyed on the *factor* rather than on the baseline goes silently blank."""
+    cfg = _bmr_cfg(tmp_path)
+    add_weight(db, kg=80.0, date=D, at=1)
+    assert day_baseline(db, cfg, date=D) == BMR_AT_80KG
+
+
+def test_there_is_no_baseline_without_a_weight_or_a_profile(db, tmp_path):
+    cfg = _bmr_cfg(tmp_path, activity="desk")
+    assert day_baseline(db, cfg, date=D) is None
+    add_weight(db, kg=80.0, date=D, at=1)
+    assert day_baseline(db, _cfg(tmp_path), date=D) is None
+
+
+def test_the_net_series_draws_without_an_activity_level(db, tmp_path):
+    """The visible symptom: `c` -> net drew an empty chart next to an ENERGY panel that
+    was showing a live net figure, for every profile with no level — which is the
+    default, because the level is deliberately never defaulted."""
+    cfg = _bmr_cfg(tmp_path)
+    add_weight(db, kg=80.0, date="2026-09-01", at=1)
+    add_food(db, description="a", kcal=2000, source="labeled", date="2026-09-01", at=2)
+    got = net_series_between(db, cfg, start="2026-09-01", end=D)
+    assert got == [("2026-09-01", 2000 - BMR_AT_80KG)], got
+
+
+def test_the_net_series_still_prefers_burn_when_a_factor_exists(db, tmp_path):
+    cfg = _bmr_cfg(tmp_path, activity="desk")
+    add_weight(db, kg=80.0, date="2026-09-01", at=1)
+    add_food(db, description="a", kcal=2000, source="labeled", date="2026-09-01", at=2)
+    got = net_series_between(db, cfg, start="2026-09-01", end=D)
+    assert got == [("2026-09-01", 2000 - round(BMR_AT_80KG * 1.2))], got
+
+
+def test_the_net_series_still_skips_a_day_with_no_weigh_in_behind_it(db, tmp_path):
+    """Falling back to BMR must not become falling back to nothing: a day before the
+    first weigh-in has no baseline at all and stays absent."""
+    cfg = _bmr_cfg(tmp_path)
+    add_food(db, description="a", kcal=2000, source="labeled", date="2026-09-01", at=1)
+    add_weight(db, kg=80.0, date="2026-09-02", at=2)
+    add_food(db, description="b", kcal=2000, source="labeled", date="2026-09-02", at=3)
+    assert net_series_between(db, cfg, start="2026-09-01", end=D) == [
+        ("2026-09-02", 2000 - BMR_AT_80KG)
+    ]

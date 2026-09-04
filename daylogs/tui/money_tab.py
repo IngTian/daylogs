@@ -100,7 +100,9 @@ class MoneyTab(PanelTab):
         v = self.view
         parts = [mark(v.label().lower(), "bold")]
         if v.filter_category:
-            parts.append(f"in {v.filter_category}")
+            # Escaped for the same reason as filter_text below: a category slug comes
+            # from config.toml, which is hand-edited.
+            parts.append(f"in {esc(v.filter_category)}")
         if v.filter_text:
             # User input into a markup string: filtering on "[" would otherwise
             # open a tag and eat the rest of the row.
@@ -233,12 +235,16 @@ class MoneyTab(PanelTab):
         over = {c.category for c in s.over_budget}
         for c in s.by_category:
             flag = "  ⚠" if c.category in over else ""
-            # Text, not markup, for cells: DataTable measures column widths from
-            # the cell's own render, so a "[red]…[/]" string would both print
-            # literally and widen the column by nine characters.
+            # Text, not markup, for cells. Two reasons, and the second one was
+            # missing for years: DataTable measures column widths from the cell's own
+            # render, and a plain `str` cell IS parsed as markup — so a stored
+            # description containing `[/b]` raised MarkupError straight out of the
+            # render, and one containing `[work]` silently lost the word. Every cell
+            # carrying stored or configured text is therefore wrapped, not just the
+            # coloured ones.
             delta = Text(signed(c.delta), style=GOOD if c.delta >= 0 else BAD)
             table.add_row(
-                c.category + flag,
+                Text(c.category + flag),
                 fmt(c.budget),
                 fmt(c.spent),
                 delta,
@@ -252,7 +258,9 @@ class MoneyTab(PanelTab):
         if not self.view.grouped:
             table.add_columns("date", "description", "category", "amount")
             for r in rows:
-                table.add_row(r["date"], r["description"], r["category"], fmt(r["amount"]))
+                table.add_row(
+                    r["date"], Text(r["description"]), Text(r["category"]), fmt(r["amount"])
+                )
                 self._ids.append(r["id"])
                 self._groups.append("")
             return
@@ -262,11 +270,13 @@ class MoneyTab(PanelTab):
             rows, collapsed=self.view.collapsed
         ):
             marker = "▸" if slug in self.view.collapsed else "▾"
-            table.add_row(marker, slug, f"{count} rows", fmt(total))
+            table.add_row(marker, Text(slug), f"{count} rows", fmt(total))
             self._ids.append(-1)
             self._groups.append(slug)
             for r in children:
-                table.add_row("", f"  {r['date']}", r["description"], fmt(r["amount"]))
+                table.add_row(
+                    "", f"  {r['date']}", Text(r["description"]), fmt(r["amount"])
+                )
                 self._ids.append(r["id"])
                 self._groups.append("")
 
@@ -274,8 +284,8 @@ class MoneyTab(PanelTab):
         table.add_columns("name", "category", "cost", "cycle", "monthly", "on")
         for r in money.list_recurring(self.app.conn):
             table.add_row(
-                r["name"],
-                r["category"],
+                Text(r["name"]),
+                Text(r["category"]),
                 fmt(r["cost"]),
                 r["cycle"],
                 fmt(r["monthly_cost"]),
@@ -398,8 +408,20 @@ class MoneyTab(PanelTab):
         else:
             self.app.prompt.open("recurring", prefill=parse.render_recurring(row))
 
-    def key_back(self) -> bool:
-        return self.view.back()
+    def key_back(self) -> None:
+        """`esc` unwinds one narrowing, and repaints — the two are one job.
+
+        They used to be split: this returned a bool to `DaylogsApp.app_back`, which did
+        the `reload()`. But every tab defined `key_back`, so the app's handler lost the
+        lookup to the tab's every single time and was never reached. `esc` cleared the
+        filter and left the old rows on screen with the strip still bolding the pane you
+        had left. One layer owns it now, so there is no protocol left to get wrong.
+
+        esc-never-quits is delivered by the keymap binding, not by this method, so a tab
+        with nothing to unwind simply has no handler.
+        """
+        if self.view.back():
+            self.reload()
 
     def key_roll(self) -> None:
         month = self.view.months()[-1] if self.view.months() else self.app.today()[:7]

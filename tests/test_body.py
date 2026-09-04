@@ -62,12 +62,15 @@ def test_list_weight_newest_first_and_since_filter(db):
     assert [r["kg"] for r in list_weight(db, since="2026-08-25")] == [78.2]
 
 
-def test_weight_series_one_point_per_day_last_reading_wins(db):
+def test_weight_series_one_point_per_day_first_reading_wins(db):
+    """Collapsing at all keeps a curious re-check from becoming a second point. Keeping
+    the *first* is what makes the survivor comparable across days: the fasted reading,
+    before food and water. See tests/test_weight_of_a_day.py for why it changed."""
     add_weight(db, kg=79.0, date="2026-08-25", at=10)
     add_weight(db, kg=78.6, date="2026-08-25", at=20)
     add_weight(db, kg=78.2, date="2026-08-27", at=30)
     series = weight_series(db, end_date="2026-08-27", days=7)
-    assert series == [("2026-08-25", 78.6), ("2026-08-27", 78.2)]
+    assert series == [("2026-08-25", 79.0), ("2026-08-27", 78.2)]
 
 
 def test_weight_series_excludes_outside_window(db):
@@ -263,7 +266,7 @@ def test_weight_series_between_reports_when_each_daily_point_was_taken(db):
     rows = weight_series_between(db, start="2026-08-27", end="2026-08-27")
     assert len(rows) == 1, "the per-day collapse must survive"
     date, kg, at = rows[0]
-    assert (date, kg, at) == ("2026-08-27", 79.5, 2000), "the latest reading wins"
+    assert (date, kg, at) == ("2026-08-27", 80.0, 1000), "the first reading wins"
 
 
 def test_weight_points_between_keeps_every_reading(db):

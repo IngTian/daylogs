@@ -294,14 +294,6 @@ class DaylogsApp(App):
         update_config(self.cfg.root / "config.toml", {"theme": name})
         self.notify(f"theme {name}", timeout=2)
 
-    def app_back(self) -> None:
-        """`esc` unwinds one step. When the active tab has nothing to unwind,
-        nothing happens — esc never quits."""
-        tab = self._active_tab()
-        fn = getattr(tab, "key_back", None)
-        if fn is not None and fn():
-            tab.reload()
-
     def app_undo(self) -> None:
         item = self.undo_stack.pop()
         if item is None:
@@ -398,6 +390,24 @@ class DaylogsApp(App):
             callback()
         else:
             self.notify("cancelled", timeout=2)
+
+    # ── notifications ────────────────────────────────────────────────────
+    def notify(self, message: str, **kwargs) -> None:
+        """Toasts are plain text unless a caller insists otherwise.
+
+        Textual defaults `markup=True`. Every toast in this app interpolates stored text
+        — a food description, an expense, a category, a row about to be deleted — and not
+        one of them wants markup. So a description containing `[work]` lost the word from
+        the write toast *and* from the delete confirmation, which is the dangerous one: a
+        confirmation that misquotes the row is asking you to approve something other than
+        what it says. One containing `[/b]` raised out of the toast.
+
+        Flipping the default here rather than at forty call sites is what makes it true
+        by construction; a caller that genuinely wants markup can still pass
+        `markup=True`.
+        """
+        kwargs.setdefault("markup", False)
+        super().notify(message, **kwargs)
 
     # ── errors ───────────────────────────────────────────────────────────
     def notify_error(self, message: str) -> None:

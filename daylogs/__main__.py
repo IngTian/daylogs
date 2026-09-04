@@ -13,6 +13,7 @@ import asyncio
 import datetime as dt
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from daylogs import __version__, claude, export, summary
 from daylogs.config import load_config
@@ -99,7 +100,13 @@ def _legacy_root_to_move(root: Path) -> Path | None:
 
 
 def _summary(conn, cfg, date: str | None) -> int:
-    target = date or summary.target_date(dt.date.today().isoformat())
+    # The configured zone, not the machine's. `cfg` was already in hand and unused for
+    # this: with `timezone` pinned away from the machine — which the README advertises —
+    # cron wrote a report dated a day the app never looks for, so the app spent a second
+    # `claude -p` call, and in one direction the CLI summarised the configured zone's
+    # *today*: the half-finished day this module's docstring exists to avoid.
+    today = dt.datetime.now(ZoneInfo(cfg.timezone)).date().isoformat()
+    target = date or summary.target_date(today)
     try:
         check_date(target)
     except MoneyError as e:

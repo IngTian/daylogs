@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -27,7 +28,14 @@ from daylogs.parse import (
 )
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
-from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style, view_row
+from daylogs.tui.widgets import (
+    arrow,
+    burn_bar,
+    mark,
+    sparkline,
+    trend_style,
+    view_row,
+)
 
 _CHART_H = 8
 _YLABEL_W = 7
@@ -157,7 +165,7 @@ class BodyTab(PanelTab):
         else:
             d7 = body.weight_delta(conn, end_date=date, days=7)
             d30 = body.weight_delta(conn, end_date=date, days=30)
-            head = f"WEIGHT   {kg:g} kg"
+            head = f"WEIGHT   {kg:g} kg  ({hhmm(latest['measured_at'], cfg.timezone)})"
             # A bare number, next to the weight it restates. No band and no colour:
             # "overweight" is a judgement this app does not otherwise make, and there
             # is no BMI chart for the same reason — it is the weight curve times a
@@ -308,10 +316,22 @@ class BodyTab(PanelTab):
                 ]
             when = [self._local(at) for at, _ in moments]
             ax = hz.axis(span, [w.date().isoformat() for w in when])
+            # The extent comes from every reading in the window, not from the points
+            # drawn. Over a month the line is one point per day, so fitting it to those
+            # labelled the top of a week as 81.85 while a reading of 82.65 sat inside it —
+            # a range the window does not have. On the hourly views the two sets are the
+            # same, so this changes nothing there.
+            everything = [
+                kg for _, kg in body.weight_points_between(
+                    conn, start=span.start, end=span.end
+                )
+            ]
             return chart.frame_chart(
                 [v for _, v in moments],
                 x_labels=ax.labels(),
                 positions=ax.fractions_at(when),
+                low=min(everything) if everything else None,
+                high=max(everything) if everything else None,
                 **common,
             )
 
@@ -415,14 +435,14 @@ class BodyTab(PanelTab):
                 self.app.conn, since=span.start, until=span.end, limit=_WEIGHT_CAP
             )
             for r in rows:
-                table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
+                table.add_row(r["date"], f"{r['kg']:g}", Text(r["note"] or ""))
                 self._ids.append(r["id"])
         elif self.table_mode == "activity":
             table.add_columns("time", "description", "factor", "src")
             for r in body.list_activity(self.app.conn, date=date):
                 table.add_row(
                     hhmm(r["logged_at"], self.app.cfg.timezone),
-                    r["description"],
+                    Text(r["description"]),
                     # A dash, not a blank: an inference that never landed is a state
                     # worth seeing, because the day quietly used the baseline instead.
                     "—" if r["factor"] is None else f"×{r['factor']:g}",
@@ -434,7 +454,10 @@ class BodyTab(PanelTab):
             for r in body.list_food(self.app.conn, date=date):
                 table.add_row(
                     hhmm(r["ate_at"], self.app.cfg.timezone),
-                    r["description"],
+                    # Text, not str: a `str` cell is parsed as markup, so a description
+                    # containing `[/b]` raised out of the render and one containing
+                    # `[work]` quietly lost the word.
+                    Text(r["description"]),
                     f"{r['kcal']:,}",
                     "lab" if r["source"] == "labeled" else "est",
                 )
@@ -542,9 +565,6 @@ class BodyTab(PanelTab):
     def key_zoom_out(self) -> None:
         self.horizon = hz.next_horizon(self.horizon, 1)
         self.reload()
-
-    def key_back(self) -> bool:
-        return False
 
     def key_delete(self) -> None:
         row = self._selected_row()
@@ -752,7 +772,7 @@ class BodyTab(PanelTab):
             self.viewing_date = r.date
             self.reload()
             d7 = body.weight_delta(self.app.conn, end_date=r.date, days=7)
-            trend = "" if d7 is None else f" · {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            trend = "" if d7 is None else f" · {arrow(d7)}{abs(d7):g} vs 7d"
             self.app.notify(f"{r.kg:g} kg logged{trend}", timeout=4)
             return
         before = self.app.conn.execute(
@@ -971,10 +991,20 @@ class BodyTab(PanelTab):
         self.viewing_date = r.date
         self.reload()
         total = body.day_kcal(self.app.conn, date=r.date)
-        latest = body.latest_weight(self.app.conn, on_or_before=r.date)
-        bmr = body.compute_bmr(self.app.cfg, latest["kg"] if latest else None, today=r.date)
+        # The same question the header one line above asks. It used to ask `compute_bmr`
+        # directly, so with a factor set the header said net against `burn` and this said
+        # "vs BMR" in the same instant, about the same day.
+        baseline = body.day_baseline(self.app.conn, self.app.cfg, date=r.date)
+        # And named the same way. The number is burn only when a factor applied; without
+        # one it is resting BMR, and calling that "burn" would be the same drift running
+        # the other way. The name is display copy, so it is decided here rather than
+        # returned from the data layer.
+        factor, _ = body.resolved_factor(self.app.conn, self.app.cfg, date=r.date)
         # The useful answer is not "saved" but where the day now stands.
-        against = f"{total:,} today" if bmr is None else f"{total - bmr:+,} vs BMR"
+        if baseline is None:
+            against = f"{total:,} today"
+        else:
+            against = f"{total - baseline:+,} vs {'burn' if factor is not None else 'BMR'}"
         self.app.notify(f"{r.description} · {r.kcal or 0:,} kcal · {against}", timeout=4)
 
 
@@ -989,7 +1019,6 @@ def _delta(value: float | None, label: str) -> str:
     """
     if value is None:
         return f"— vs {label}"
-    arrow = "▼" if value < 0 else ("▲" if value > 0 else "→")
-    return mark(f"{arrow} {abs(value):g} vs {label}", trend_style(value))
+    return mark(f"{arrow(value)} {abs(value):g} vs {label}", trend_style(value))
 
 

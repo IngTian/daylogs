@@ -40,6 +40,22 @@ jobs:
       - run: pip install -q build
       - run: python -m build --sdist --wheel --outdir dist
 
+      # The suite, AFTER the build. `ci.yml` triggers on `push: branches: [main]` and
+      # `pull_request` — a tag ref matches neither — so before this, pushing a tag
+      # published to PyPI without running a single test.
+      #
+      # After, not before, on purpose: `pip install -e` leaves `.egg-info` and
+      # `__pycache__` in the tree, which is exactly the dirty-tree class the wheel-shape
+      # check above exists to catch. Build the artifact from a clean checkout, then test.
+      #
+      # No `ruff` here. Both later jobs are `needs: build`, so a lint failure would
+      # produce nothing and force a tag delete and re-push — against this workflow's own
+      # rule that a tag is never wasted. Lint is CI's job, on the commit, before the tag.
+      - name: the suite passes on the tagged commit
+        run: |
+          pip install -e '.[dev]'
+          pytest -q
+
       # Same guard the CI workflow runs: the stylesheet is loaded by path at
       # runtime, so a wheel without it installs fine and starts up unstyled.
       - name: wheel ships the stylesheet, and nothing else
@@ -65,6 +81,10 @@ jobs:
           python -m venv /tmp/smoke
           /tmp/smoke/bin/pip install -q dist/*.whl
           /tmp/smoke/bin/day --version
+          # The import too, matching ci.yml. Release was weaker than CI's own packaging
+          # check by exactly this line, and it is the one that proves the package-data
+          # path resolves from an installed wheel rather than from the source tree.
+          /tmp/smoke/bin/python -c "import daylogs.tui.app; print('imports clean')"
 
       - uses: actions/upload-artifact@v4
         with:

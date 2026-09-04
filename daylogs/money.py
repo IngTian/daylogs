@@ -241,7 +241,42 @@ def update_recurring(conn, id: int, cfg=None, **fields) -> bool:
     cur = conn.execute(
         f"UPDATE recurring SET {sets} WHERE id = ?", (*fields.values(), int(id))
     )
+    if "name" in fields:
+        _rename_rolled_budgets(conn, old=row["name"], new=fields["name"])
     return cur.rowcount > 0
+
+
+def _rename_rolled_budgets(conn, *, old: str, new: str) -> None:
+    """Carry a recurring item's rename through to the budget lines it produced.
+
+    Budget rows are keyed by `name`, recurring items by `id`, and nothing joined the
+    two. So a rename left the old month's line standing and the next `roll_month_budgets`
+    added a second line for the same subscription: one 24.99 item became 49.98 of budget,
+    permanently, in the single number the Money tab exists to answer.
+
+    Fixed here rather than by reconciling at roll time, because this is the only place
+    that knows a rename happened. From the budget table alone an unclaimed line is
+    indistinguishable from one whose item was *deleted* — and those want opposite
+    treatment: a month you have already paid for keeps its line, and next month's roll
+    simply will not include it.
+
+    Only `source='recurring'` rows move. A number you typed by hand is yours; the roll
+    has never overwritten one and neither does this.
+    """
+    if old == new:
+        return
+    # Drop the old line in any month that already has one under the new name, rather
+    # than colliding with UNIQUE(month, name). Such a month has both because it was
+    # rolled after the rename — the old row is precisely the duplicate being cleaned up.
+    conn.execute(
+        "DELETE FROM budget WHERE name = ? AND source = 'recurring'"
+        " AND month IN (SELECT month FROM budget WHERE name = ?)",
+        (old, new),
+    )
+    conn.execute(
+        "UPDATE budget SET name = ? WHERE name = ? AND source = 'recurring'",
+        (new, old),
+    )
 
 
 def delete_recurring(conn, id: int) -> dict | None:

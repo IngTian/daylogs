@@ -27,7 +27,7 @@ from daylogs import horizon as hz
 from daylogs.fmt import hhmm, human_date
 from daylogs.markup import to_markdown
 from daylogs.tui.common import PanelTab
-from daylogs.tui.widgets import BAD, WARN, mark, trend_style
+from daylogs.tui.widgets import BAD, WARN, arrow, mark, trend_style
 
 _EMPTY = "no summary yet — press r"
 
@@ -79,8 +79,7 @@ class SummaryTab(PanelTab):
             # and sign carry the direction, so colour only emphasises.
             trend = ""
             if d7 is not None:
-                arrow = "▼" if d7 < 0 else "▲"
-                trend = "  " + mark(f"{arrow}{abs(d7):g} vs 7d", trend_style(d7))
+                trend = "  " + mark(f"{arrow(d7)}{abs(d7):g} vs 7d", trend_style(d7))
             lines.append(f"  weight    {kg:>7,.1f} kg{trend}")
 
         # A bare number, no band and no colour — the same stance the Body tab takes.
@@ -220,9 +219,6 @@ class SummaryTab(PanelTab):
         newest = summary.latest_report(self.app.conn)
         self.viewing_date = newest["date"] if newest else None
         self.reload()
-
-    def key_back(self) -> bool:
-        return False
 
     def handle_prompt(self, label: str, value: str) -> None:
         if label == "go to date" and value:

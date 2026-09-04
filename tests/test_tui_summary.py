@@ -693,3 +693,19 @@ async def test_the_body_panel_omits_bmi_without_a_height(make_app, db, make_cfg)
     add_weight(db, kg=81.0, date="2026-09-03", at=1)
     panel = await _day_body(make_app, make_cfg())
     assert "BMI" not in panel, f"BMI with no height to compute it from: {panel!r}"
+
+
+async def test_an_unchanged_weight_gets_a_neutral_arrow_on_the_day_panel(make_app, db):
+    """`▲0 vs 7d` for a weight that did not move. This site was two-way, so zero fell
+    into the "up" branch — and `trend_style` withholds colour at zero on purpose, which
+    left the wrong glyph as the only signal."""
+    from daylogs.body import add_weight
+
+    add_weight(db, kg=71.0, date="2026-08-25", at=1787000000)
+    add_weight(db, kg=71.0, date="2026-08-30", at=1788000000)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 30, 9, 0, tzinfo=TZ))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        line = _line(_panel(app, "body"), "weight")
+    assert "→" in line, f"an unchanged weight is not flagged as unchanged: {line!r}"
+    assert "▲" not in line, f"zero rendered as a rise: {line!r}"

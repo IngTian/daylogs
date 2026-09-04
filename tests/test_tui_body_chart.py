@@ -294,11 +294,21 @@ async def test_a_three_day_window_plots_both_of_a_days_weigh_ins(make_app, db):
         await pilot.pause()
         three_day = _chart(app)
 
-    # 80.4 is the morning reading the daily collapse discards; only the zoomed view
-    # can show it, and its y-axis label is the evidence.
-    assert "80.4" not in monthly, "the month view should keep one point per day"
-    assert "80.4" in three_day, f"the morning reading is missing:\n{three_day}"
-    assert "79.8" in three_day
+    # Asserted against what is *plotted*, not against the axis labels. The labels used
+    # to be the evidence here, and they no longer can be: the extent now describes every
+    # reading in the window rather than only the drawn points, precisely so a week does
+    # not claim a top of 81.85 while an 82.65 sits inside it. Both labels are therefore
+    # present in both views, and the difference to assert is the number of points.
+    from daylogs.body import weight_points_between, weight_series_between
+
+    collapsed = weight_series_between(db, start="2026-08-28", end="2026-08-28")
+    every = weight_points_between(db, start="2026-08-28", end="2026-08-28")
+    assert [kg for _, kg, _ in collapsed] == [80.4], "the collapse keeps the morning one"
+    assert [kg for _, kg in every] == [80.4, 79.8], "the zoomed view has both"
+    assert monthly != three_day, "the two windows drew the same picture"
+    # And the labels describe the window in both, which is the point of the extent change.
+    for text in (monthly, three_day):
+        assert "80.4" in text and "79.8" in text
 
 
 async def test_a_three_day_axis_is_labelled_by_the_clock(make_app, db):
@@ -517,3 +527,49 @@ async def test_the_calorie_series_is_plotted_against_its_dates(make_app, db, mak
     left = {ch for r in plot for ch in r[: int(width * 0.75)]}
     assert left <= {BLANK}, "two days were spread across a three-month window"
     assert any(ch != BLANK for r in plot for ch in r[int(width * 0.75) :])
+
+
+async def test_food_feedback_names_burn_when_a_level_is_set(make_app, make_cfg, db):
+    """The toast and the FOOD header describe the same day, so they must name the same
+    baseline. The toast asked `compute_bmr` directly, so with a level set the header said
+    net against `burn` while the toast said "vs BMR" in the same instant."""
+    from daylogs.body import add_weight as _aw
+
+    _aw(db, kg=80.0, date="2026-08-27", at=1)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
+    app = make_app(cfg=cfg, now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        seen = []
+        app.notify = lambda msg, **kw: seen.append(str(msg))
+        body = app.query_one("#body")
+        body.viewing_date = "2026-08-27"
+        await pilot.press("f")
+        for ch in "salad =610":
+            await pilot.press("space" if ch == " " else ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert any("burn" in m for m in seen), f"the toast does not name burn: {seen}"
+    assert not any("BMR" in m for m in seen), f"the toast still says BMR: {seen}"
+    assert "burn" in head, "the header should be naming burn too"
+
+
+async def test_an_unchanged_weigh_in_reports_a_neutral_arrow(make_app, db, type_into):
+    """The third site drawing this arrow: the weigh-in toast. Re-logging the same number
+    is a real thing to do, and it used to answer `▲0`."""
+    add_weight(db, kg=78.2, date="2026-08-22", at=1)
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        seen = []
+        app.notify = lambda msg, **kw: seen.append(str(msg))
+        await pilot.press("w")
+        await type_into(pilot, "78.2")
+        await pilot.press("enter")
+        await pilot.pause()
+    trend = [m for m in seen if "7d" in m]
+    assert trend, f"no trend in the feedback: {seen}"
+    assert "→" in trend[0], f"an unchanged weigh-in is not flagged as unchanged: {trend}"

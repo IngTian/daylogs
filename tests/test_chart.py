@@ -226,3 +226,33 @@ def test_frame_rows_stay_uniform_width_with_a_zero_row():
 def test_a_flat_zero_series_does_not_divide_by_zero():
     rows = frame_chart([0.0, 0.0], width=12, height=4, include_zero=True)
     assert len(rows) == 6
+
+
+# ── the axis describes the window, not just the drawn points ─────────────
+
+
+def test_an_explicit_extent_widens_the_labels_beyond_the_plotted_points():
+    """The weight chart draws one point per day but the window may hold several readings
+    per day, so the extent has to come from the window. Otherwise the labels claim a range
+    the window does not have — the same defect as v1 plotting the last 30 entries while
+    labelling as though it described the requested window.
+    """
+    rows = frame_chart([81.85, 81.75], width=20, height=5, low=80.65, high=82.65)
+    assert "82.65" in rows[0], f"the top label is not the window's max: {rows[0]!r}"
+    assert "80.65" in rows[4], f"the bottom label is not the window's min: {rows[4]!r}"
+
+
+def test_a_widened_extent_leaves_the_line_off_the_panel_edges():
+    """The consequence, and it is the honest one: nothing plotted reaches the top row,
+    because the reading that defines it is not one of the drawn points."""
+    tight = frame_chart([81.85, 81.75], width=20, height=6)
+    wide = frame_chart([81.85, 81.75], width=20, height=6, low=80.65, high=82.65)
+    plot = lambda rows: [r.split("│", 1)[1] for r in rows if "│" in r]  # noqa: E731
+    assert plot(tight)[0].strip("⠀"), "the tight fit should touch the top row"
+    assert not plot(wide)[0].strip("⠀"), "a widened extent must not touch the top row"
+
+
+def test_an_explicit_extent_is_ignored_when_absent():
+    assert frame_chart([81.85, 81.75], width=20, height=5) == frame_chart(
+        [81.85, 81.75], width=20, height=5, low=None, high=None
+    )

@@ -79,16 +79,48 @@ def latest_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | Non
     return conn.execute(sql, args).fetchone()
 
 
+def morning_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | None:
+    """The **first** reading of the most recent day that has one — the day's comparable
+    weight.
+
+    The counterpart to `latest_weight`, and the app needs both. "What do I weigh now" is
+    the latest reading and belongs in the header. "What did this day weigh" is the first
+    one: taken fasted, before food and water, so it is the only reading that compares
+    across days. The trend, the 7d/30d deltas and the digest all want the second.
+
+    They were the same function, and it was `latest_weight`. On real data every day with
+    two readings was weighed early and again mid-morning, so taking the later one took the
+    low end of every day — not a neutral sample of it. It also made the digest prompt
+    false: it states `weight_kg` is "the weigh-in on the *morning* of target_date, before
+    any of the food listed" while being handed the mid-morning one.
+
+    Same staleness rule as `latest_weight`: a week-old reading is the best available
+    answer, not a reason to show nothing.
+    """
+    sql = "SELECT * FROM weight"
+    args: list = []
+    if on_or_before:
+        sql += " WHERE date <= ?"
+        args.append(_check_date(on_or_before))
+    # Latest *day*, then earliest reading within it. One ORDER BY cannot express that.
+    sql += " ORDER BY date DESC, measured_at ASC LIMIT 1"
+    return conn.execute(sql, args).fetchone()
+
+
 def weight_series(conn, *, end_date: str, days: int) -> list[tuple[str, float]]:
-    """One point per day in the window, ascending. When a day has several
-    readings the latest wins — a morning weigh-in plus a curious evening
-    re-check should not become two points."""
+    """One point per day in the window, ascending — each day's **first** reading.
+
+    Collapsing at all is so that a morning weigh-in plus a curious evening re-check does
+    not become two points. Keeping the *first* is so that what survives is comparable:
+    the fasted reading, before food and water. Latest-wins took the low end of every
+    multi-reading day and hid the high one entirely once the window passed `3d`.
+    """
     rows = conn.execute(
         """
         SELECT date, kg FROM weight w
         WHERE date BETWEEN ? AND ?
           AND measured_at = (
-              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+              SELECT MIN(measured_at) FROM weight w2 WHERE w2.date = w.date
           )
         GROUP BY date
         ORDER BY date ASC
@@ -103,7 +135,7 @@ def weight_series_between(
 ) -> list[tuple[str, float, int]]:
     """One point per day between `start` and `end` inclusive, ascending.
 
-    `start=None` means unbounded. Same last-reading-wins rule as weight_series.
+    `start=None` means unbounded. Same first-reading-wins rule as weight_series.
 
     Returns `(date, kg, measured_at)`. The timestamp comes along so the chart can
     place a day's point at the hour it was taken rather than at midnight — the
@@ -114,7 +146,7 @@ def weight_series_between(
         SELECT date, kg, measured_at FROM weight w
         WHERE date <= ?
           AND measured_at = (
-              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+              SELECT MIN(measured_at) FROM weight w2 WHERE w2.date = w.date
           )
     """
     args: list = [_check_date(end)]
@@ -463,21 +495,49 @@ def day_tdee(conn, cfg, *, date: str) -> int | None:
     return compute_tdee(bmr, day_factor(conn, cfg, date=date))
 
 
+def day_baseline(conn, cfg, *, date: str) -> int | None:
+    """What `date` is measured against: its burn if there is a factor, else resting BMR.
+
+    Six surfaces ask this question and two of them had drifted. The food toast asked
+    `compute_bmr` while the FOOD header one line above it asked `day_tdee`, so the
+    header said net against `burn` and the toast said "+X vs BMR" in the same instant.
+    And `net_series_between` keyed on the *factor*, so `c` -> net drew an empty chart for
+    any profile without a level — which is the default, because the level is deliberately
+    never defaulted.
+
+    "No factor" is a real state in which every calorie figure sits against resting BMR
+    exactly as it did before, so a baseline still exists. That is the distinction: ask for
+    the baseline, not for the factor. `None` means there is genuinely nothing to measure
+    against — no weigh-in, or no profile — and then a figure is shown bare.
+    """
+    latest = latest_weight(conn, on_or_before=date)
+    bmr = compute_bmr(cfg, latest["kg"] if latest else None, today=date)
+    if bmr is None:
+        return None
+    burn = compute_tdee(bmr, day_factor(conn, cfg, date=date))
+    # Explicit `is not None` rather than `or`: a truthiness test would also swallow a
+    # burn of 0, which is a real number here and not an absent one.
+    return burn if burn is not None else bmr
+
+
 def net_series_between(
     conn, cfg, *, start: str | None, end: str
 ) -> list[tuple[str, int]]:
-    """Daily `intake − that day's burn`, ascending, for the days that have both.
+    """Daily `intake − that day's baseline`, ascending, for the days that have both.
 
     Per day, not "the window's average intake minus today's burn": a factor describes
     one day, so a single gym session must not restate a month of net. Days with no
     food are absent — a logging gap is not a fast, the same rule
-    `kcal_series_between` follows — and so are days with no resolvable burn, because
-    showing intake as if it were net reads as an enormous surplus.
+    `kcal_series_between` follows — and so are days with no *baseline*, because showing
+    intake as if it were net reads as an enormous surplus.
+
+    Baseline, not burn: keyed on the factor this returned nothing at all for a profile
+    with no level, so the chart was empty beside an ENERGY panel showing a live net.
     """
     return [
-        (date, kcal - tdee)
+        (date, kcal - baseline)
         for date, kcal in kcal_series_between(conn, start=start, end=end)
-        if (tdee := day_tdee(conn, cfg, date=date)) is not None
+        if (baseline := day_baseline(conn, cfg, date=date)) is not None
     ]
 
 
