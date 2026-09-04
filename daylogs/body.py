@@ -79,16 +79,48 @@ def latest_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | Non
     return conn.execute(sql, args).fetchone()
 
 
+def morning_weight(conn, *, on_or_before: str | None = None) -> sqlite3.Row | None:
+    """The **first** reading of the most recent day that has one — the day's comparable
+    weight.
+
+    The counterpart to `latest_weight`, and the app needs both. "What do I weigh now" is
+    the latest reading and belongs in the header. "What did this day weigh" is the first
+    one: taken fasted, before food and water, so it is the only reading that compares
+    across days. The trend, the 7d/30d deltas and the digest all want the second.
+
+    They were the same function, and it was `latest_weight`. On real data every day with
+    two readings was weighed early and again mid-morning, so taking the later one took the
+    low end of every day — not a neutral sample of it. It also made the digest prompt
+    false: it states `weight_kg` is "the weigh-in on the *morning* of target_date, before
+    any of the food listed" while being handed the mid-morning one.
+
+    Same staleness rule as `latest_weight`: a week-old reading is the best available
+    answer, not a reason to show nothing.
+    """
+    sql = "SELECT * FROM weight"
+    args: list = []
+    if on_or_before:
+        sql += " WHERE date <= ?"
+        args.append(_check_date(on_or_before))
+    # Latest *day*, then earliest reading within it. One ORDER BY cannot express that.
+    sql += " ORDER BY date DESC, measured_at ASC LIMIT 1"
+    return conn.execute(sql, args).fetchone()
+
+
 def weight_series(conn, *, end_date: str, days: int) -> list[tuple[str, float]]:
-    """One point per day in the window, ascending. When a day has several
-    readings the latest wins — a morning weigh-in plus a curious evening
-    re-check should not become two points."""
+    """One point per day in the window, ascending — each day's **first** reading.
+
+    Collapsing at all is so that a morning weigh-in plus a curious evening re-check does
+    not become two points. Keeping the *first* is so that what survives is comparable:
+    the fasted reading, before food and water. Latest-wins took the low end of every
+    multi-reading day and hid the high one entirely once the window passed `3d`.
+    """
     rows = conn.execute(
         """
         SELECT date, kg FROM weight w
         WHERE date BETWEEN ? AND ?
           AND measured_at = (
-              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+              SELECT MIN(measured_at) FROM weight w2 WHERE w2.date = w.date
           )
         GROUP BY date
         ORDER BY date ASC
@@ -103,7 +135,7 @@ def weight_series_between(
 ) -> list[tuple[str, float, int]]:
     """One point per day between `start` and `end` inclusive, ascending.
 
-    `start=None` means unbounded. Same last-reading-wins rule as weight_series.
+    `start=None` means unbounded. Same first-reading-wins rule as weight_series.
 
     Returns `(date, kg, measured_at)`. The timestamp comes along so the chart can
     place a day's point at the hour it was taken rather than at midnight — the
@@ -114,7 +146,7 @@ def weight_series_between(
         SELECT date, kg, measured_at FROM weight w
         WHERE date <= ?
           AND measured_at = (
-              SELECT MAX(measured_at) FROM weight w2 WHERE w2.date = w.date
+              SELECT MIN(measured_at) FROM weight w2 WHERE w2.date = w.date
           )
     """
     args: list = [_check_date(end)]

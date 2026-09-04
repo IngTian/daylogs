@@ -294,11 +294,21 @@ async def test_a_three_day_window_plots_both_of_a_days_weigh_ins(make_app, db):
         await pilot.pause()
         three_day = _chart(app)
 
-    # 80.4 is the morning reading the daily collapse discards; only the zoomed view
-    # can show it, and its y-axis label is the evidence.
-    assert "80.4" not in monthly, "the month view should keep one point per day"
-    assert "80.4" in three_day, f"the morning reading is missing:\n{three_day}"
-    assert "79.8" in three_day
+    # Asserted against what is *plotted*, not against the axis labels. The labels used
+    # to be the evidence here, and they no longer can be: the extent now describes every
+    # reading in the window rather than only the drawn points, precisely so a week does
+    # not claim a top of 81.85 while an 82.65 sits inside it. Both labels are therefore
+    # present in both views, and the difference to assert is the number of points.
+    from daylogs.body import weight_points_between, weight_series_between
+
+    collapsed = weight_series_between(db, start="2026-08-28", end="2026-08-28")
+    every = weight_points_between(db, start="2026-08-28", end="2026-08-28")
+    assert [kg for _, kg, _ in collapsed] == [80.4], "the collapse keeps the morning one"
+    assert [kg for _, kg in every] == [80.4, 79.8], "the zoomed view has both"
+    assert monthly != three_day, "the two windows drew the same picture"
+    # And the labels describe the window in both, which is the point of the extent change.
+    for text in (monthly, three_day):
+        assert "80.4" in text and "79.8" in text
 
 
 async def test_a_three_day_axis_is_labelled_by_the_clock(make_app, db):

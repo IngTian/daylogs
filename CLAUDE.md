@@ -84,6 +84,23 @@ appended prose where it was convenient rather than editing the map.
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand
   edge of the span), not a month.
+- **Two named weight concepts, and they are not interchangeable.** `latest_weight` is
+  "what do I weigh now" — the WEIGHT header's headline, which states the reading's clock
+  time so it reads as a reading rather than as *the* number, and the BMI beside it.
+  `morning_weight` is the day's **first** reading, taken fasted: the trend line, the
+  7d/30d deltas and the digest. One function served both and it was `latest_weight`, so
+  the collapse kept `MAX(measured_at)`. On real data every twice-weighed day was measured
+  early and again mid-morning, so latest-wins took the low end of every day, hid the high
+  reading entirely once the window passed `3d`, and made `summary.py`'s prompt false — it
+  states `weight_kg` is the morning weigh-in "before any of the food listed" while being
+  handed the mid-morning one. `next_morning_kg` was mislabelled the same way. The
+  headline and the trend therefore disagree on a twice-weighed day, on purpose.
+- **A chart's y-extent describes the window, not the points it drew.** `frame_chart`
+  takes `low`/`high` for the weight chart, which plots one point per day while the window
+  may hold several readings per day — fitting to the drawn points labelled the top of a
+  week as 81.85 with an 82.65 inside it, the same defect as v1 labelling min/max of the
+  last 30 entries as though they were the window. The line then does not touch the panel
+  edges, which is the honest picture: the value defining the edge is not on screen.
 - **One timezone, and `fmt` takes it as an argument.** `cfg.timezone` defaults to the
   *machine's* zone (`config.system_timezone`, from `TZ` then the `/etc/localtime`
   symlink, else UTC) and is always a real IANA name, so every reader can do

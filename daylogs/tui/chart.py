@@ -103,12 +103,21 @@ def frame_chart(
     unit: str = "",
     positions: list[float] | None = None,
     include_zero: bool = False,
+    low: float | None = None,
+    high: float | None = None,
 ) -> list[str]:
     """Chart rows plus a y-axis, an axis rule, and an x-label row.
 
     The y labels describe the extent of `values` as passed in — the caller's
     window. v1 plotted the last 30 entries while labelling min/max as though they
     described the requested window, which made the chart quietly wrong.
+
+    `low`/`high` override that extent, for a caller whose *window* holds more than it
+    draws. The weight chart plots one point per day but a day may hold several readings,
+    so fitting to the drawn points labelled the top of a week as 81.85 when a reading of
+    82.65 sat inside it — the same defect one level up. The consequence is that the line
+    then does not touch the panel edges, which is the honest picture: the value defining
+    the edge is not one of the points on screen.
 
     `include_zero` pulls 0 into that extent, for a series whose sign is the point.
     A signed net fitted to its own min and max is unreadable: a month of deficits and
@@ -122,7 +131,8 @@ def frame_chart(
     if not values:
         return [f"{'':>{ylabel_width}} │ no data yet".ljust(total)[:total]]
 
-    hi, lo = max(values), min(values)
+    hi = max(values) if high is None else high
+    lo = min(values) if low is None else low
     if include_zero:
         hi, lo = max(hi, 0.0), min(lo, 0.0)
     zero = _zero_row(lo, hi, height) if include_zero else None

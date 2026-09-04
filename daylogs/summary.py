@@ -55,7 +55,8 @@ _TASK = """\
 ## Body
 
 **Temporal framing — read carefully.** `payload.body.weight_kg` is the
-weigh-in on the *morning* of target_date, **before** any of the food listed.
+*first* weigh-in of target_date — the morning one, **before** any of the food
+listed — or, if that day has none, the most recent earlier morning reading.
 It does not reflect that food. `payload.body.next_morning_kg` is the morning
 weigh-in of the following day; THAT reflects target_date's intake. Use it as
 the ground-truth read on whether the food moved the scale.
@@ -115,10 +116,14 @@ def build_payload(conn, cfg, *, date: str) -> dict:
     month = date[:7]
     next_day = (dt.date.fromisoformat(date) + dt.timedelta(days=1)).isoformat()
 
-    same = body.latest_weight(conn, on_or_before=date)
+    # The day's *first* reading, not its last. The prompt below states this field is the
+    # morning weigh-in before any of the listed food; `latest_weight` handed it the last
+    # reading of the day, so on any day weighed twice the temporal-framing block — and
+    # `next_morning_delta` with it — was reasoning from a premise that was simply false.
+    same = body.morning_weight(conn, on_or_before=date)
     same_kg = same["kg"] if same else None
     nxt = conn.execute(
-        "SELECT kg FROM weight WHERE date = ? ORDER BY measured_at DESC LIMIT 1",
+        "SELECT kg FROM weight WHERE date = ? ORDER BY measured_at ASC LIMIT 1",
         (next_day,),
     ).fetchone()
     next_kg = nxt["kg"] if nxt else None

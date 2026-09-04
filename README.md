@@ -174,9 +174,9 @@ a leading sigil, so `\!important` is just a word.
 Every prompt shows what it wants, in three places and no extra screen rows:
 
 ```
-╭─ profile › ───────────────────────────────────────╮
-│ 180 male 1990-01-01                               │   the example, greyed
-╰─ height · m/f · birthday — any order, partial ok ─╯   the grammar, persistent
+╭─ profile › ──────────────────────────────────────────────────────────╮
+│ 180 male 1990-01-01 desk America/Toronto                              │
+╰─ height · m/f · birthday · desk/light/active/heavy · zone — any order ╯
 ```
 
 The example is the placeholder, so it gets out of the way as soon as you type. The
@@ -379,7 +379,19 @@ A braille line chart: 2×4 dots per cell, so an 8-row by 48-column chart carries
 horizontal detail.
 
 `c` cycles which series it plots — **weight**, **intake**, **net** — over whatever
-window `+` / `-` have set. The panel names all three and marks the one you're on, and
+window `+` / `-` have set.
+
+Two readings on one day are two different questions, so the app answers both. The header
+shows your **latest** reading with its clock time — what you weigh now. The trend, the
+7d/30d deltas and the daily summary use each day's **first** reading, taken fasted before
+food and water, because that is the only one comparable across days. On a day you weighed
+twice the header and the last point of the trend will differ, and that is deliberate.
+
+The y-axis describes the **window**, not just the points drawn. Over a month the line is
+one point per day, so a day's other readings would otherwise be missing from the range as
+well as from the line — a week could claim a top of 81.85 with an 82.65 inside it. The
+line not quite touching the top of the panel means the reading that defines it is not one
+of the points on screen. The panel names all three and marks the one you're on, and
 the two controls are independent: zooming doesn't reset the series.
 
 `net` is intake against **each day's own burn**, so one hard day moves only its own

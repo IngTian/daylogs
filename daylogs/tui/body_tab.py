@@ -165,7 +165,7 @@ class BodyTab(PanelTab):
         else:
             d7 = body.weight_delta(conn, end_date=date, days=7)
             d30 = body.weight_delta(conn, end_date=date, days=30)
-            head = f"WEIGHT   {kg:g} kg"
+            head = f"WEIGHT   {kg:g} kg  ({hhmm(latest['measured_at'], cfg.timezone)})"
             # A bare number, next to the weight it restates. No band and no colour:
             # "overweight" is a judgement this app does not otherwise make, and there
             # is no BMI chart for the same reason — it is the weight curve times a
@@ -316,10 +316,22 @@ class BodyTab(PanelTab):
                 ]
             when = [self._local(at) for at, _ in moments]
             ax = hz.axis(span, [w.date().isoformat() for w in when])
+            # The extent comes from every reading in the window, not from the points
+            # drawn. Over a month the line is one point per day, so fitting it to those
+            # labelled the top of a week as 81.85 while a reading of 82.65 sat inside it —
+            # a range the window does not have. On the hourly views the two sets are the
+            # same, so this changes nothing there.
+            everything = [
+                kg for _, kg in body.weight_points_between(
+                    conn, start=span.start, end=span.end
+                )
+            ]
             return chart.frame_chart(
                 [v for _, v in moments],
                 x_labels=ax.labels(),
                 positions=ax.fractions_at(when),
+                low=min(everything) if everything else None,
+                high=max(everything) if everything else None,
                 **common,
             )
 
