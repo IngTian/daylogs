@@ -461,6 +461,39 @@ class MoneyTab(PanelTab):
         if self.view.back():
             self.reload()
 
+    def key_toggle_active(self) -> None:
+        """Pause or resume the selected recurring item.
+
+        The `on` column has been rendered since the first version and nothing could ever
+        change it, so `roll_month_budgets`' and `pending_roll`'s `active_only` filter had
+        no reachable other side. This is that keypress and nothing more — the whole data
+        layer was already here.
+
+        Pausing means "not from now on", not "this never happened": a budget line already
+        rolled for this month stays, the same stance a deleted item's line gets, and next
+        month's roll simply will not include it.
+        """
+        if self.view.pane != "recurring":
+            self.app.notify("switch to the recurring pane to pause an item (tab)", timeout=4)
+            return
+        row_id = self._selected_id()
+        if row_id is None:
+            return
+        before = self.app.conn.execute(
+            "SELECT * FROM recurring WHERE id = ?", (row_id,)
+        ).fetchone()
+        if before is None:
+            return
+        # Read from the row rather than setting a constant, so one key serves both
+        # directions. `active` is the only field passed: `update_recurring` recomputes
+        # `monthly_cost` when cost or cycle moves, and neither moves here.
+        money.update_recurring(self.app.conn, row_id, active=not before["active"])
+        self.app.undo_stack.push("recurring", dict(before))
+        state = "resumed" if not before["active"] else "paused"
+        tail = "r will roll it again" if not before["active"] else "r will skip it"
+        self.app.notify(f"{before['name']} {state} · {tail} · u to undo", timeout=4)
+        self.reload()
+
     def key_roll(self) -> None:
         month = self.view.months()[-1] if self.view.months() else self.app.today()[:7]
         n = money.roll_month_budgets(self.app.conn, month=month, cfg=self.app.cfg)

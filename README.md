@@ -136,6 +136,7 @@ figures above them are always today's.
 | `e` | log an expense |
 | `b` | set a budget line — prefilled from the selected category |
 | `s` | add or update a recurring item |
+| `o` | pause or resume the selected recurring item |
 | `n` | add a category to `config.toml` |
 | `r` | roll active recurring items into the month's budget |
 | `d` `c` `k` | sort by date / cost / category — press again to flip direction |
@@ -206,7 +207,14 @@ the note survives. Food entries always require `=kcal` — dropping it is reject
 rather than silently zeroing the calories. Each line carries exactly the columns
 that row's table shows, so what you can see is what you can edit.
 
-`u` undoes an edit as well as a delete.
+The one exception is a recurring item's `on` column, which `o` toggles on the recurring
+pane rather than putting a field in the line — a boolean's whole edit is a toggle. `r`
+skips a paused item from then on, and a budget line already rolled for this month stays:
+pausing means "not from now on", not "this never happened", so a month you have already
+paid for keeps its number. Re-adding the item with `s` to change its price leaves it
+paused.
+
+`u` undoes an edit, a delete, and the `o` toggle.
 
 ### Time horizons
 

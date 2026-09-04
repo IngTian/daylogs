@@ -156,6 +156,19 @@ def upsert_recurring(
     active: bool = True,
     cfg=None,
 ) -> int:
+    """Add an item, or update one of the same name.
+
+    `active` applies on **insert only** — it is deliberately absent from the ON CONFLICT
+    clause. Pausing is a state you set on purpose with `o`; a re-add is about cost, cycle
+    and category, and it arrives through a grammar that cannot express the flag, so
+    `active = excluded.active` meant every re-add carried the parameter's `True` default.
+    Raising a paused subscription's price un-paused it, and the next roll charged for it
+    with nothing on screen connecting the two.
+
+    `note` is still overwritten, which has the same shape and is left alone on purpose:
+    the recurring grammar has no `~note`, so that column is unreachable from the UI in
+    both directions and fixing one half of an unreachable field would be pretending.
+    """
     name = name.strip()
     if not name:
         raise MoneyError("recurring item needs a name")
@@ -172,7 +185,6 @@ def upsert_recurring(
           cost = excluded.cost,
           cycle = excluded.cycle,
           monthly_cost = excluded.monthly_cost,
-          active = excluded.active,
           note = excluded.note
         """,
         (name, category, float(cost), cycle, monthly, 1 if active else 0, note or None),
