@@ -1113,9 +1113,14 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
     table.clear(columns=True) and resets the cursor to row 0.
 
     The PHOTO path is the one that proves it: `p` opens no prompt, so nothing else
-    repaints the tab and _set_estimating was the only thing touching the table. (The
-    `f` path already resets the cursor when the prompt opens — pre-existing, and not
-    this change's to fix.)
+    repaints the tab and the estimate machinery was the only thing touching the table.
+
+    It caught a real one. The in-progress popup appears in the bottom container, which
+    changes the tab's *height*, and `PanelTab.on_resize` rebuilt everything on any resize
+    — including `_fill_table`, which clears the table and resets the cursor. `on_resize`
+    now reloads only when the **width** changes, which is the reason it exists. That also
+    fixes the `f` path, which had the same defect through the prompt and was recorded here
+    as pre-existing; see the test below.
     """
     import asyncio
     import datetime as dt
@@ -1158,6 +1163,103 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
         release.set()
         await pilot.pause()
     assert during == 3, f"starting a photo estimate moved the cursor from row 3 to row {during}"
+
+
+async def test_opening_a_prompt_no_longer_loses_the_selected_row(
+    make_app, db, type_into
+):
+    """The `f` path's half of the same defect, fixed by the same change.
+
+    Any prompt appearing changes the tab's height, so any prompt used to rebuild the
+    table and put the cursor back on row 0. Harmless-looking, and the reason it stayed is
+    that the edit path captures the row id before opening — but it means the row you were
+    looking at is gone by the time you are typing about it.
+
+    End-to-end, so it depends on Textual actually delivering the Resize before the
+    assertion — which in this suite it often does not, and it passes with the guard removed
+    for that reason. `test_a_height_change_does_not_rebuild_the_tab` is the tripwire; this
+    is the user-visible statement of what the tripwire is for.
+    """
+    from textual.widgets import DataTable
+
+    from daylogs.body import add_food
+
+    for i in range(4):
+        add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
+                 date="2026-08-28", at=1787000000 + i * 3600)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        table = app.query_one("#body-table", DataTable)
+        table.focus()
+        table.move_cursor(row=3)
+        await pilot.pause()
+        assert table.cursor_coordinate.row == 3, "this test would prove nothing"
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.prompt.is_open is True
+        assert table.cursor_coordinate.row == 3, "opening the prompt threw the row away"
+
+
+def _resize(tab, width: int, height: int) -> None:
+    """Deliver a Resize to the tab directly.
+
+    Deliberately not `pilot.resize_terminal` + `pause()`. That is how the defect this
+    guards reached CI in the first place: `pause()` waits for the app to go idle, the
+    suite shortens Textual's idle-wait granularity to 2 ms, and the Resize is often not
+    processed before the assertion runs. So the end-to-end version passed locally with the
+    guard *removed* and failed on CI, which is the worst behaviour a tripwire can have.
+
+    The handler is the unit under test; delivering the event is Textual's business.
+    """
+    from textual.events import Resize
+    from textual.geometry import Size
+
+    size = Size(width, height)
+    tab.on_resize(Resize(size, size))
+
+
+async def test_a_height_change_does_not_rebuild_the_tab(make_app, db):
+    """Rebuilding clears the table, so anything that changes only the tab's height must
+    not: the prompt, the in-progress popup and the theme picker all live in the bottom
+    container and all shorten the tab by appearing."""
+    from textual.widgets import DataTable
+
+    from daylogs.body import add_food
+
+    for i in range(4):
+        add_food(db, description=f"row{i}", kcal=100 + i, source="labeled",
+                 date="2026-08-28", at=1787000000 + i * 3600)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(120, 34)) as pilot:
+        body_tab = await go_body(pilot, app)
+        await pilot.pause()
+        table = app.query_one("#body-table", DataTable)
+        table.focus()
+        table.move_cursor(row=3)
+        await pilot.pause()
+        assert table.cursor_coordinate.row == 3, "this test would prove nothing"
+        _resize(body_tab, body_tab.size.width, body_tab.size.height - 3)
+        await pilot.pause()
+        assert table.cursor_coordinate.row == 3, "a height change threw the selected row away"
+
+
+async def test_a_width_change_does_rebuild_the_tab(make_app, db):
+    """The other direction: the guard must not turn the handler off. A panel's contents
+    are built to its measured width, and contents built for a wider one wrap every row."""
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(120, 34)) as pilot:
+        body_tab = await go_body(pilot, app)
+        await pilot.pause()
+        calls: list[int] = []
+        body_tab.reload = lambda: calls.append(1)   # type: ignore[method-assign]
+        _resize(body_tab, body_tab.size.width, body_tab.size.height - 3)
+        assert calls == [], "a height change rebuilt the tab"
+        _resize(body_tab, 80, body_tab.size.height - 3)
+        assert calls == [1], "a width change no longer rebuilds the panels"
+        _resize(body_tab, 80, body_tab.size.height - 6)
+        assert calls == [1], "the same width rebuilt twice"
 
 
 async def test_the_indicator_clears_when_the_estimate_fails(
