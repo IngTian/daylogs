@@ -22,9 +22,34 @@ _FALLBACK = 46
 class PanelTab(Vertical):
     """A tab whose panels size their own contents."""
 
+    # The width the panels were last built for. A class attribute so no subclass has to
+    # remember to call a constructor; the first resize never matches it.
+    _built_for_width = -1
+
     def on_resize(self, event) -> None:
         """`Resize` is delivered to widgets, not to the App, so an App-level handler
-        never fires — each tab has to ask for its own redraw."""
+        never fires — each tab has to ask for its own redraw.
+
+        Only on a **width** change, which is the whole reason this handler exists: a
+        panel's contents are built to its own measured width. Height rebuilds nothing,
+        and rebuilding anyway is not merely wasted work — `reload` calls `_fill_table`,
+        which does `table.clear(columns=True)`, so the DataTable cursor goes back to row
+        0. Everything in the bottom container changes the tab's height by appearing:
+        opening any prompt did it (documented as pre-existing, and it is this), and so
+        does the in-progress popup, which is how a photo estimate started throwing away
+        the food row you had selected.
+
+        Known, separate, and older than this guard: the reload happens *during* the
+        resize, when a panel's `content_size` still holds the previous layout's width. So
+        the contents are built to the width the panel is about to stop having — dragging
+        120 columns to 80 measured a 76-column panel and drew a 36-column chart in it,
+        until the next keypress reloaded the tab. `call_after_refresh(self.reload)` fixes
+        it in a hand-run app and could not be made to fail-then-pass reliably in the test
+        harness, so it is written down here rather than shipped on a coin flip.
+        """
+        if event.size.width == self._built_for_width:
+            return
+        self._built_for_width = event.size.width
         self.reload()
 
     def panel_width(self, selector: str, *, minimum: int) -> int:

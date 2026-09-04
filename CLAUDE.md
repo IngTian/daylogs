@@ -222,6 +222,15 @@ appended prose where it was convenient rather than editing the map.
   `content_size` is 0 during `on_mount`, so the app re-renders once via
   `call_after_refresh`, and each widget handles its own `on_resize` — `Resize` is
   delivered to widgets, **not** to the App, so an App-level handler never fires.
+  `PanelTab.on_resize` reloads **only on a width change**, because that is the entire
+  reason it exists: a height change rebuilds nothing, and rebuilding anyway calls
+  `_fill_table`, whose `table.clear(columns=True)` resets the DataTable cursor to row 0.
+  Everything in the bottom container shortens the tab by appearing — the prompt (recorded
+  as a known wart for a while), the in-progress popup, the theme picker — so without the
+  guard, starting a photo estimate threw away the food row you had selected. Test it by
+  calling `on_resize` with a synthetic `Resize`, not through `pilot.resize_terminal`:
+  `pause()` returns before the event is delivered under the suite's 2 ms idle granularity,
+  so the end-to-end version passed locally with the guard removed and failed on CI.
 - **The summary renders through Textual's `Markdown` widget.** Feed it markdown,
   not Rich markup; the prompt is instructed to emit plain markdown and no LaTeX,
   which no terminal renders. `markup.py` only converts legacy `<num>`/`<warn>`
