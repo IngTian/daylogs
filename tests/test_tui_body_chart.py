@@ -517,3 +517,30 @@ async def test_the_calorie_series_is_plotted_against_its_dates(make_app, db, mak
     left = {ch for r in plot for ch in r[: int(width * 0.75)]}
     assert left <= {BLANK}, "two days were spread across a three-month window"
     assert any(ch != BLANK for r in plot for ch in r[int(width * 0.75) :])
+
+
+async def test_food_feedback_names_burn_when_a_level_is_set(make_app, make_cfg, db):
+    """The toast and the FOOD header describe the same day, so they must name the same
+    baseline. The toast asked `compute_bmr` directly, so with a level set the header said
+    net against `burn` while the toast said "vs BMR" in the same instant."""
+    from daylogs.body import add_weight as _aw
+
+    _aw(db, kg=80.0, date="2026-08-27", at=1)
+    cfg = make_cfg(height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
+    app = make_app(cfg=cfg, now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        seen = []
+        app.notify = lambda msg, **kw: seen.append(str(msg))
+        body = app.query_one("#body")
+        body.viewing_date = "2026-08-27"
+        await pilot.press("f")
+        for ch in "salad =610":
+            await pilot.press("space" if ch == " " else ch)
+        await pilot.press("enter")
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert any("burn" in m for m in seen), f"the toast does not name burn: {seen}"
+    assert not any("BMR" in m for m in seen), f"the toast still says BMR: {seen}"
+    assert "burn" in head, "the header should be naming burn too"

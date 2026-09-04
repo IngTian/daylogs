@@ -972,10 +972,20 @@ class BodyTab(PanelTab):
         self.viewing_date = r.date
         self.reload()
         total = body.day_kcal(self.app.conn, date=r.date)
-        latest = body.latest_weight(self.app.conn, on_or_before=r.date)
-        bmr = body.compute_bmr(self.app.cfg, latest["kg"] if latest else None, today=r.date)
+        # The same question the header one line above asks. It used to ask `compute_bmr`
+        # directly, so with a factor set the header said net against `burn` and this said
+        # "vs BMR" in the same instant, about the same day.
+        baseline = body.day_baseline(self.app.conn, self.app.cfg, date=r.date)
+        # And named the same way. The number is burn only when a factor applied; without
+        # one it is resting BMR, and calling that "burn" would be the same drift running
+        # the other way. The name is display copy, so it is decided here rather than
+        # returned from the data layer.
+        factor, _ = body.resolved_factor(self.app.conn, self.app.cfg, date=r.date)
         # The useful answer is not "saved" but where the day now stands.
-        against = f"{total:,} today" if bmr is None else f"{total - bmr:+,} vs BMR"
+        if baseline is None:
+            against = f"{total:,} today"
+        else:
+            against = f"{total - baseline:+,} vs {'burn' if factor is not None else 'BMR'}"
         self.app.notify(f"{r.description} · {r.kcal or 0:,} kcal · {against}", timeout=4)
 
 

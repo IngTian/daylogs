@@ -463,21 +463,49 @@ def day_tdee(conn, cfg, *, date: str) -> int | None:
     return compute_tdee(bmr, day_factor(conn, cfg, date=date))
 
 
+def day_baseline(conn, cfg, *, date: str) -> int | None:
+    """What `date` is measured against: its burn if there is a factor, else resting BMR.
+
+    Six surfaces ask this question and two of them had drifted. The food toast asked
+    `compute_bmr` while the FOOD header one line above it asked `day_tdee`, so the
+    header said net against `burn` and the toast said "+X vs BMR" in the same instant.
+    And `net_series_between` keyed on the *factor*, so `c` -> net drew an empty chart for
+    any profile without a level — which is the default, because the level is deliberately
+    never defaulted.
+
+    "No factor" is a real state in which every calorie figure sits against resting BMR
+    exactly as it did before, so a baseline still exists. That is the distinction: ask for
+    the baseline, not for the factor. `None` means there is genuinely nothing to measure
+    against — no weigh-in, or no profile — and then a figure is shown bare.
+    """
+    latest = latest_weight(conn, on_or_before=date)
+    bmr = compute_bmr(cfg, latest["kg"] if latest else None, today=date)
+    if bmr is None:
+        return None
+    burn = compute_tdee(bmr, day_factor(conn, cfg, date=date))
+    # Explicit `is not None` rather than `or`: a truthiness test would also swallow a
+    # burn of 0, which is a real number here and not an absent one.
+    return burn if burn is not None else bmr
+
+
 def net_series_between(
     conn, cfg, *, start: str | None, end: str
 ) -> list[tuple[str, int]]:
-    """Daily `intake − that day's burn`, ascending, for the days that have both.
+    """Daily `intake − that day's baseline`, ascending, for the days that have both.
 
     Per day, not "the window's average intake minus today's burn": a factor describes
     one day, so a single gym session must not restate a month of net. Days with no
     food are absent — a logging gap is not a fast, the same rule
-    `kcal_series_between` follows — and so are days with no resolvable burn, because
-    showing intake as if it were net reads as an enormous surplus.
+    `kcal_series_between` follows — and so are days with no *baseline*, because showing
+    intake as if it were net reads as an enormous surplus.
+
+    Baseline, not burn: keyed on the factor this returned nothing at all for a profile
+    with no level, so the chart was empty beside an ENERGY panel showing a live net.
     """
     return [
-        (date, kcal - tdee)
+        (date, kcal - baseline)
         for date, kcal in kcal_series_between(conn, start=start, end=end)
-        if (tdee := day_tdee(conn, cfg, date=date)) is not None
+        if (baseline := day_baseline(conn, cfg, date=date)) is not None
     ]
 
 
