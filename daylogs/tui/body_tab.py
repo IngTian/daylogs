@@ -547,9 +547,6 @@ class BodyTab(PanelTab):
         self.horizon = hz.next_horizon(self.horizon, 1)
         self.reload()
 
-    def key_back(self) -> bool:
-        return False
-
     def key_delete(self) -> None:
         row = self._selected_row()
         if row is None:

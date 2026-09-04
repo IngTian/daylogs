@@ -294,14 +294,6 @@ class DaylogsApp(App):
         update_config(self.cfg.root / "config.toml", {"theme": name})
         self.notify(f"theme {name}", timeout=2)
 
-    def app_back(self) -> None:
-        """`esc` unwinds one step. When the active tab has nothing to unwind,
-        nothing happens — esc never quits."""
-        tab = self._active_tab()
-        fn = getattr(tab, "key_back", None)
-        if fn is not None and fn():
-            tab.reload()
-
     def app_undo(self) -> None:
         item = self.undo_stack.pop()
         if item is None:

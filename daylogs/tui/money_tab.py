@@ -408,8 +408,20 @@ class MoneyTab(PanelTab):
         else:
             self.app.prompt.open("recurring", prefill=parse.render_recurring(row))
 
-    def key_back(self) -> bool:
-        return self.view.back()
+    def key_back(self) -> None:
+        """`esc` unwinds one narrowing, and repaints — the two are one job.
+
+        They used to be split: this returned a bool to `DaylogsApp.app_back`, which did
+        the `reload()`. But every tab defined `key_back`, so the app's handler lost the
+        lookup to the tab's every single time and was never reached. `esc` cleared the
+        filter and left the old rows on screen with the strip still bolding the pane you
+        had left. One layer owns it now, so there is no protocol left to get wrong.
+
+        esc-never-quits is delivered by the keymap binding, not by this method, so a tab
+        with nothing to unwind simply has no handler.
+        """
+        if self.view.back():
+            self.reload()
 
     def key_roll(self) -> None:
         month = self.view.months()[-1] if self.view.months() else self.app.today()[:7]

@@ -221,9 +221,6 @@ class SummaryTab(PanelTab):
         self.viewing_date = newest["date"] if newest else None
         self.reload()
 
-    def key_back(self) -> bool:
-        return False
-
     def handle_prompt(self, label: str, value: str) -> None:
         if label == "go to date" and value:
             wanted = hz.resolve_goto(value)
