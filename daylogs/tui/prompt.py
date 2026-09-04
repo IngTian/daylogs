@@ -18,6 +18,7 @@ from textual.widgets import Input
 
 from daylogs.complete import complete
 from daylogs.tui import hints
+from daylogs.tui.widgets import esc
 
 _HISTORY = 50
 
@@ -71,7 +72,9 @@ class InlinePrompt(Input):
         reading the error.
         """
         self.error = message
-        self.border_subtitle = message
+        # Escaped: error text quotes what you typed — `parse_profile` interpolates the
+        # rejected word verbatim — so this slot is a markup sink fed by the keyboard.
+        self.border_subtitle = esc(message)
         self.add_class("error")
 
     def clear_error(self) -> None:
@@ -96,7 +99,9 @@ class InlinePrompt(Input):
         """Candidates take the grammar's slot while the cursor is in a completable
         token. Reusing that slot is why completion costs no screen space and needs
         no overlay."""
-        self.border_subtitle = " ".join(candidates) if candidates else "no match"
+        self.border_subtitle = (
+            " ".join(esc(c) for c in candidates) if candidates else "no match"
+        )
 
     def complete_now(self, vocab: dict[str, tuple[str, ...]]) -> None:
         """Apply one tab press. Repeated presses on an untouched token cycle.

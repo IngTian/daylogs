@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -415,14 +416,14 @@ class BodyTab(PanelTab):
                 self.app.conn, since=span.start, until=span.end, limit=_WEIGHT_CAP
             )
             for r in rows:
-                table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
+                table.add_row(r["date"], f"{r['kg']:g}", Text(r["note"] or ""))
                 self._ids.append(r["id"])
         elif self.table_mode == "activity":
             table.add_columns("time", "description", "factor", "src")
             for r in body.list_activity(self.app.conn, date=date):
                 table.add_row(
                     hhmm(r["logged_at"], self.app.cfg.timezone),
-                    r["description"],
+                    Text(r["description"]),
                     # A dash, not a blank: an inference that never landed is a state
                     # worth seeing, because the day quietly used the baseline instead.
                     "—" if r["factor"] is None else f"×{r['factor']:g}",
@@ -434,7 +435,10 @@ class BodyTab(PanelTab):
             for r in body.list_food(self.app.conn, date=date):
                 table.add_row(
                     hhmm(r["ate_at"], self.app.cfg.timezone),
-                    r["description"],
+                    # Text, not str: a `str` cell is parsed as markup, so a description
+                    # containing `[/b]` raised out of the render and one containing
+                    # `[work]` quietly lost the word.
+                    Text(r["description"]),
                     f"{r['kcal']:,}",
                     "lab" if r["source"] == "labeled" else "est",
                 )
