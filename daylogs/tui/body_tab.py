@@ -28,7 +28,14 @@ from daylogs.parse import (
 )
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
-from daylogs.tui.widgets import burn_bar, mark, sparkline, trend_style, view_row
+from daylogs.tui.widgets import (
+    arrow,
+    burn_bar,
+    mark,
+    sparkline,
+    trend_style,
+    view_row,
+)
 
 _CHART_H = 8
 _YLABEL_W = 7
@@ -753,7 +760,7 @@ class BodyTab(PanelTab):
             self.viewing_date = r.date
             self.reload()
             d7 = body.weight_delta(self.app.conn, end_date=r.date, days=7)
-            trend = "" if d7 is None else f" · {'▼' if d7 < 0 else '▲'}{abs(d7):g} vs 7d"
+            trend = "" if d7 is None else f" · {arrow(d7)}{abs(d7):g} vs 7d"
             self.app.notify(f"{r.kg:g} kg logged{trend}", timeout=4)
             return
         before = self.app.conn.execute(
@@ -1000,7 +1007,6 @@ def _delta(value: float | None, label: str) -> str:
     """
     if value is None:
         return f"— vs {label}"
-    arrow = "▼" if value < 0 else ("▲" if value > 0 else "→")
-    return mark(f"{arrow} {abs(value):g} vs {label}", trend_style(value))
+    return mark(f"{arrow(value)} {abs(value):g} vs {label}", trend_style(value))
 
 

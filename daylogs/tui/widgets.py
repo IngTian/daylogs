@@ -70,6 +70,20 @@ def view_row(names: tuple[str, ...], active: str) -> str:
     return "   ".join(f"[b]{n}[/b]" if n == active else n for n in names)
 
 
+def arrow(value: float | None) -> str:
+    """The direction glyph for a signed change: `▼`, `▲`, `→`, or nothing.
+
+    Beside `trend_style` because they are two halves of one judgement and must not
+    disagree about the boundary. `trend_style` has always treated zero as neither; two of
+    the three sites drawing this arrow were two-way (`▼` if negative else `▲`), so an
+    unchanged weight rendered `▲0 vs 7d` — and since colour is withheld at zero, the
+    wrong glyph was the only signal the reader got.
+    """
+    if value is None:
+        return ""
+    return "▼" if value < 0 else ("▲" if value > 0 else "→")
+
+
 def trend_style(value: float | None, *, falling_is_good: bool = True) -> str:
     """Which way is good, for a signed number. The one place that rule lives.
 

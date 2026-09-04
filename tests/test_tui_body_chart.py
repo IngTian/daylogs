@@ -544,3 +544,22 @@ async def test_food_feedback_names_burn_when_a_level_is_set(make_app, make_cfg, 
     assert any("burn" in m for m in seen), f"the toast does not name burn: {seen}"
     assert not any("BMR" in m for m in seen), f"the toast still says BMR: {seen}"
     assert "burn" in head, "the header should be naming burn too"
+
+
+async def test_an_unchanged_weigh_in_reports_a_neutral_arrow(make_app, db, type_into):
+    """The third site drawing this arrow: the weigh-in toast. Re-logging the same number
+    is a real thing to do, and it used to answer `▲0`."""
+    add_weight(db, kg=78.2, date="2026-08-22", at=1)
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        seen = []
+        app.notify = lambda msg, **kw: seen.append(str(msg))
+        await pilot.press("w")
+        await type_into(pilot, "78.2")
+        await pilot.press("enter")
+        await pilot.pause()
+    trend = [m for m in seen if "7d" in m]
+    assert trend, f"no trend in the feedback: {seen}"
+    assert "→" in trend[0], f"an unchanged weigh-in is not flagged as unchanged: {trend}"

@@ -244,3 +244,34 @@ def test_the_guard_stays_out_of_the_way_once_the_move_has_happened(tmp_path, mon
     monkeypatch.setenv("DAYLOGS_HOME", str(new_root))
 
     assert main(["export", str(tmp_path / "out")]) == 0
+
+
+def test_day_summary_picks_yesterday_in_the_configured_zone(tmp_path, monkeypatch):
+    """`cfg` was already in hand and unused for this, so the CLI dated its target by the
+    *machine's* clock. With `timezone` pinned away from the machine — which the README
+    advertises for travelling — cron wrote a report dated a day the app never looks for:
+    the app then spent a second `claude -p` call, and in one direction the CLI summarised
+    the configured zone's *today*, the half-finished day `summary.py` exists to avoid.
+    """
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from daylogs import __main__ as cli
+
+    (tmp_path / "config.toml").write_text('timezone = "Pacific/Kiritimati"\n')
+    seen = {}
+
+    async def fake_generate(conn, cfg, *, date, runner):
+        seen["date"] = date
+        return "ok"
+
+    monkeypatch.setattr(cli.summary, "generate", fake_generate)
+    monkeypatch.setenv("DAYLOGS_HOME", str(tmp_path))
+    assert cli.main(["summary"]) == 0
+
+    # Kiritimati is UTC+14, so its "today" is ahead of UTC's for most of the day; the
+    # target must be *its* yesterday, whatever zone the machine is in.
+    expected = (
+        dt.datetime.now(ZoneInfo("Pacific/Kiritimati")).date() - dt.timedelta(days=1)
+    ).isoformat()
+    assert seen["date"] == expected, f"dated by the machine, not the config: {seen}"

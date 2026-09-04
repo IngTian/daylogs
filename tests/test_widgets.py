@@ -1,6 +1,7 @@
 import pytest
 
 from daylogs.tui.widgets import (
+    arrow,
     budget_bars,
     burn_bar,
     mark,
@@ -8,6 +9,7 @@ from daylogs.tui.widgets import (
     ranked_bars,
     signed,
     sparkline,
+    trend_style,
     wide_sparkline,
 )
 
@@ -360,3 +362,30 @@ def test_view_row_marks_nothing_when_the_active_name_is_unknown():
     from daylogs.tui.widgets import view_row
 
     assert view_row(("weight", "food"), "nonsense") == "weight   food"
+
+
+# ── the arrow is part of the judgement ───────────────────────────────────
+
+
+def test_an_unchanged_value_gets_a_neutral_arrow():
+    """`▲0` for a weight that did not move. Two of the three sites drawing this arrow
+    were two-way (`▼` if negative else `▲`), so zero fell into the "up" branch — and
+    `trend_style` withholds colour at zero on purpose, which left the wrong glyph as the
+    only signal the reader gets."""
+    assert arrow(0) == "→"
+    assert arrow(0.0) == "→"
+
+
+def test_a_falling_value_points_down_and_a_rising_one_up():
+    assert arrow(-0.4) == "▼"
+    assert arrow(0.4) == "▲"
+
+
+def test_no_value_has_no_arrow():
+    assert arrow(None) == ""
+
+
+def test_the_arrow_and_the_colour_agree_about_zero():
+    """They are two halves of one judgement, so they must not disagree: `trend_style`
+    already treats zero as neither, and the arrow now does too."""
+    assert (arrow(0), trend_style(0)) == ("→", "")
