@@ -2132,3 +2132,148 @@ async def test_x_deletes_an_activity_and_u_restores_it(make_app, db):
         await pilot.pause()
     rows = _act_rows(db, app.today())
     assert len(rows) == 1 and rows[0]["factor"] == 1.4
+
+
+# ── the weight table follows the window ──────────────────────────────────
+# It used to be `list_weight(limit=60)`: no span and no viewed date, so `[`/`]` and
+# `+`/`-` moved the chart and the header while the table underneath sat still. The
+# header said "60 most recent weigh-ins" precisely because claiming the span would
+# have been a lie — which made the honest label a standing admission of the bug.
+
+
+def _weight_rows(app):
+    table = app.query_one("#body-table")
+    return [str(table.get_row_at(r)[0]) for r in range(table.row_count)]
+
+
+async def _weight_view(app, *, date, horizon="1m"):
+    body = app.query_one("#body")
+    body.table_mode = "weight"
+    body.viewing_date = date
+    body.horizon = horizon
+    body.reload()
+    return body
+
+
+async def test_the_weight_table_lists_only_the_windows_weigh_ins(make_app, db):
+    for day in ("2026-06-15", "2026-09-01", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY)
+        await pilot.pause()
+        rows = _weight_rows(app)
+    assert rows == ["2026-09-02", "2026-09-01"], f"not the window's rows: {rows}"
+
+
+async def test_a_weigh_in_after_the_window_is_excluded(make_app, db):
+    """Viewing an older day must not list readings that had not happened yet — the
+    same rule the chart and every figure on the tab follow."""
+    for day in ("2026-07-05", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date="2026-07-10")
+        await pilot.pause()
+        rows = _weight_rows(app)
+    assert rows == ["2026-07-05"], f"leaked a later reading: {rows}"
+
+
+async def test_zooming_out_brings_more_weigh_ins_into_the_table(make_app, db):
+    for day in ("2026-06-15", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY)
+        await pilot.pause()
+        assert _weight_rows(app) == ["2026-09-02"]
+        await pilot.press("minus")          # 1m -> MTD ... keep going to 3m
+        await pilot.press("minus")
+        await pilot.press("minus")
+        await pilot.pause()
+        wider = _weight_rows(app)
+    assert "2026-06-15" in wider, f"zooming out did not reach the table: {wider}"
+
+
+async def test_stepping_the_period_moves_the_table(make_app, db):
+    for day in ("2026-08-02", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date="2026-09-02")
+        await pilot.pause()
+        assert _weight_rows(app) == ["2026-09-02"]
+        for _ in range(31):
+            await pilot.press("left_square_bracket")
+        await pilot.pause()
+        stepped = _weight_rows(app)
+    assert stepped == ["2026-08-02"], f"the table did not follow `[`: {stepped}"
+
+
+async def test_the_weight_header_names_the_window_and_the_count(make_app, db):
+    for day in ("2026-09-01", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        body = await _weight_view(app, date=DAY)
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+        label = body.span().label
+    assert head.startswith("WEIGHT")
+    assert label in head, f"the header does not name the window: {head!r}"
+    assert "2 weigh-ins" in head, f"the header does not count the rows: {head!r}"
+    assert "most recent" not in head, "still admitting it ignores the span"
+
+
+async def test_one_weigh_in_is_not_pluralised(make_app, db):
+    add_weight(db, kg=80.0, date="2026-09-02", at=1)
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY)
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert "1 weigh-in" in head and "1 weigh-ins" not in head, f"{head!r}"
+
+
+async def test_an_empty_window_names_the_fix(make_app, db):
+    """A window with nothing in it is true and useless on its own; it has to say what
+    would change it."""
+    add_weight(db, kg=80.0, date="2026-01-05", at=1)
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY)
+        await pilot.pause()
+        head = str(app.query_one("#food-head").content)
+    assert "no weigh-ins" in head, f"{head!r}"
+    assert "press w" in head, f"the empty state names no fix: {head!r}"
+
+
+async def test_the_weight_table_is_newest_first(make_app, db):
+    for day in ("2026-08-30", "2026-09-01", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=int(day[-2:]))
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY)
+        await pilot.pause()
+        rows = _weight_rows(app)
+    assert rows == sorted(rows, reverse=True), f"not newest first: {rows}"
+
+
+async def test_all_time_has_no_lower_bound(make_app, db):
+    for day in ("2020-01-01", "2026-09-02"):
+        add_weight(db, kg=80.0, date=day, at=1)
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_body(pilot, app)
+        await _weight_view(app, date=DAY, horizon="all")
+        await pilot.pause()
+        rows = _weight_rows(app)
+    assert rows == ["2026-09-02", "2020-01-01"], f"all time dropped a row: {rows}"

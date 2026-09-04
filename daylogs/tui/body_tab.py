@@ -52,10 +52,11 @@ _VIEWS = ("weight", "food", "activity")
 # horizon and the width arithmetic already live here. Weight stays in the cycle because
 # it is the same question about the same window.
 _CHARTS = ("weight", "intake", "net")
-# How many weigh-ins the weight view lists. Shared with the header, which states
-# the number — a header quoting a different count than the query uses is the same
-# defect as a header naming the wrong view.
-_WEIGHT_ROWS = 60
+# A safety net on the weight query, not an advertised number. The table is filtered by
+# the tab's span now, so the header states the count it actually got; this only bounds
+# a pathological "all time". Matches money's `_LIMIT_CAP` in spirit — and if it ever
+# bites, the header says so rather than silently showing a prefix.
+_WEIGHT_CAP = 2000
 
 
 class BodyTab(PanelTab):
@@ -205,16 +206,28 @@ class BodyTab(PanelTab):
             )
         )
 
+        # Filled before the header is composed, so the weight header can state the
+        # count the query actually returned rather than a number it hopes is right.
+        self._fill_table(date, span)
+
         # The header describes the table directly beneath it, so it has to follow
         # table_mode. It used to read "FOOD … kcal in / BMR → net" unconditionally,
         # including while the table listed weigh-ins — a label that is wrong is
         # worse than one that is missing.
         if self.table_mode == "weight":
-            # Says "recent" rather than naming the span, because list_weight is not
-            # span-filtered: it returns the latest 60 rows whatever the horizon and
-            # whatever day is being viewed. Claiming the span here would be the same
-            # class of lie this fixes.
-            self._food_head = f"WEIGHT   {_WEIGHT_ROWS} most recent weigh-ins"
+            # It names the span now. It used to say "60 most recent" *because*
+            # `list_weight` ignored the span and the viewed date, so claiming the window
+            # would have been a lie — an honest label standing in for a fix.
+            n = len(self._ids)
+            if n == 0:
+                self._food_head = (
+                    f"WEIGHT   {span.label}   no weigh-ins — press w, or - to widen"
+                )
+            else:
+                capped = "  (capped)" if n >= _WEIGHT_CAP else ""
+                self._food_head = (
+                    f"WEIGHT   {span.label}   {n} weigh-in{'' if n == 1 else 's'}{capped}"
+                )
         elif self.table_mode == "activity":
             # The factor, its origin and the burn it produces — the same three facts
             # the ENERGY panel shows, because this header sits above the rows that
@@ -247,8 +260,6 @@ class BodyTab(PanelTab):
                 )
         self._paint_food_head()
         self.query_one("#body-views", Static).update(view_row(_VIEWS, self.table_mode))
-
-        self._fill_table(date)
 
         pending = photo.pending_count(cfg.inbox_dir)
         line = self.query_one("#inbox-line", Static)
@@ -393,13 +404,18 @@ class BodyTab(PanelTab):
             )
         return "\n".join(lines)
 
-    def _fill_table(self, date: str) -> None:
+    def _fill_table(self, date: str, span) -> None:
         table = self.query_one("#body-table", DataTable)
         table.clear(columns=True)
         self._ids = []
         if self.table_mode == "weight":
             table.add_columns("date", "kg", "note")
-            for r in body.list_weight(self.app.conn, limit=_WEIGHT_ROWS):
+            # Bounded by the span, like the chart above it. `span.start` is None for
+            # "all time", which `list_weight` reads as no lower bound.
+            rows = body.list_weight(
+                self.app.conn, since=span.start, until=span.end, limit=_WEIGHT_CAP
+            )
+            for r in rows:
                 table.add_row(r["date"], f"{r['kg']:g}", r["note"] or "")
                 self._ids.append(r["id"])
         elif self.table_mode == "activity":
