@@ -15,6 +15,7 @@ from daylogs.categories import slugs
 from daylogs.parse import (
     parse_activity,
     parse_budget,
+    parse_category,
     parse_expense,
     parse_food,
     parse_recurring,
@@ -24,7 +25,10 @@ from daylogs.parse import (
 README = Path(__file__).resolve().parents[1] / "README.md"
 NOW = dt.datetime(2026, 8, 28, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
 
-# Map prompt labels to their parsers.
+# Map prompt labels to their parsers. Two tables, because not every grammar takes a
+# clock or a vocabulary — `new category` is the whole line — and an unmapped prompt is a
+# hard failure rather than a skip: it skipped for exactly one release and that release
+# shipped a README example nothing had parsed.
 PARSERS = {
     "weigh ›": parse_weigh,
     "food ›": parse_food,
@@ -32,6 +36,11 @@ PARSERS = {
     "expense ›": parse_expense,
     "budget ›": parse_budget,
     "recurring ›": parse_recurring,
+}
+
+# Same guarantee, one fewer argument.
+PLAIN_PARSERS = {
+    "new category ›": parse_category,
 }
 
 
@@ -78,7 +87,13 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
     """
     parser = PARSERS.get(prompt)
     if parser is None:
-        pytest.skip(f"No parser for {prompt}")
+        plain = PLAIN_PARSERS.get(prompt)
+        assert plain is not None, (
+            f"{prompt} is advertised in the README with nothing checking it —"
+            " add it to PARSERS or PLAIN_PARSERS"
+        )
+        plain(example)
+        return
 
     # All parsers take (raw, *, now, known_slugs) as keyword args.
     result = parser(example, now=NOW, known_slugs=slugs())
