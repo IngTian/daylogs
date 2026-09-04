@@ -39,8 +39,9 @@ jobs:
           # daybook -> daylogs rename: the wheel shipped both. CI checks out
           # clean and would not reproduce it, so assert the shape instead.
           tops = {n.split("/")[0] for n in names if "/" in n}
-          unexpected = tops - {"daylogs", "daylogs-0.2.0.dist-info"}
-          unexpected = {t for t in unexpected if not t.endswith(".dist-info")}
+          # Any .dist-info is fine and its name carries the version, so naming one
+          # here would only go stale on every release.
+          unexpected = {t for t in tops - {"daylogs"} if not t.endswith(".dist-info")}
           if unexpected:
               sys.exit(f"unexpected top-level packages in {wheel}: {sorted(unexpected)}")
           print("app.tcss present, and only daylogs/ ships:", wheel)

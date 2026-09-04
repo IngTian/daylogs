@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # reclamation is slow and rarely granted — so rather than publish under a
 # suffixed name forever, the project took a free one. The command is still `day`.
 name = "daylogs"
-version = "0.2.0"
+version = "0.3.0"
 description = "A personal daily log in the terminal: weight, food, expenses, and one daily summary."
 readme = "README.md"
 requires-python = ">=3.12"
