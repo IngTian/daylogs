@@ -159,7 +159,7 @@ def build_payload(conn, cfg, *, date: str) -> dict:
             ),
             "food": [
                 {
-                    "time": hhmm(r["ate_at"]),
+                    "time": hhmm(r["ate_at"], cfg.timezone),
                     "description": r["description"],
                     "kcal": r["kcal"],
                     "source": r["source"],
@@ -170,7 +170,7 @@ def build_payload(conn, cfg, *, date: str) -> dict:
             # list means an ordinary day, not a missing one.
             "activity": [
                 {
-                    "time": hhmm(r["logged_at"]),
+                    "time": hhmm(r["logged_at"], cfg.timezone),
                     "description": r["description"],
                     "factor": r["factor"],
                     "source": r["source"],

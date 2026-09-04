@@ -125,7 +125,7 @@ figures above them are always today's.
 | `p` | log food from a photo |
 | `a` | log an activity — only for a day that departs from your ordinary one |
 | `c` | cycle the chart: weight → intake → net |
-| `h` | set height, sex, birthday and your ordinary-day level (for BMR, maintenance and BMI) |
+| `h` | set height, sex, birthday, ordinary-day level and timezone |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
 
@@ -432,7 +432,7 @@ Everywhere: `esc` cancels, `↑` / `↓` walk that prompt's history.
 Optional. `~/Documents/daylogs/config.toml`; every key has a default.
 
 ```toml
-timezone             = "America/Toronto"
+timezone             = "America/Toronto"  # defaults to your machine's zone
 height_cm            = 170          # BMR input, and BMI
 sex                  = "female"     # BMR constant term only
 birthday             = "1990-01-01" # age, for BMR
@@ -457,6 +457,12 @@ color   = "#9ba068"
 Built-in categories: `grocery`, `restaurant`, `transport`, `housing`,
 `utilities`, `subscriptions`, `entertainment`, `education`, `other`. Adding
 one needs no code change — just a `[[category]]` block.
+
+`timezone` defaults to **your machine's zone** and is what every stored time is read
+and written in — so `@07:30` means 07:30 where you are. Set it explicitly only if you
+want a fixed zone regardless of the machine (travelling with a laptop, say); `h` writes
+it for you, and an unrecognised name falls back to the machine's zone rather than
+stopping the app.
 
 Height, sex and birthday feed the Mifflin-St Jeor BMR line, and height also gives
 BMI. Leave them out and the Body tab shows calories with no baseline at all.

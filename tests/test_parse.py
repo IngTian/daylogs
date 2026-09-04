@@ -23,7 +23,8 @@ from daylogs.parse import (
     resolve_when,
 )
 
-TZ = ZoneInfo("America/Toronto")
+TZ_NAME = "America/Toronto"
+TZ = ZoneInfo(TZ_NAME)
 NOW = datetime(2026, 8, 27, 19, 40, tzinfo=TZ)
 SLUGS = slugs()
 
@@ -193,10 +194,17 @@ FOOD_ROWS = [
 
 @pytest.mark.parametrize("row", FOOD_ROWS, ids=[r["description"][:14] for r in FOOD_ROWS])
 def test_food_round_trips(row):
-    got = F(render_food(row))
+    got = F(render_food(row, TZ_NAME))
     assert got.description == row["description"]
     assert got.kcal == row["kcal"]
     assert got.date == row["date"]
+    # To the minute. This assertion was impossible until the zone became an argument:
+    # `render_food` used the machine's zone while `F` parses in Toronto, so it held only
+    # on a Toronto machine. The seconds still cannot survive — the grammar's only time
+    # token is HH:MM — which is what `body.restamp` exists to protect.
+    assert dt.datetime.fromtimestamp(got.at, TZ).strftime("%Y-%m-%d %H:%M") == (
+        dt.datetime.fromtimestamp(row["ate_at"], TZ).strftime("%Y-%m-%d %H:%M")
+    )
 
 
 # ── expense ──────────────────────────────────────────────────────────────
@@ -741,20 +749,18 @@ ACTIVITY_ROWS = [
     "row", ACTIVITY_ROWS, ids=[str(r["description"])[:14] for r in ACTIVITY_ROWS]
 )
 def test_activity_round_trips(row):
-    got = A(render_activity(row))
+    got = A(render_activity(row, TZ_NAME))
     assert got.description == row["description"]
     assert got.factor == row["factor"]
     assert got.date == row["date"]
-    # `at` is deliberately not asserted, exactly as `test_food_round_trips` does not
-    # assert it, and for a reason worth writing down rather than rediscovering:
-    # `render_*` formats the clock through `fmt.hhmm`, which is **system** local time,
-    # while the parsers resolve `@HH:MM` in the injected `now`'s zone (`cfg.timezone`).
-    # Those agree only when the two zones agree, so asserting the timestamp here fails
-    # under `TZ=UTC` against the default Toronto config — a pre-existing mismatch this
-    # slice neither introduces nor fixes.
+    # To the minute, now that `render_activity` takes the zone it will be parsed in.
+    # This used to be unassertable: the render read the *machine's* zone while the parse
+    # resolved in the configured one, so it held only where those agreed.
     #
-    # The seconds cannot survive a render either way: the grammar's only time token is
-    # `HH:MM`. They matter — `logged_at` is the tie-breaker `resolved_factor` uses to
-    # pick a day's latest inference — which is why the edit path goes through
-    # `body.restamp`, whose own tests pin that it returns None when the minute did not
-    # move rather than rewriting the column.
+    # The seconds still cannot survive — the grammar's only time token is `HH:MM` — and
+    # they matter, because `logged_at` is the tie-breaker `resolved_factor` uses to pick
+    # a day's latest inference. That is what `body.restamp` protects: it returns None
+    # when the minute did not move rather than rewriting the column.
+    assert dt.datetime.fromtimestamp(got.at, TZ).strftime("%Y-%m-%d %H:%M") == (
+        dt.datetime.fromtimestamp(row["logged_at"], TZ).strftime("%Y-%m-%d %H:%M")
+    )

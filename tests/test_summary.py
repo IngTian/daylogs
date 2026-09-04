@@ -274,7 +274,7 @@ def test_the_payload_lists_the_days_activities(db, tmp_path):
     b = build_payload(db, cfg, date="2026-08-26")["body"]
     assert b["activity"] == [
         {
-            "time": hhmm(1788010000),
+            "time": hhmm(1788010000, cfg.timezone),
             "description": "gym 1h",
             "factor": 1.6,
             "source": "estimated",

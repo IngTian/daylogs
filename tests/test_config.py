@@ -1,6 +1,6 @@
 import pytest
 
-from daylogs.config import load_config, update_config
+from daylogs.config import load_config, system_timezone, update_config
 
 
 def test_defaults_when_no_file(tmp_path):
@@ -9,7 +9,8 @@ def test_defaults_when_no_file(tmp_path):
     assert cfg.db_path == tmp_path / "daylogs.db"
     assert cfg.inbox_dir == tmp_path / "inbox"
     assert cfg.memory_path == tmp_path / "memory.md"
-    assert cfg.timezone == "America/Toronto"
+    # The machine's zone, not a literal. See test_timezone.py for why.
+    assert cfg.timezone == system_timezone()
     assert cfg.summary_after_hour == 6
     assert cfg.summary_timeout_sec == 120
     assert cfg.estimate_timeout_sec == 60

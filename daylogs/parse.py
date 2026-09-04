@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from daylogs import money, sigil
 from daylogs.body import ACTIVITY_LEVELS, FACTOR_MAX, FACTOR_MIN
 from daylogs.categories import FALLBACK_SLUG, get
+from daylogs.config import is_zone
 from daylogs.fmt import hhmm
 
 _NUM = re.compile(r"^-?\$?[\d,]+(?:\.\d+)?$")
@@ -190,11 +191,18 @@ def parse_food(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> FoodIn
     return FoodInput(description=g.text, kcal=kcal, date=when.date, at=when.at)
 
 
-def render_food(row) -> str:
+def render_food(row, tz: str) -> str:
+    """The inverse, for prefilling an edit.
+
+    `tz` is required and must be the zone the line will be *parsed* in, which is
+    `cfg.timezone`. It used to render through the machine's zone while `parse_food`
+    resolved in the configured one, so on a machine whose zone differed the prefill
+    round-trip moved the row by the offset — from a plain `enter` on a food row.
+    """
     return " ".join([
         sigil.escape(row["description"]),
         f"={int(row['kcal'])}",
-        f"@{row['date']}/{hhmm(row['ate_at'])}",
+        f"@{row['date']}/{hhmm(row['ate_at'], tz)}",
     ])
 
 
@@ -252,7 +260,7 @@ def parse_activity(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> Ac
     )
 
 
-def render_activity(row) -> str:
+def render_activity(row, tz: str) -> str:
     """The inverse, for prefilling an edit.
 
     The factor renders as a number rather than as the keyword that may have produced
@@ -264,7 +272,7 @@ def render_activity(row) -> str:
     parts = [sigil.escape(row["description"])]
     if row["factor"] is not None:
         parts.append(f"={row['factor']:g}")
-    parts.append(f"@{row['date']}/{hhmm(row['logged_at'])}")
+    parts.append(f"@{row['date']}/{hhmm(row['logged_at'], tz)}")
     return " ".join(parts)
 
 
@@ -461,6 +469,7 @@ class ProfileInput:
     sex: str | None = None
     birthday: str | None = None
     activity: str | None = None
+    timezone: str | None = None
 
     def fields(self) -> dict[str, float | str]:
         return {
@@ -470,6 +479,7 @@ class ProfileInput:
                 ("sex", self.sex),
                 ("birthday", self.birthday),
                 ("activity", self.activity),
+                ("timezone", self.timezone),
             )
             if v is not None
         }
@@ -486,6 +496,7 @@ def parse_profile(raw: str) -> ProfileInput:
     sex: str | None = None
     birthday: str | None = None
     activity: str | None = None
+    timezone: str | None = None
     for word in raw.split():
         low = word.lower()
         if low in _SEX:
@@ -508,14 +519,26 @@ def parse_profile(raw: str) -> ProfileInput:
                 raise ParseError(f"{m[1]} cm is not a plausible height")
             height = value
             continue
+        # Last, and on the *original* word rather than the lowercased one: ZoneInfo
+        # keys are case-sensitive, and `america/toronto` is not a zone. Recognised by
+        # asking the zone database instead of by shape, so it needs no pattern to keep
+        # in step with tzdata and cannot collide with the four fields above — none of
+        # `180`, `male`, an ISO date or a level is a zone name.
+        if is_zone(word):
+            timezone = word
+            continue
         raise ParseError(
-            f"don't know what {word!r} is — try 180 male 1990-01-01 desk"
+            f"don't know what {word!r} is — try 180 male 1990-01-01 desk America/Toronto"
         )
-    if height is None and sex is None and birthday is None and activity is None:
+    if all(v is None for v in (height, sex, birthday, activity, timezone)):
         raise ParseError(
-            "give a height, a sex, a birthday or an ordinary-day level — "
-            "e.g. 180 male 1990-01-01 desk"
+            "give a height, a sex, a birthday, an ordinary-day level or a timezone — "
+            "e.g. 180 male 1990-01-01 desk America/Toronto"
         )
     return ProfileInput(
-        height_cm=height, sex=sex, birthday=birthday, activity=activity
+        height_cm=height,
+        sex=sex,
+        birthday=birthday,
+        activity=activity,
+        timezone=timezone,
     )

@@ -84,6 +84,26 @@ appended prose where it was convenient rather than editing the map.
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand
   edge of the span), not a month.
+- **One timezone, and `fmt` takes it as an argument.** `cfg.timezone` defaults to the
+  *machine's* zone (`config.system_timezone`, from `TZ` then the `/etc/localtime`
+  symlink, else UTC) and is always a real IANA name, so every reader can do
+  `ZoneInfo(cfg.timezone)` with no None branch. It used to default to the literal
+  `"America/Toronto"` while `fmt.hhmm` read the machine — so on any other machine an
+  edit's prefill round-trip moved the row by the offset, reachable from a plain `enter`
+  on a food row. `fmt.hhmm`/`fmt.wall` and `body.restamp` therefore **require** the
+  zone: a default is precisely how that hid, because every call site looked right. A
+  zone *name*, not a tzinfo, because DST has to resolve per timestamp — a captured
+  offset renders a January reading with August's rules.
+  `date` stays authoritative over `ate_at` when the two disagree after a zone change
+  (Aug 27 in Toronto is Aug 28 in Kiritimati), so the render is asserted to be *stable*
+  rather than instant-preserving: it settles once instead of creeping on every edit.
+- **Activities are assumed to be logged faithfully and in full, every day.** A stated
+  premise, not an inference: a day with no activity row *is* an ordinary day and takes
+  the profile baseline, and the inference is handed the whole day because the whole day
+  is assumed present. So there is no partial-logging machinery and no "did you forget"
+  nagging, and none should be added without revisiting this. It does **not** extend to
+  food, which is logged sparsely — which is why `kcal_series_between` and
+  `net_series_between` still treat a foodless day as absent rather than as a fast.
 - **The activity factor is never defaulted, and `body.day_tdee` is the only place
   BMR is multiplied by it.** Assuming `desk` for an unset profile would raise
   maintenance 20% and silently restate every figure on screen and in every digest
