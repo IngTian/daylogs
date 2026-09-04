@@ -189,6 +189,11 @@ async def test_footer_adapts_when_the_terminal_resizes(make_app):
         await pilot.pause()
         wide = str(app.query_one("#keyfooter").content)
         await pilot.resize_terminal(56, 40)
+        # Two frames, not one: the relayout happens first, and only then is `Resize`
+        # delivered to the footer, which is what recomputes the line. One `pause()`
+        # passed only because Textual's idle poll used to sleep 20 ms and covered both —
+        # a duration, not a condition. Waiting for the second frame makes it a condition.
+        await pilot.pause()
         await pilot.pause()
         narrow = str(app.query_one("#keyfooter").content)
     assert len(narrow) < len(wide), f"footer did not shrink: {narrow!r}"

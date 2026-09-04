@@ -4,6 +4,27 @@ from daylogs.config import Config
 from daylogs.db import connect, ensure_schema
 
 
+@pytest.fixture(autouse=True)
+def _fast_pilot(monkeypatch):
+    """Shorten Textual's idle-wait granularity for the whole suite.
+
+    `pilot.pause()` waits for the app to go idle, and Textual polls for that on a
+    20 ms tick. The suite awaits it thousands of times, so almost all of a four-minute
+    run was sleeping: 236 s -> 83 s, measured, with all 1,163 tests still passing.
+
+    That mattered more than it sounds. A four-minute gate is a gate nobody runs while
+    editing, and six defects accumulated behind 1,163 green tests — an audit found them,
+    not the suite, because the suite was too slow to be part of the loop.
+
+    `textual._wait.SLEEP_GRANULARITY` is private, so this is patched through
+    `monkeypatch.setattr` deliberately: it raises immediately if the attribute is ever
+    renamed, rather than silently going back to sleeping.
+    """
+    import textual._wait
+
+    monkeypatch.setattr(textual._wait, "SLEEP_GRANULARITY", 0.002)
+
+
 @pytest.fixture()
 def db(tmp_path):
     conn = connect(tmp_path / "test.db")
