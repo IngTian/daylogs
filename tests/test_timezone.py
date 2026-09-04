@@ -282,3 +282,81 @@ def _looks_like_zone(text: str) -> bool:
     from daylogs.config import is_zone
 
     return is_zone(text)
+
+
+# ── module purity ────────────────────────────────────────────────────────
+
+
+def test_only_the_ui_layer_imports_textual():
+    """CLAUDE.md names four modules as Textual-free — `chart.py`, `widgets.py`,
+    `sigil.py`, `complete.py` — plus a data layer that must not import the UI at all, and
+    nothing enforced any of it. `config.py` even carries a duplicated theme-name literal
+    whose *only* purpose is preserving that property.
+
+    An allowlist, not a list of pure modules. Enumerating the pure ones leaves a *new*
+    pure module unprotected by default, which is the same failure as "three modules were
+    once missing from the map". Adding an import to a pure module fails here; adding a
+    genuinely new UI module means updating one set, deliberately.
+
+    Transitive too: importing `daylogs.tui.anything` pulls Textual in, so it counts.
+    """
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "daylogs"
+    impure: set[str] = set()
+    for path in sorted(src.rglob("*.py")):
+        rel = str(path.relative_to(src))
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            if any(n == "textual" or n.startswith("textual.") for n in names):
+                impure.add(rel)
+            if any(n == "daylogs.tui" or n.startswith("daylogs.tui.") for n in names):
+                impure.add(rel)
+
+    allowed = {
+        "tui/__init__.py",
+        "tui/app.py",
+        "tui/body_tab.py",
+        "tui/chart.py",
+        "tui/common.py",
+        "tui/footer.py",
+        "tui/help.py",
+        "tui/hints.py",
+        "tui/keymap.py",
+        "tui/money_tab.py",
+        "tui/prompt.py",
+        "tui/summary_tab.py",
+        "tui/themes.py",
+        "tui/widgets.py",
+        "__main__.py",
+    }
+    assert impure <= allowed, (
+        "these modules reach the UI layer and should not: "
+        f"{sorted(impure - allowed)}"
+    )
+
+
+def test_the_modules_claimed_textual_free_really_are():
+    """The four CLAUDE.md names outright, asserted by name as well as by the allowlist
+    above — because these four are the ones whose whole point is unit-testing as plain
+    functions, and a reader looking for that promise should find it stated."""
+    import ast
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parents[1] / "daylogs"
+    for rel in ("tui/chart.py", "tui/widgets.py", "sigil.py", "complete.py"):
+        text = (src / rel).read_text()
+        for node in ast.walk(ast.parse(text)):
+            mods = []
+            if isinstance(node, ast.Import):
+                mods = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                mods = [node.module]
+            assert not any(m.split(".")[0] == "textual" for m in mods), (
+                f"{rel} imports textual, and its docstring promises it does not"
+            )

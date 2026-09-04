@@ -1,7 +1,12 @@
+import datetime as dt
+from zoneinfo import ZoneInfo
+
 from helpers import go_body
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
 from daylogs.estimate import Estimate
+
+WEIGHT_TZ = ZoneInfo("America/Toronto")
 
 
 async def test_w_logs_a_weight(make_app, db, type_into):
@@ -720,12 +725,24 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
     """If user arms a weight edit, presses escape, then submits a fresh entry,
     that fresh entry must INSERT, not UPDATE the abandoned row."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    app = make_app()
+    # Pinned: the seed is dated, and the weight table is span-filtered, so on an
+    # unpinned clock the row leaves Body's rolling 1m window on 2026-09-26 —
+    # after which `enter` selects nothing and this test passes without arming an
+    # edit at all. Verified by probing the table at four dates.
+    app = make_app(now=lambda: dt.datetime(2026, 8, 27, 9, 0, tzinfo=WEIGHT_TZ))
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.query_one("#body")._editing is not None, (
+            # `prompt.is_open` is not enough: `key_activate` opens the prompt
+            # whether or not it armed the row, so a broken arming path would sail
+            # past it and this test would pass by doing nothing. `_editing` is the
+            # state whose lifecycle the test is about, and what `cancel_editing`
+            # clears.
+            "no edit was armed, so this test proves nothing"
+        )
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("w")
@@ -756,7 +773,14 @@ async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, ty
         await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        assert app.query_one("#body")._editing is not None, (
+            # `prompt.is_open` is not enough: `key_activate` opens the prompt
+            # whether or not it armed the row, so a broken arming path would sail
+            # past it and this test would pass by doing nothing. `_editing` is the
+            # state whose lifecycle the test is about, and what `cancel_editing`
+            # clears.
+            "no edit was armed, so this test proves nothing"
+        )
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("f")
@@ -773,12 +797,24 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
     """If user arms a weight edit, clears the line, submits empty, then submits a
     fresh entry, that fresh entry must INSERT, not UPDATE the abandoned row."""
     add_weight(db, kg=78.2, date="2026-08-27", at=1, note="original")
-    app = make_app()
+    # Pinned: the seed is dated, and the weight table is span-filtered, so on an
+    # unpinned clock the row leaves Body's rolling 1m window on 2026-09-26 —
+    # after which `enter` selects nothing and this test passes without arming an
+    # edit at all. Verified by probing the table at four dates.
+    app = make_app(now=lambda: dt.datetime(2026, 8, 27, 9, 0, tzinfo=WEIGHT_TZ))
     async with app.run_test(size=(120, 30)) as pilot:
         await go_body(pilot, app)
         await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
+        assert app.query_one("#body")._editing is not None, (
+            # `prompt.is_open` is not enough: `key_activate` opens the prompt
+            # whether or not it armed the row, so a broken arming path would sail
+            # past it and this test would pass by doing nothing. `_editing` is the
+            # state whose lifecycle the test is about, and what `cancel_editing`
+            # clears.
+            "no edit was armed, so this test proves nothing"
+        )
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -804,7 +840,14 @@ async def test_empty_submit_on_food_edit_does_not_corrupt_next_entry(make_app, d
         await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.is_open, "no edit was armed, so this test proves nothing"
+        assert app.query_one("#body")._editing is not None, (
+            # `prompt.is_open` is not enough: `key_activate` opens the prompt
+            # whether or not it armed the row, so a broken arming path would sail
+            # past it and this test would pass by doing nothing. `_editing` is the
+            # state whose lifecycle the test is about, and what `cancel_editing`
+            # clears.
+            "no edit was armed, so this test proves nothing"
+        )
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -2277,3 +2320,69 @@ async def test_all_time_has_no_lower_bound(make_app, db):
         await pilot.pause()
         rows = _weight_rows(app)
     assert rows == ["2026-09-02", "2020-01-01"], f"all time dropped a row: {rows}"
+
+
+async def test_a_meal_estimate_and_a_factor_inference_do_not_cancel_each_other(
+    make_app, db, type_into
+):
+    """The activity worker has its own `@work` group, and nothing tested it — removing
+    the token left all tests green.
+
+    The severe direction is this one: with a shared group, pressing `f` during a factor
+    inference cancels `_run_factor_estimate` before it writes, so "gym 1h" is never
+    recorded at all — a direct violation of "a failed activity inference still records the
+    activity". A cancelled worker also never reaches `_set_inferring(False)`, so the
+    indicator would stick on forever rather than clearing.
+    """
+    import asyncio
+
+    release = asyncio.Event()
+
+    async def slow_factor(**kw):
+        await release.wait()
+        return {"factor": 1.6}
+
+    async def quick_food(**kw):
+        return {"description": "salad", "kcal": 120}
+
+    calls = {"n": 0}
+
+    async def runner_json(**kw):
+        calls["n"] += 1
+        # The factor call is the one carrying a `system_prompt` about PAL; the food
+        # estimate is the other. Dispatch on that rather than on call order.
+        if "activity level" in str(kw.get("system_prompt", "")).lower():
+            return await slow_factor(**kw)
+        return await quick_food(**kw)
+
+    app = make_app(runner_json=runner_json)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "gym 1h")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # A meal estimate starts while the inference is still in flight.
+        await pilot.press("f")
+        await type_into(pilot, "salad")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+
+        release.set()
+        for _ in range(6):
+            await pilot.pause()
+        label = app.prompt.label
+        body = app.query_one("#body")
+        inferring, pending = body._inferring, body._pending_activity
+    assert calls["n"] == 2, f"one of the two calls never happened: {calls}"
+    # A surviving inference offers its answer, which replaces the food confirm. Sharing
+    # the group cancels the factor worker instead, so the label stays "confirm food" and
+    # the number is silently never offered — the activity would then only ever be written
+    # by the failure path, with no factor.
+    assert label == "confirm activity", f"the inference was cancelled: {label!r}"
+    assert pending is not None and pending.factor == 1.6
+    # A cancelled worker never reaches `_set_inferring(False)`, so the "estimating…"
+    # indicator would stick on forever rather than clearing.
+    assert inferring is False, "the estimating indicator never cleared"
