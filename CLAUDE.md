@@ -50,6 +50,7 @@ daylogs/
     common.py   PanelTab: on_resize + panel_width, shared by the two big tabs
     chart.py    braille line charts (no Textual import)
     widgets.py  bars, sparklines, colours, markup escaping (no Textual import)
+    progress.py the in-progress popup: one line per running claude call
   __main__.py `day`, `day summary`, `day backup`
 ```
 
@@ -237,6 +238,20 @@ appended prose where it was convenient rather than editing the map.
   spend; a negative row keeps its amount and shows no share.
 - **`chart.py` and `widgets.py` import no Textual.** They are pure functions and
   unit-test as such.
+- **Work in flight is announced by the popup, app-level, and nowhere else.** A
+  `claude -p` call runs for seconds to a minute, so the indicator has to outlive a
+  toast — that part was already true as a `"   estimating…"` suffix on the FOOD header
+  and `"   generating…"` on SUMMARY. What was wrong is that both lived on the tab that
+  started the work: pressing `3` erased every trace of a running estimate and the answer
+  arrived later as a prompt with no explanation. `app.begin_work(key, label, timeout)` /
+  `end_work(key)` is the only way to say it now, and a tab that grows a second indicator
+  is reintroducing the bug. Keyed, not a boolean: a food estimate, an activity inference
+  and the daily read can all be in flight at once, and the first two have separate worker
+  groups on purpose. Elapsed is shown against the call's own budget (`18s / 60s`) because
+  with animations off a static word cannot say "still alive"; the timer exists only while
+  a job does. It lives in `#bottom` with the prompt and the footer rather than floating,
+  so it pushes content up instead of covering the row you are reading, and costs no rows
+  when hidden.
 - **Animations stay off** (`self.animation_level = "none"`). Measured: 383 ms →
   127 ms per tab switch. It is an *instance* attribute in textual 8.2; a class
   attribute named `ANIMATION_LEVEL` is a silent no-op.

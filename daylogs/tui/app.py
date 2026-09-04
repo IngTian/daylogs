@@ -33,6 +33,7 @@ from daylogs.tui.body_tab import BodyTab
 from daylogs.tui.footer import KeyFooter
 from daylogs.tui.help import HelpScreen
 from daylogs.tui.money_tab import MoneyTab
+from daylogs.tui.progress import WorkPopup
 from daylogs.tui.prompt import InlinePrompt
 from daylogs.tui.summary_tab import SummaryTab
 from daylogs.tui.themes import ThemeError
@@ -98,6 +99,9 @@ class DaylogsApp(App):
         self.undo_stack = UndoStack()
         self.prompt = InlinePrompt()
         self.key_footer = KeyFooter()
+        # App-level, not per-tab: a running estimate used to disappear the moment you
+        # pressed `3`, and its answer arrived later as a prompt with no explanation.
+        self.work_popup = WorkPopup(id="work")
         self.summary_worker_started = False
         self._confirm: Callable[[], None] | None = None
 
@@ -125,6 +129,12 @@ class DaylogsApp(App):
         # docking both made the footer claim the last row and clip the prompt's
         # bottom border.
         with Vertical(id="bottom"):
+            # Above the prompt, inside the one bottom-docked container rather than on a
+            # layer of its own: floating it would cover the row you are reading, and a
+            # second independently-docked widget is what clipped the prompt's border
+            # before. Appearing here pushes content up instead of hiding it, in the place
+            # the eye already goes for the prompt and the footer.
+            yield self.work_popup
             yield self.prompt
             yield self.key_footer
 
@@ -392,6 +402,18 @@ class DaylogsApp(App):
             self.notify("cancelled", timeout=2)
 
     # ── notifications ────────────────────────────────────────────────────
+    def begin_work(self, key: str, label: str, timeout_sec: int) -> None:
+        """Show `label` in the popup until `end_work(key)`.
+
+        The one place a tab says "this is running". Keyed by job rather than a boolean,
+        because a food estimate, an activity inference and the daily read can all be in
+        flight at once — the first two have separate worker groups on purpose.
+        """
+        self.work_popup.begin(key, label, timeout_sec)
+
+    def end_work(self, key: str) -> None:
+        self.work_popup.end(key)
+
     def notify(self, message: str, **kwargs) -> None:
         """Toasts are plain text unless a caller insists otherwise.
 

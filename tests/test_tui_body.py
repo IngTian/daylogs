@@ -942,16 +942,21 @@ async def test_editing_a_food_with_escaped_at_preserves_timestamp(
     assert rows[0]["ate_at"] == 1787223943, "escaped @ must not trigger a restamp"
 
 
-# ── the estimate progress indicator (#2) ─────────────────────────────────
+# ── the estimate progress indicator ──────────────────────────────────────
 #
 # The estimate is one opaque subprocess call of up to `estimate_timeout_sec`
-# (60 by default). Before this, the only feedback was a 3-second toast, so the
-# remaining 57 seconds looked identical to a dropped keypress.
+# (60 by default). The original feedback was a 3-second toast, so the remaining
+# 57 seconds looked identical to a dropped keypress.
 #
 # The prompt is CLOSED for the whole wait (on_input_submitted closes on
-# success), so the indicator cannot live in its border subtitle — it goes where
-# summary_tab already puts "generating…": the panel header and the footer's
-# state row.
+# success), so the indicator cannot live in its border subtitle. It was a suffix
+# on the FOOD header and in the footer's state row, which fixed the lifetime
+# problem but not the location one: both live on the tab that started the work,
+# so pressing `3` erased every trace of a running estimate and its answer
+# arrived later as a prompt with no explanation. It is now the app-level popup,
+# and these tests are the same tests pointed at it — every exit they cover
+# (success, failure, timeout, a cancelled worker, the photo path) still has to
+# leave nothing behind.
 
 
 def _gate():
@@ -974,6 +979,19 @@ def _food_head(app) -> str:
     return str(app.query_one("#food-head", Static).content)
 
 
+def _popup(app) -> str:
+    """The PAINTED popup, or "" when it is hidden.
+
+    Deliberately the rendered widget and not the job dict behind it: the popup owns a
+    timer and repaints itself, so asserting on the registry passes while the screen
+    stays silent — the same trap `_footer` documents one function down.
+    """
+    from daylogs.tui.progress import WorkPopup
+
+    w = app.query_one(WorkPopup)
+    return str(w.render()) if w.display else ""
+
+
 def _footer(app) -> str:
     """The footer's PAINTED text.
 
@@ -986,7 +1004,7 @@ def _footer(app) -> str:
     return str(app.query_one(KeyFooter).render())
 
 
-async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
+async def test_the_popup_shows_estimating_while_the_call_is_in_flight(
     make_app, db, type_into, monkeypatch
 ):
     runner, started, release = _gate()
@@ -1003,19 +1021,27 @@ async def test_the_food_header_shows_estimating_while_the_call_is_in_flight(
         await pilot.press("enter")
         await started.wait()
         await pilot.pause()
-        mid = _food_head(app)
+        mid, mid_head = _popup(app), _food_head(app)
         assert app.prompt.is_open is False, "the prompt should be closed during the wait"
         release.set()
         await pilot.pause()
         await pilot.pause()
-        after = _food_head(app)
+        after = _popup(app)
     assert "estimating" in mid.lower(), f"no indicator mid-flight: {mid!r}"
-    assert "estimating" not in after.lower(), f"indicator outlived the call: {after!r}"
+    assert "60s" in mid, f"the popup must show the budget the call is allowed: {mid!r}"
+    assert after == "", f"the popup outlived the call: {after!r}"
+    # The other half of the move: the header is the figures again, and stays that way.
+    assert "estimating" not in mid_head.lower(), (
+        f"the FOOD header still carries the indicator: {mid_head!r}"
+    )
 
 
-async def test_the_footer_state_row_shows_estimating_while_in_flight(
+async def test_the_footer_state_row_stays_the_tab_state_during_an_estimate(
     make_app, db, type_into, monkeypatch
 ):
+    """Row 1 of the footer answers "what am I looking at" — which day, which horizon. It
+    carried "estimating…" too, and that was one signal in two places, both of them on the
+    tab that started the work. The popup is the signal; this stays the state."""
     runner, started, release = _gate()
     monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", runner)
     app = make_app()
@@ -1031,20 +1057,21 @@ async def test_the_footer_state_row_shows_estimating_while_in_flight(
         await pilot.pause()
         await pilot.pause()
         after = app.query_one("#body").status_hint()
-    assert "estimating" in mid.lower(), f"footer silent mid-flight: {mid!r}"
-    assert "estimating" not in after.lower(), f"footer still busy after: {after!r}"
+    assert "estimating" not in mid.lower(), f"the state row duplicates the popup: {mid!r}"
+    assert mid == after == "1m", f"the horizon should be all it says: {mid!r} / {after!r}"
 
 
-async def test_the_rendered_footer_shows_and_then_clears_the_indicator(
+async def test_the_popup_is_hidden_again_and_not_merely_blank(
     make_app, db, type_into, monkeypatch
 ):
-    """The footer half, asserted on the painted widget.
+    """Asserted on the painted widget, and on `display` as well as the text.
 
-    `_set_estimating` has to call `app.refresh_footer()` itself: `reload()` only
-    repaints BodyTab's own widgets, and every other refresh_footer call site is
-    driven by a keypress. Without it the footer never shows the indicator during
-    the wait, and — worse — a footer painted by any keypress mid-estimate keeps
-    claiming an estimate is running long after it finished.
+    The predecessor of this test existed because `_set_estimating` had to call
+    `app.refresh_footer()` itself — `reload()` only repaints BodyTab's own widgets — and
+    a footer painted by any keypress mid-estimate would otherwise keep claiming an
+    estimate was running long after it finished. The popup repaints itself, which is why
+    that call is gone; what has to be checked instead is that it goes *away* rather than
+    staying as an empty bordered box taking two rows off the screen forever.
     """
     import asyncio
 
@@ -1064,15 +1091,17 @@ async def test_the_rendered_footer_shows_and_then_clears_the_indicator(
         await pilot.press("enter")
         await started.wait()
         await pilot.pause()
-        during = _footer(app)
+        from daylogs.tui.progress import WorkPopup
+
+        during, shown = _popup(app), app.query_one(WorkPopup).display
         release.set()
         await pilot.pause()
         await pilot.pause()
-        after = _footer(app)
-    assert "estimating" in during.lower(), f"painted footer silent mid-estimate: {during!r}"
-    assert "estimating" not in after.lower(), (
-        f"painted footer still claims an estimate is running: {after!r}"
-    )
+        after, still_shown = _popup(app), app.query_one(WorkPopup).display
+    assert "estimating" in during.lower(), f"painted popup silent mid-estimate: {during!r}"
+    assert shown is True
+    assert after == "", f"the painted popup still claims work is running: {after!r}"
+    assert still_shown is False, "the popup stayed on screen as an empty box"
 
 
 async def test_a_photo_estimate_does_not_move_the_selected_food_row(
@@ -1148,8 +1177,8 @@ async def test_the_indicator_clears_when_the_estimate_fails(
         await pilot.press("enter")
         await pilot.pause()
         await pilot.pause()
-        head = _food_head(app)
-    assert "estimating" not in head.lower(), f"indicator survived a failure: {head!r}"
+        shown = _popup(app)
+    assert shown == "", f"the popup survived a failure: {shown!r}"
 
 
 async def test_the_indicator_clears_when_the_estimate_times_out(
@@ -1172,8 +1201,8 @@ async def test_the_indicator_clears_when_the_estimate_times_out(
         await pilot.press("enter")
         await pilot.pause()
         await pilot.pause()
-        head = _food_head(app)
-    assert "estimating" not in head.lower(), f"indicator survived a timeout: {head!r}"
+        shown = _popup(app)
+    assert shown == "", f"the popup survived a timeout: {shown!r}"
 
 
 async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicator(
@@ -1214,16 +1243,19 @@ async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicato
         await started.wait()
         await pilot.pause()
         await pilot.pause()
-        mid = _food_head(app)
+        mid = _popup(app)
         release_second.set()
         await pilot.pause()
         await pilot.pause()
-        after = _food_head(app)
+        after = _popup(app)
     assert len(calls) == 2, f"expected two estimate calls, got {len(calls)}"
     assert "estimating" in mid.lower(), (
         f"the cancelled worker cleared the indicator while the second was in flight: {mid!r}"
     )
-    assert "estimating" not in after.lower(), f"indicator outlived the second call: {after!r}"
+    assert mid.count("estimating") == 1, (
+        f"the popup is keyed by job, so a superseded estimate must not add a line: {mid!r}"
+    )
+    assert after == "", f"the popup outlived the second call: {after!r}"
 
 
 async def test_the_photo_estimate_shows_the_same_indicator(
@@ -1250,13 +1282,13 @@ async def test_the_photo_estimate_shows_the_same_indicator(
         await pilot.press("p")
         await started.wait()
         await pilot.pause()
-        mid = _food_head(app)
+        mid = _popup(app)
         release.set()
         await pilot.pause()
         await pilot.pause()
-        after = _food_head(app)
+        after = _popup(app)
     assert "estimating" in mid.lower(), f"no indicator during a photo estimate: {mid!r}"
-    assert "estimating" not in after.lower(), f"indicator outlived the photo call: {after!r}"
+    assert after == "", f"the popup outlived the photo call: {after!r}"
 
 
 async def test_no_three_second_toast_is_fired_for_an_estimate(

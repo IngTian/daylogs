@@ -30,6 +30,12 @@ from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import BAD, WARN, arrow, mark, trend_style
 
 _EMPTY = "no summary yet — press r"
+# The in-progress popup's key and label for this tab's one call. `busy` still drives the
+# empty pane — while a first report is being written there is nothing to show and
+# "no summary yet — press r" would be inviting a keypress that is already running — but
+# the *indicator* lives in the popup now, app-level, so switching to Body mid-generation
+# no longer hides the fact that something is in flight.
+_WORK = ("summary", "writing the daily read")
 
 
 class SummaryTab(PanelTab):
@@ -170,7 +176,7 @@ class SummaryTab(PanelTab):
 
         if row is None:
             self.viewing_date = None
-            head.update("SUMMARY" + ("   generating…" if self.busy else ""))
+            head.update("SUMMARY")
             body.update("")
             body.display = False
             empty.update("" if self.busy else _EMPTY)
@@ -179,15 +185,14 @@ class SummaryTab(PanelTab):
 
         self.viewing_date = row["date"]
         stamp = hhmm(row["generated_at"], self.app.cfg.timezone)
-        suffix = "   generating…" if self.busy else ""
-        head.update(f"SUMMARY   {human_date(row['date'])}   generated {stamp}{suffix}")
+        head.update(f"SUMMARY   {human_date(row['date'])}   generated {stamp}")
         body.display = True
         empty.display = False
         body.update(to_markdown(row["content"]))
 
     def status_hint(self) -> str:
-        if self.busy:
-            return "generating…"
+        """Which report is on screen. Not whether one is being written — the popup says
+        that, from whichever tab you happen to be looking at."""
         return human_date(self.viewing_date) if self.viewing_date else "no summary"
 
     # ── keys ─────────────────────────────────────────────────────────────
@@ -230,9 +235,22 @@ class SummaryTab(PanelTab):
             self.reload()
 
     # ── worker ───────────────────────────────────────────────────────────
+    def _set_busy(self, running: bool) -> None:
+        """Flip the flag and tell the popup, in one place.
+
+        Two callers times two exit paths is four chances for a flag to move without the
+        indicator following it — which is how a stuck "generating…" would look, and it
+        would look like the app had hung on a call that finished.
+        """
+        self.busy = running
+        if running:
+            self.app.begin_work(*_WORK, self.app.cfg.summary_timeout_sec)
+        else:
+            self.app.end_work(_WORK[0])
+
     @work(exclusive=True)
     async def generate(self, date: str) -> None:
-        self.busy = True
+        self._set_busy(True)
         self.reload()
         try:
             await summary.generate(
@@ -242,11 +260,11 @@ class SummaryTab(PanelTab):
                 runner=self.app.runner_text,
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
-            self.busy = False
+            self._set_busy(False)
             self.reload()
             self.app.notify_error(f"summary failed: {e}")
             return
-        self.busy = False
+        self._set_busy(False)
         self.viewing_date = date
         self.reload()
 

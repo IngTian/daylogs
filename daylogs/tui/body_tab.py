@@ -44,11 +44,14 @@ _YLABEL_W = 7
 # Money wants MTD because a budget is a calendar-month thing. The horizon *list* is
 # shared, the starting point is per-tab.
 _DEFAULT_HORIZON = "1m"
-# Shown in the FOOD header and the footer's state row for as long as an estimate is
-# actually running. It replaces a 3-second toast that fired against a call allowed
-# 60 seconds — so it vanished while you were still waiting, indistinguishable from
-# a dropped keypress. Same spacing convention as summary_tab's "generating…".
-_ESTIMATING = "   estimating…"
+# What the in-progress popup says while each call is in flight. The words used to be a
+# suffix on the FOOD header and in the footer's state row — which fixed the original
+# defect (a 3-second toast against a 60-second call) but kept the indicator on the tab
+# that started the work, so pressing `3` erased every trace of a running estimate. The
+# popup is app-level and keyed, so the two can also run at once; the keys are the worker
+# groups they belong to.
+_WORK_FOOD = ("food", "estimating calories")
+_WORK_ACTIVITY = ("activity", "estimating the day's activity factor")
 # The sub-views `tab` walks, in the order the strip draws them. Named so the header,
 # the strip and the toggle cannot disagree about what exists. Each name is also its
 # table's name, which is what lets the row lookup, the edit prefill and the delete
@@ -97,8 +100,7 @@ class BodyTab(PanelTab):
         # The inferred factor waiting to be confirmed, so the confirm line can be
         # submitted unchanged and still land a number.
         self._pending_activity: estimate.Effort | None = None
-        # The FOOD header without the estimate suffix, kept so the suffix can be
-        # painted on and off without recomputing the line or touching the table.
+        # The FOOD header line, assigned in whichever branch of `reload` built it.
         self._food_head = ""
 
     def compose(self) -> ComposeResult:
@@ -145,12 +147,12 @@ class BodyTab(PanelTab):
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
 
     def status_hint(self) -> str:
+        """The tab's state: which day, which horizon. Not what is running — the popup
+        says that, in one place, for whichever tab you are looking at."""
         date = self.viewing_date or self.app.today()
         parts = [self.horizon]
         if date != self.app.today():
             parts.insert(0, human_date(date))
-        if self._estimating or self._inferring:
-            parts.append(_ESTIMATING.strip())
         return " · ".join(parts)
 
     # ── rendering ────────────────────────────────────────────────────────
@@ -265,7 +267,7 @@ class BodyTab(PanelTab):
                 self._food_head = (
                     f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
                 )
-        self._paint_food_head()
+        self.query_one("#food-head", Static).update(self._food_head)
         self.query_one("#body-views", Static).update(view_row(_VIEWS, self.table_mode))
 
         pending = photo.pending_count(cfg.inbox_dir)
@@ -614,30 +616,29 @@ class BodyTab(PanelTab):
         self._run_image_estimate(path)
 
     # ── workers ──────────────────────────────────────────────────────────
-    def _paint_food_head(self) -> None:
-        suffix = _ESTIMATING if (self._estimating or self._inferring) else ""
-        self.query_one("#food-head", Static).update(self._food_head + suffix)
-
     def _set_estimating(self, running: bool) -> None:
-        """Repaint only the two places the indicator appears.
+        """Flip the flag and tell the popup.
 
-        Deliberately not `reload()`. That calls `_fill_table`, which does
+        Deliberately still not `reload()`: that calls `_fill_table`, which does
         `table.clear(columns=True)` and so resets the DataTable cursor to row 0 —
-        starting an estimate would throw away whichever food row you had selected.
-        And `reload()` could not show the footer half anyway: the footer is a
-        sibling widget, rewritten only by `App.refresh_footer()`, so without this
-        call `status_hint()`'s suffix never reaches the screen and a footer painted
-        by some other keypress mid-estimate would never be cleared.
+        starting an estimate would throw away whichever food row you had selected. The
+        popup is a sibling widget that repaints itself, so there is nothing else to
+        touch, which is the whole reason the indicator moved off the header.
         """
         self._estimating = running
-        self._paint_food_head()
-        self.app.refresh_footer()
+        if running:
+            self.app.begin_work(*_WORK_FOOD, self.app.cfg.estimate_timeout_sec)
+        else:
+            self.app.end_work(_WORK_FOOD[0])
 
     def _set_inferring(self, running: bool) -> None:
-        """The activity-factor counterpart, repainting the same two places."""
+        """The activity-factor counterpart. Its own popup key, matching its own worker
+        group: logging a gym session must not look like it cancelled a meal estimate."""
         self._inferring = running
-        self._paint_food_head()
-        self.app.refresh_footer()
+        if running:
+            self.app.begin_work(*_WORK_ACTIVITY, self.app.cfg.estimate_timeout_sec)
+        else:
+            self.app.end_work(_WORK_ACTIVITY[0])
 
     @work(exclusive=True)
     async def _run_image_estimate(self, path) -> None:
