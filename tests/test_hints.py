@@ -207,17 +207,17 @@ def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
                 ), f"{h.label}: example uses {tok.sigil}, grammar does not"
 
 
-def test_theme_completes_without_a_sigil():
-    """Its whole input is a theme name, so the implicit sigil is the empty string —
-    the same shape as `fix category`."""
-    v = hints.vocab_for(hints.for_label("theme"))
-    assert "gruvbox" in v[""]
-    assert "tokyo-night" in v[""]
+def test_no_hint_declares_a_vocabulary_it_cannot_resolve():
+    """`vocab_for` had a `label == "theme"` branch that returned Textual's theme list,
+    because that prompt completed a bare word and `fix category` completes a different
+    one — the empty sigil alone could not decide between them. `T` is a picker now, so
+    that branch is gone and the empty sigil means categories again, unambiguously.
 
-
-def test_theme_offers_textuals_list_not_a_frozen_copy():
-    """If this ever diverges from themes.names(), completion is offering names the
-    prompt will reject."""
-    from daylogs.tui import themes
-
-    assert hints.vocab_for(hints.for_label("theme"))[""] == themes.names()
+    Which makes the general property assertable: every sigil a hint declares resolves to
+    a non-empty vocabulary. A hint declaring one that resolves to nothing would make the
+    prompt answer "no match" to everything typed into it.
+    """
+    for h in hints.HINTS:
+        vocab = hints.vocab_for(h)
+        for sig in h.sigils:
+            assert vocab.get(sig), f"{h.label} declares {sig!r} and gets nothing back"

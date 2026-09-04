@@ -37,6 +37,18 @@ Screen {
     margin: 0 1;
 }
 
+/* The theme picker. Same three slots as the prompt — border title, body, border
+   subtitle — because it answers the same three questions: what am I setting, what is the
+   value, what are the keys. Deliberately not a modal screen: a modal covers the
+   interface whose colours you are previewing, which is the entire point of it. */
+#theme-picker {
+    height: 3;
+    border: round $accent;
+    border-title-align: left;
+    border-subtitle-align: left;
+    padding: 0 1;
+}
+
 /* Two rows: state on top, grouped keys below. One row meant nineteen hints in
    a single 190-character line, where nothing stood out. */
 #keyfooter {

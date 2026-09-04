@@ -117,7 +117,7 @@ show as two lines.
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
 | `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
 | `-` | zoom **out** — a longer horizon: `1d` `3d` `1w` `1m` `MTD` `3m` `YTD` `1y` `all` |
-| `T` | change the theme — `tab` completes the list, and the choice is remembered |
+| `T` | change the theme — `←` `→` preview each one live, `enter` keeps it, `esc` restores |
 | `?` | the full keymap |
 | `u` | undo the last delete or edit |
 | `esc` | back out one step — never quits |
@@ -266,10 +266,21 @@ assumption, and the arrow carries the direction either way.
 
 `T` changes the **theme** — the background, borders, muted text and accents. Every
 theme Textual ships is on offer (gruvbox, nord, tokyo-night, dracula, catppuccin,
-solarized, rose-pine and a dozen more); `tab` completes the names, and the choice is
-written to `config.toml` so it survives a restart. daylogs defines no palettes of
-its own: the stylesheet uses only Textual's design tokens, so this costs nothing to
-maintain.
+solarized, rose-pine and a dozen more), and you pick one by looking at it:
+
+```
+╭─ theme › nord   13 of 21 ───────────────────────────────────────────────────────╮
+│ … flexoki   gruvbox   monokai   ▸nord◂   rose-pine   rose-pine-dawn   solarized… │
+╰─ ← → preview · enter keeps it · esc restores gruvbox ────────────────────────────╯
+```
+
+`←` and `→` apply each theme immediately, so the app you are looking at *is* the
+preview. `enter` keeps the one on screen and writes it to `config.toml`; `esc` puts
+back the one you started with. The tabs still work while it is open — `2` and `3` —
+because the charts and the summary are where you most want to see the difference.
+
+daylogs defines no palettes of its own: the stylesheet uses only Textual's design
+tokens, so this costs nothing to maintain.
 
 What a theme deliberately does **not** change is the nine category colours or the
 green/red/amber signals. A category's colour is its identity — grocery being amber

@@ -36,7 +36,7 @@ from daylogs.tui.money_tab import MoneyTab
 from daylogs.tui.progress import WorkPopup
 from daylogs.tui.prompt import InlinePrompt
 from daylogs.tui.summary_tab import SummaryTab
-from daylogs.tui.themes import ThemeError
+from daylogs.tui.themes import ThemePicker
 from daylogs.undo import UndoStack
 
 log = logging.getLogger(__name__)
@@ -54,7 +54,6 @@ RETRYABLE = (
     PhotoError,
     ViewError,
     HorizonError,
-    ThemeError,
 )
 
 
@@ -102,6 +101,7 @@ class DaylogsApp(App):
         # App-level, not per-tab: a running estimate used to disappear the moment you
         # pressed `3`, and its answer arrived later as a prompt with no explanation.
         self.work_popup = WorkPopup(id="work")
+        self.theme_picker = ThemePicker(id="theme-picker")
         self.summary_worker_started = False
         self._confirm: Callable[[], None] | None = None
 
@@ -135,12 +135,13 @@ class DaylogsApp(App):
             # before. Appearing here pushes content up instead of hiding it, in the place
             # the eye already goes for the prompt and the footer.
             yield self.work_popup
+            yield self.theme_picker
             yield self.prompt
             yield self.key_footer
 
     def on_mount(self) -> None:
         self.sub_title = self.now().strftime("%a %b %d")
-        # `resolve`, not `check`: a stale or misspelled name in config.toml must
+        # `resolve`, which falls back: a stale or misspelled name in config.toml must
         # not stop the app over a cosmetic setting.
         self.theme = themes.resolve(self.cfg.theme)
         self.refresh_tabs()
@@ -178,7 +179,14 @@ class DaylogsApp(App):
         self.query_one("#tabs", TabbedContent).active = _TAB_OF[scope]
         tab = self._active_tab()
         tab.reload()
-        tab.focus_default()
+        # Tabs stay reachable while the theme picker is open — the charts are on Body and
+        # the summary is on Day, so being pinned to one tab would hide most of what you
+        # are trying to look at. Focus goes back to the picker rather than the tab, or the
+        # arrows would start walking tabs again halfway through a preview.
+        if self.theme_picker.is_open:
+            self.theme_picker.focus()
+        else:
+            tab.focus_default()
         self.refresh_footer()
 
     def refresh_tabs(self) -> None:
@@ -287,16 +295,30 @@ class DaylogsApp(App):
         self.prompt.open("go to date")
 
     def app_theme(self) -> None:
-        self.prompt.open("theme")
+        """Open the picker on whatever is in effect.
 
-    def _apply_theme(self, value: str) -> None:
-        """Set the theme and remember it. Raises ThemeError on an unknown name.
-
-        Handled here rather than in a tab's `handle_prompt` because it is the one
-        prompt that means the same thing on every tab — routing it through the
-        active tab would need the same method in all three.
+        `self.theme` rather than `cfg.theme`: they differ after a cancelled preview, and
+        the picker's `esc` has to restore what is on screen, not what was last written.
         """
-        name = themes.check(value)
+        self.theme_picker.open(self.theme)
+
+    def on_theme_picker_chosen(self, event: ThemePicker.Chosen) -> None:
+        event.stop()
+        self._apply_theme(event.name)
+        self._active_tab().focus_default()
+
+    def on_theme_picker_cancelled(self, event: ThemePicker.Cancelled) -> None:
+        event.stop()
+        self._active_tab().focus_default()
+
+    def _apply_theme(self, name: str) -> None:
+        """Remember the theme the picker landed on.
+
+        Handled here rather than in a tab because it is the one setting that means the
+        same thing on every tab — routing it through the active tab would need the same
+        method in all three. The picker has already applied it; only persistence is left,
+        and the name came from `themes.names()` so there is nothing left to validate.
+        """
         self.theme = name
         # update_config edits the file as text, so the user's comments and
         # [[category]] blocks survive, and a new key lands above the first table
@@ -362,12 +384,10 @@ class DaylogsApp(App):
             return
         before = (self.prompt.is_open, self.prompt.label)
         try:
-            # The one prompt that means the same thing on every tab, so it is
-            # answered here instead of in three identical handle_prompt branches.
-            if label == "theme":
-                self._apply_theme(value)
-            else:
-                tab.handle_prompt(label, value)
+            # Every prompt belongs to a tab now. `theme` was the exception — the one that
+            # meant the same thing everywhere, answered here rather than in three
+            # identical branches — and it is a picker rather than a prompt.
+            tab.handle_prompt(label, value)
         except RETRYABLE as e:
             self.prompt.show_error(str(e))
             self.prompt.focus()
