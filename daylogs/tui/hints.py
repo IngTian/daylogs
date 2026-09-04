@@ -95,6 +95,14 @@ HINTS: tuple[Hint, ...] = (
         "cost · name · !category · #monthly or #annually",
         sigils=("!", "#"),
     ),
+    # No colour field: `categories.auto_color` hashes the slug to a stable palette entry,
+    # which is already how a config-added category gets its hue, and picking one is a
+    # decision with no good answer at a prompt.
+    Hint(
+        "new category",
+        "gym Gym & Pool",
+        "slug · display name (optional) — written to config.toml",
+    ),
     Hint(
         "fix category",
         "restaurant",

@@ -134,8 +134,9 @@ figures above them are always today's.
 | Key | Does |
 |---|---|
 | `e` | log an expense |
-| `b` | set a budget line |
+| `b` | set a budget line — prefilled from the selected category |
 | `s` | add or update a recurring item |
+| `n` | add a category to `config.toml` |
 | `r` | roll active recurring items into the month's budget |
 | `d` `c` `k` | sort by date / cost / category — press again to flip direction |
 | `/` | filter by text |
@@ -159,6 +160,7 @@ figures above them are always today's.
 | `expense ›` | `-24.99 returned shoes !grocery` | a refund |
 | `budget ›` | `500 !grocery` | named after the category |
 | `recurring ›` | `20.99 Streaming !subscriptions #monthly` | monthly |
+| `new category ›` | `gym Gym & Pool` | slug, then an optional display name |
 
 Sigils mark the fields, so nothing is ever taken out of your own words:
 
@@ -468,7 +470,11 @@ color   = "#9ba068"
 
 Built-in categories: `grocery`, `restaurant`, `transport`, `housing`,
 `utilities`, `subscriptions`, `entertainment`, `education`, `other`. Adding
-one needs no code change — just a `[[category]]` block.
+one needs no code change and no restart: `n` on the Money tab writes the
+`[[category]]` block for you and the slug is usable on the next keystroke, colour
+included — it is hashed from the slug, the same way a hand-written block with no
+`color` gets one. The toast then points at `b`, because a category with neither a
+budget nor a spend is not yet a row in the pane.
 
 `timezone` defaults to **your machine's zone** and is what every stored time is read
 and written in — so `@07:30` means 07:30 where you are. Set it explicitly only if you

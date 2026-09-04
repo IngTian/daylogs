@@ -246,6 +246,21 @@ def update_recurring(conn, id: int, cfg=None, **fields) -> bool:
     return cur.rowcount > 0
 
 
+def budget_line(conn, *, month: str, category: str) -> sqlite3.Row | None:
+    """The budget row for one category in one month, or None.
+
+    A category can hold more than one line in a month — `budget` is UNIQUE(month, name),
+    not (month, category), so a `Rent` and a `Storage` line can both be `housing`. The
+    newest wins here, which is the one an edit prefill should show; the pane's own figures
+    keep summing all of them, so this is a lookup for editing, not a total.
+    """
+    check_month(month)
+    return conn.execute(
+        "SELECT * FROM budget WHERE month = ? AND category = ? ORDER BY id DESC LIMIT 1",
+        (month, category),
+    ).fetchone()
+
+
 def _rename_rolled_budgets(conn, *, old: str, new: str) -> None:
     """Carry a recurring item's rename through to the budget lines it produced.
 

@@ -13,8 +13,14 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Static
 
 from daylogs import money, parse
+from daylogs.config import add_category, load_config
 from daylogs.moneyview import PANES, MoneyView
-from daylogs.parse import parse_budget, parse_expense, parse_recurring
+from daylogs.parse import (
+    parse_budget,
+    parse_category,
+    parse_expense,
+    parse_recurring,
+)
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import (
     BAD,
@@ -316,10 +322,42 @@ class MoneyTab(PanelTab):
         self.app.prompt.open("expense")
 
     def key_budget(self) -> None:
-        self.app.prompt.open("budget")
+        """Prefilled with the selected category's line for the month on screen.
+
+        Editing a budget otherwise meant reading the amount off the pane and retyping the
+        whole line. `upsert_budget` is keyed on (month, name), so submitting a changed
+        number has always *replaced* the line rather than adding one — what was missing
+        was seeing the current value in the prompt.
+
+        Rendered through `parse.render_budget`, which had no caller: no budget row is
+        selectable anywhere, so the one renderer for this grammar was dead. Blank when
+        nothing is selected, or when the category has no line yet — a new budget is typed
+        fresh, and `parse_budget` requires a leading amount, so half a line would be a
+        prefill that cannot be submitted.
+        """
+        self.app.prompt.open("budget", prefill=self._budget_prefill())
+
+    def _budget_prefill(self) -> str:
+        slug = self._selected_group()
+        if not slug or self.view.pane != "categories":
+            return ""
+        row = money.budget_line(self.app.conn, month=self._budget_month(), category=slug)
+        return parse.render_budget(row) if row is not None else ""
+
+    def _budget_month(self) -> str:
+        """The month `b` writes to: the right-hand edge of the span on screen.
+
+        Not always today's. `[` walks the anchor back, and writing this month's budget
+        while looking at August would be the same class of wrongness as a header naming a
+        window the query ignores — which is why the toast states the month.
+        """
+        return self.view.months()[-1] if self.view.months() else self.app.today()[:7]
 
     def key_recurring(self) -> None:
         self.app.prompt.open("recurring")
+
+    def key_category(self) -> None:
+        self.app.prompt.open("new category")
 
     def key_filter(self) -> None:
         self.app.prompt.open("filter", self.view.filter_text)
@@ -475,6 +513,8 @@ class MoneyTab(PanelTab):
             self._submit_expense(value, refiling=True)
         elif label == "budget":
             self._submit_budget(value)
+        elif label == "new category":
+            self._submit_category(value)
         elif label == "recurring":
             self._submit_recurring(value)
         elif label == "filter":
@@ -541,10 +581,31 @@ class MoneyTab(PanelTab):
         self.app.notify(f"{fmt(r.amount)} {r.description} → {r.category} · u to undo", timeout=4)
         self.reload()
 
+    def _submit_category(self, value: str) -> None:
+        """Write a `[[category]]` block and re-read config, so no restart is needed.
+
+        The same two lines `body_tab._submit_profile` uses, and for the same reason: the
+        slug has to be usable on the very next keystroke. Tab completion picks it up for
+        free because `hints.vocab_for` resolves the vocabulary at call time rather than
+        freezing it — which is exactly the case that was written for.
+
+        A brand-new category is not yet a row in the pane: `summarize_span` lists only
+        categories with a budget or a spend. So the toast says what to press next.
+        """
+        r = parse_category(value, known_slugs=money.slugs(self.app.cfg))
+        add_category(self.app.cfg.root / "config.toml", slug=r.slug, display=r.display)
+        self.app.cfg = load_config(self.app.cfg.root)
+        self.app.refresh_tabs()
+        self.app.notify(
+            f"category {r.slug} added — press b to give it a budget for"
+            f" {self._budget_month()}",
+            timeout=6,
+        )
+
     def _submit_budget(self, value: str) -> None:
         cfg = self.app.cfg
         r = parse_budget(value, now=self.app.now(), known_slugs=money.slugs(cfg))
-        month = self.view.months()[-1] if self.view.months() else self.app.today()[:7]
+        month = self._budget_month()
         money.upsert_budget(
             self.app.conn,
             month=month,
@@ -561,7 +622,7 @@ class MoneyTab(PanelTab):
         spent = cat.spent if cat else 0.0
         left = (cat.delta if cat else r.amount)
         self.app.notify(
-            f"budget {r.category} {fmt(r.amount)} · {fmt(spent)} spent,"
+            f"budget {r.category} {fmt(r.amount)} for {month} · {fmt(spent)} spent,"
             f" {fmt(left)} left",
             timeout=5,
         )
