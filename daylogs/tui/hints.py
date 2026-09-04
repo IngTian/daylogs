@@ -9,8 +9,8 @@ Every prompt now shows three things, using the three slots the bordered input
 already has and no extra screen rows:
 
     ╭─ profile › ──────────────────────────────────────────────────────────────╮
-    │ 180 male 1990-01-01 desk                                                 │
-    ╰─ height · m/f · birthday · ordinary day: desk/light/active/heavy ─────────╯
+    │ 180 male 1990-01-01 desk America/Toronto                                  │
+    ╰─ height · m/f · birthday · desk/light/active/heavy · zone ────────────────╯
 
 (example inside, greyed; grammar below, persistent)
 
@@ -73,8 +73,8 @@ HINTS: tuple[Hint, ...] = (
     # A closed vocabulary of four words is fully discoverable by being written down.
     Hint(
         "profile",
-        "180 male 1990-01-01 desk",
-        "height · m/f · birthday · ordinary day: desk/light/active/heavy — any order",
+        "180 male 1990-01-01 desk America/Toronto",
+        "height · m/f · birthday · desk/light/active/heavy · zone — any order",
     ),
     # ── money ────────────────────────────────────────────────────────────
     Hint(

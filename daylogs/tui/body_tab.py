@@ -8,7 +8,6 @@ What lives here is key handling, the estimate review flow, and rendering.
 from __future__ import annotations
 
 import datetime as dt
-from zoneinfo import ZoneInfo
 
 from textual import work
 from textual.app import ComposeResult
@@ -18,7 +17,7 @@ from textual.widgets import DataTable, Static
 from daylogs import body, estimate, parse, photo, sigil
 from daylogs import horizon as hz
 from daylogs.config import load_config, update_config
-from daylogs.fmt import hhmm, human_date
+from daylogs.fmt import hhmm, human_date, wall
 from daylogs.parse import (
     ParseError,
     parse_activity,
@@ -274,7 +273,7 @@ class BodyTab(PanelTab):
         previous evening locally, and plotting it on the wrong day is the same class
         of bug as the date traps this repo keeps hitting.
         """
-        return dt.datetime.fromtimestamp(epoch, ZoneInfo(self.app.cfg.timezone))
+        return wall(epoch, self.app.cfg.timezone)
 
     def _chart_rows(self, conn, cfg, span) -> list[str]:
         """The TREND panel's plot, for whichever series is selected.
@@ -422,7 +421,7 @@ class BodyTab(PanelTab):
             table.add_columns("time", "description", "factor", "src")
             for r in body.list_activity(self.app.conn, date=date):
                 table.add_row(
-                    hhmm(r["logged_at"]),
+                    hhmm(r["logged_at"], self.app.cfg.timezone),
                     r["description"],
                     # A dash, not a blank: an inference that never landed is a state
                     # worth seeing, because the day quietly used the baseline instead.
@@ -434,7 +433,7 @@ class BodyTab(PanelTab):
             table.add_columns("time", "description", "kcal", "src")
             for r in body.list_food(self.app.conn, date=date):
                 table.add_row(
-                    hhmm(r["ate_at"]),
+                    hhmm(r["ate_at"], self.app.cfg.timezone),
                     r["description"],
                     f"{r['kcal']:,}",
                     "lab" if r["source"] == "labeled" else "est",
@@ -466,6 +465,7 @@ class BodyTab(PanelTab):
                 cfg.sex or "",
                 cfg.birthday or "",
                 cfg.activity or "",
+                cfg.timezone,
             )
             if v
         )
@@ -492,10 +492,14 @@ class BodyTab(PanelTab):
             self.app.prompt.open("weigh", prefill=parse.render_weigh(row))
         elif self.table_mode == "activity":
             self._editing = ("activity", row["id"])
-            self.app.prompt.open("activity", prefill=parse.render_activity(row))
+            self.app.prompt.open(
+                "activity", prefill=parse.render_activity(row, self.app.cfg.timezone)
+            )
         else:
             self._editing = ("food", row["id"])
-            self.app.prompt.open("food", prefill=parse.render_food(row))
+            self.app.prompt.open(
+                "food", prefill=parse.render_food(row, self.app.cfg.timezone)
+            )
 
     def key_next_subview(self) -> None:
         self._step_subview(1)
@@ -795,12 +799,13 @@ class BodyTab(PanelTab):
         if not self._line_sets_a_time(value):
             at = before["ate_at"]
         else:
-            before_minute = dt.datetime.fromtimestamp(before["ate_at"]).strftime("%Y-%m-%d %H:%M")
-            parsed_minute = dt.datetime.fromtimestamp(r.at).strftime("%Y-%m-%d %H:%M")
+            tz = self.app.cfg.timezone
+            before_minute = wall(before["ate_at"], tz).strftime("%Y-%m-%d %H:%M")
+            parsed_minute = wall(r.at, tz).strftime("%Y-%m-%d %H:%M")
             if before_minute == parsed_minute:
                 at = before["ate_at"]
             else:
-                at = body.restamp(before["ate_at"], date=r.date, hhmm=hhmm(r.at))
+                at = body.restamp(before["ate_at"], date=r.date, hhmm=hhmm(r.at, tz), tz=tz)
                 if at is None:
                     at = before["ate_at"]
         # `source` is deliberately absent from the grammar: it is provenance
@@ -856,7 +861,10 @@ class BodyTab(PanelTab):
             # Only restamp when the minute actually moved, so the seconds survive —
             # `logged_at` is the tie-breaker `resolved_factor` uses to pick a day's
             # latest inference, and the grammar's only time token is HH:MM.
-            at = body.restamp(before["logged_at"], date=r.date, hhmm=hhmm(r.at))
+            at = body.restamp(
+                before["logged_at"], date=r.date,
+                hhmm=hhmm(r.at, self.app.cfg.timezone), tz=self.app.cfg.timezone,
+            )
             body.update_activity(
                 self.app.conn, row_id,
                 description=r.description, factor=r.factor, date=r.date,

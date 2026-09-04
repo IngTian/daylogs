@@ -1,4 +1,5 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -203,35 +204,52 @@ def test_age_from_birthday_handles_pre_birthday():
 
 
 # ── restamp ──────────────────────────────────────────────────────────────
+# An explicit zone throughout, on both sides. `restamp` takes one now, and these used
+# naive system-local datetimes — which agreed with the old implementation only because
+# both happened to read the machine. Pinning a zone makes them say what they mean and
+# stop depending on where the suite runs.
+RE_TZ = "America/Toronto"
+_RZ = ZoneInfo(RE_TZ)
+
+
+def _stamp(*parts) -> int:
+    return int(datetime(*parts, tzinfo=_RZ).timestamp())
+
+
+def _wall(ts: int) -> datetime:
+    return datetime.fromtimestamp(ts, _RZ)
+
+
 def test_restamp_returns_none_when_the_minute_is_unchanged():
     """Stored timestamps carry seconds and the grammar only has HH:MM, so
     re-deriving unconditionally would shave the seconds off every edit."""
-    at = int(datetime(2026, 8, 20, 7, 5, 43).timestamp())
-    assert restamp(at, date="2026-08-20", hhmm="07:05") is None
+    at = _stamp(2026, 8, 20, 7, 5, 43)
+    assert restamp(at, date="2026-08-20", hhmm="07:05", tz=RE_TZ) is None
 
 
 def test_restamp_returns_a_new_timestamp_when_the_minute_changed():
-    at = int(datetime(2026, 8, 20, 7, 5, 43).timestamp())
-    out = restamp(at, date="2026-08-20", hhmm="08:30")
+    at = _stamp(2026, 8, 20, 7, 5, 43)
+    out = restamp(at, date="2026-08-20", hhmm="08:30", tz=RE_TZ)
     assert out is not None
-    assert datetime.fromtimestamp(out) == datetime(2026, 8, 20, 8, 30)
+    assert _wall(out) == datetime(2026, 8, 20, 8, 30, tzinfo=_RZ)
 
 
 def test_restamp_uses_the_given_date_not_the_stored_one():
-    at = int(datetime(2026, 8, 20, 7, 5, 43).timestamp())
-    out = restamp(at, date="2026-07-01", hhmm="09:15")
-    assert datetime.fromtimestamp(out) == datetime(2026, 7, 1, 9, 15)
+    at = _stamp(2026, 8, 20, 7, 5, 43)
+    out = restamp(at, date="2026-07-01", hhmm="09:15", tz=RE_TZ)
+    assert _wall(out) == datetime(2026, 7, 1, 9, 15, tzinfo=_RZ)
 
 
 def test_restamp_drops_the_seconds_only_when_it_actually_rewrites():
-    at = int(datetime(2026, 8, 20, 7, 5, 43).timestamp())
-    assert datetime.fromtimestamp(restamp(at, date="2026-08-20", hhmm="07:06")).second == 0
+    at = _stamp(2026, 8, 20, 7, 5, 43)
+    out = restamp(at, date="2026-08-20", hhmm="07:06", tz=RE_TZ)
+    assert _wall(out).second == 0
 
 
 def test_restamp_handles_midnight():
-    at = int(datetime(2026, 8, 20, 23, 59, 12).timestamp())
-    out = restamp(at, date="2026-08-20", hhmm="00:00")
-    assert datetime.fromtimestamp(out) == datetime(2026, 8, 20, 0, 0)
+    at = _stamp(2026, 8, 20, 23, 59, 12)
+    out = restamp(at, date="2026-08-20", hhmm="00:00", tz=RE_TZ)
+    assert _wall(out) == datetime(2026, 8, 20, 0, 0, tzinfo=_RZ)
 
 
 # ── sub-day weight points (the 1d / 3d views) ────────────────────────────

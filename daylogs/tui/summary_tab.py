@@ -17,8 +17,6 @@ in the app is microseconds and runs on the event loop.
 
 from __future__ import annotations
 
-import datetime as dt
-
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -26,7 +24,7 @@ from textual.widgets import Markdown, Static
 
 from daylogs import body, money, summary
 from daylogs import horizon as hz
-from daylogs.fmt import human_date
+from daylogs.fmt import hhmm, human_date
 from daylogs.markup import to_markdown
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import BAD, WARN, mark, trend_style
@@ -181,7 +179,7 @@ class SummaryTab(PanelTab):
             return
 
         self.viewing_date = row["date"]
-        stamp = dt.datetime.fromtimestamp(row["generated_at"]).strftime("%H:%M")
+        stamp = hhmm(row["generated_at"], self.app.cfg.timezone)
         suffix = "   generating…" if self.busy else ""
         head.update(f"SUMMARY   {human_date(row['date'])}   generated {stamp}{suffix}")
         body.display = True

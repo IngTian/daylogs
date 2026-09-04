@@ -10,10 +10,53 @@ from __future__ import annotations
 import os
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-_DEFAULT_TZ = "America/Toronto"
+
+def is_zone(name: str) -> bool:
+    """Whether `name` is a zone the tz database actually has."""
+    try:
+        ZoneInfo(name)
+    except (KeyError, ValueError, OSError):
+        return False
+    return True
+
+
+def system_timezone() -> str:
+    """The machine's IANA zone name — what `timezone` defaults to.
+
+    Detected rather than hardcoded. The default used to be the literal
+    "America/Toronto", which is right for exactly one machine: everywhere else every
+    time the grammar parsed was resolved in Toronto while `fmt` rendered in the
+    machine's own zone, so an edit's prefill round-trip moved the row by the offset.
+    Making the default *be* the machine's zone is what makes the two agree by
+    construction rather than by luck.
+
+    Best effort, in the order that is actually reliable: `TZ` when it is set — which is
+    also how the test suite pins a zone, and the config has to agree with the process or
+    the tests disagree with themselves — then the `/etc/localtime` symlink that macOS
+    and Linux both keep pointing into the tzdata tree.
+
+    `UTC` is the last resort. It is wrong by an offset, but it is honest about being a
+    fallback and `h` fixes it in one line; guessing a populated zone would put a
+    plausible wrong answer everywhere instead.
+    """
+    env = os.environ.get("TZ", "").strip()
+    if env and is_zone(env):
+        return env
+    try:
+        parts = Path("/etc/localtime").resolve().parts
+        if "zoneinfo" in parts:
+            name = "/".join(parts[parts.index("zoneinfo") + 1 :])
+            if is_zone(name):
+                return name
+    except OSError:
+        pass
+    return "UTC"
+
+
 # A Textual theme name. Duplicated as a literal rather than imported from
 # tui.themes on purpose: this module is pure — no textual, no database — and
 # importing the UI framework to load a config file would invert that. The two are
@@ -27,7 +70,11 @@ class Config:
     db_path: Path
     inbox_dir: Path
     memory_path: Path
-    timezone: str = _DEFAULT_TZ
+    # Always a real IANA name, so every reader can do `ZoneInfo(cfg.timezone)`
+    # without a None branch. `default_factory` rather than a literal: a module-level
+    # default would freeze the machine's zone at import time, which is wrong for a
+    # long-running process and untestable.
+    timezone: str = field(default_factory=system_timezone)
     height_cm: float | None = None
     sex: str | None = None
     birthday: str | None = None
@@ -40,6 +87,17 @@ class Config:
     summary_timeout_sec: int = 120
     estimate_timeout_sec: int = 60
     extra_categories: tuple[tuple[str, str, str], ...] = ()
+
+
+def _zone_or_system(raw) -> str:
+    """A configured zone, or the machine's when it is absent or not a real zone.
+
+    A typo in a hand-edited config.toml must not stop the app — the same stance the
+    theme and the activity level take — and it must not leave an unusable string behind
+    either, because every reader does `ZoneInfo(cfg.timezone)` on the next keystroke.
+    """
+    name = str(raw or "").strip()
+    return name if name and is_zone(name) else system_timezone()
 
 
 def default_root() -> Path:
@@ -71,7 +129,7 @@ def load_config(root: Path | None = None) -> Config:
         db_path=path_of("db_path", "daylogs.db"),
         inbox_dir=path_of("inbox_dir", "inbox"),
         memory_path=path_of("memory_path", "memory.md"),
-        timezone=str(raw.get("timezone") or _DEFAULT_TZ),
+        timezone=_zone_or_system(raw.get("timezone")),
         height_cm=_opt_float(raw.get("height_cm")),
         sex=_opt_str(raw.get("sex")),
         birthday=_opt_str(raw.get("birthday")),

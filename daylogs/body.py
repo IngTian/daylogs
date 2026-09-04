@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import sqlite3
+from zoneinfo import ZoneInfo
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SOURCES = frozenset({"labeled", "estimated"})
@@ -224,7 +225,7 @@ def update_food(conn, id: int, **fields) -> bool:
     )
 
 
-def restamp(at: int, *, date: str, hhmm: str) -> int | None:
+def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
     """The new epoch-second timestamp for a row whose clock time was edited, or
     `None` when the minute did not change.
 
@@ -234,13 +235,19 @@ def restamp(at: int, *, date: str, hhmm: str) -> int | None:
     tie-breaker `weight_series` uses to pick a day's reading. Returning `None`
     means "leave the column alone", which is what the caller wants far more often
     than a rewrite.
+
+    `tz` has to be the zone the line was *rendered* in. Comparing in a different one
+    makes every edit look like a time change, so it rewrites the tie-breaker column on
+    an edit that only touched a description.
     """
-    current = dt.datetime.fromtimestamp(int(at))
-    if current.strftime("%H:%M") == hhmm:
+    zone = ZoneInfo(tz)
+    if dt.datetime.fromtimestamp(int(at), zone).strftime("%H:%M") == hhmm:
         return None
     hh, mm = (int(part) for part in hhmm.split(":"))
     return int(
-        dt.datetime.combine(dt.date.fromisoformat(date), dt.time(hh, mm)).timestamp()
+        dt.datetime.combine(
+            dt.date.fromisoformat(date), dt.time(hh, mm), tzinfo=zone
+        ).timestamp()
     )
 
 
