@@ -240,6 +240,23 @@ from the start of that month or year. `[` and `]` then step by one whole horizon
 `MTD` that's a calendar month, so you compare the same elapsed slice of the previous
 month rather than a ragged window.
 
+On Body the window governs **everything on the tab** — the chart and all three tables.
+Zoom out and the weight, food and activity lists reach further back; `g` and `[` `]` move
+the whole window. Every row carries its date as well as its clock time, because over a
+window two `08:00` rows five days apart are otherwise the same morning. `1d` is exactly
+one day, so zooming all the way in is how you ask "what did I eat today":
+
+```
+ FOOD   Aug 29 – Sep 4 2026   7 meals   4,494 kcal in
+ weight   food   activity
+  date        time   description  kcal  src
+  2026-09-04  12:30  lunch day 9  663   lab
+  2026-09-03  12:30  lunch day 8  656   lab
+```
+
+Each header says the same three things — what you're looking at, the window, and how much
+is in it. The day's own calorie balance is in the ENERGY panel, stated once.
+
 **At `1d` and `3d` the weight chart switches to a clock.** The axis is labelled in
 hours instead of dates, and every weigh-in is plotted at the time it was taken —
 so two readings on one day sit apart rather than on top of each other. Wider

@@ -168,14 +168,27 @@ def parse_weigh(raw: str, *, now: dt.datetime, known_slugs=frozenset()) -> Weigh
     return WeighInput(kg=kg, note=g.text or None, date=when.date, at=when.at)
 
 
-def render_weigh(row) -> str:
-    """No time in the line: `measured_at` is the tie-breaker weight_series uses to
-    pick a day's reading, and re-deriving it from an HH:MM token would shave the
-    seconds off every edit."""
+def render_weigh(row, tz: str) -> str:
+    """The inverse, for prefilling an edit.
+
+    The time is in the line because the table shows it. A day weighed twice rendered as
+    two rows both reading the same date, indistinguishable — while `measured_at` was the
+    tie-breaker `weight_series` used to pick between them. What you can see is what you
+    can edit, so the time became editable in the same change that made it visible.
+
+    This used to emit no time, on the grounds that "re-deriving it from an HH:MM token
+    would shave the seconds off every edit". That is exactly what `body.restamp` exists
+    to prevent — its own docstring names weight as the motivating case — and it was
+    simply never wired up here. The caller restamps only when the minute actually moved.
+
+    `tz` is required and must be the zone the line will be *parsed* in, for the reason
+    `render_food` documents: rendering through the machine's zone while the parser
+    resolves in the configured one moves the row by the offset.
+    """
     parts = [f"{row['kg']:g}"]
     if row["note"]:
         parts.append(sigil.escape(row["note"]))
-    parts.append(f"@{row['date']}")
+    parts.append(f"@{row['date']}/{hhmm(row['measured_at'], tz)}")
     return " ".join(parts)
 
 

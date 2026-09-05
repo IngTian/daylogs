@@ -27,15 +27,23 @@ RAISES = "dinner [/b] out"
 DAY = "2026-09-04"
 
 
-def _cells(app, column: int) -> list[str]:
+def _cells(app, column: str) -> list[str]:
     """A column's cells as plain text, whatever type the cell is.
 
     `str()` on a `rich.Text` gives its literal content, which is exactly the point: a
     `Text` cell cannot be re-parsed as markup, so what is stored is what is shown.
+
+    Looked up by column NAME. These read `[1]` until the Body tables gained a `date`
+    column, at which point three markup tests failed on a shifted index while asserting
+    nothing about markup — an index says where a column sits, which is not what any of
+    these tests are about.
     """
     table = app.query_one("#body-table") if app.query("#body-table") else None
     table = table or app.query_one("#money-table")
-    return [str(table.get_row_at(r)[column]) for r in range(table.row_count)]
+    labels = [str(c.label) for c in table.columns.values()]
+    assert column in labels, f"no {column!r} column in {labels}"
+    i = labels.index(column)
+    return [str(table.get_row_at(r)[i]) for r in range(table.row_count)]
 
 
 # ── the crash ────────────────────────────────────────────────────────────
@@ -51,7 +59,7 @@ async def test_a_food_description_with_a_closing_tag_does_not_crash(make_app, db
         body.reload()
         await pilot.pause()
         assert app.is_running, "the render raised out of the app"
-        assert RAISES in _cells(app, 1)
+        assert RAISES in _cells(app, "description")
 
 
 async def test_an_expense_description_with_a_closing_tag_does_not_crash(
@@ -112,7 +120,7 @@ async def test_a_bracketed_word_survives_into_the_table(make_app, db):
         body.viewing_date = DAY
         body.reload()
         await pilot.pause()
-        cells = _cells(app, 1)
+        cells = _cells(app, "description")
     assert EATEN in cells, f"the bracketed word was eaten: {cells}"
 
 
@@ -128,7 +136,8 @@ async def test_free_text_cells_are_text_objects_not_markup_strings(make_app, db)
         body.reload()
         await pilot.pause()
         table = app.query_one("#body-table")
-        description = table.get_row_at(0)[1]
+        labels = [str(c.label) for c in table.columns.values()]
+        description = table.get_row_at(0)[labels.index("description")]
     assert isinstance(description, Text), f"a raw str cell is markup: {description!r}"
 
 

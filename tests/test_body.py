@@ -5,6 +5,7 @@ import pytest
 
 from daylogs.body import (
     BodyError,
+    add_activity,
     add_food,
     add_weight,
     age_from_birthday,
@@ -13,6 +14,7 @@ from daylogs.body import (
     delete_food,
     delete_weight,
     latest_weight,
+    list_activity,
     list_food,
     list_weight,
     restamp,
@@ -291,3 +293,108 @@ def test_weight_points_between_unbounded_start(db):
     add_weight(db, kg=80.0, date="2026-08-27", at=2, note="")
     rows = weight_points_between(db, start=None, end="2026-08-28")
     assert [kg for _, kg in rows] == [90.0, 80.0]
+
+
+# ── one window: the food and activity logs take the same bounds as weight ──
+# `+`/`-` moved the chart and the weight table and did nothing at all to the food or
+# activity tables — 1 row at `1d` and 1 row at `all`. The window is one concept
+# (`horizon.py`), so every table on the tab answers to it.
+#
+# `date=` stays, and stays chronological: the digest and the Day tab want "the day, in
+# the order it happened", which is a different question from "the log, newest first".
+
+
+def _seed_days(db, n=5, start="2026-08-25"):
+    import datetime as dt
+
+    d0 = dt.date.fromisoformat(start)
+    for i in range(n):
+        d = (d0 + dt.timedelta(days=i)).isoformat()
+        at = int(dt.datetime.fromisoformat(f"{d}T08:00").timestamp())
+        add_food(db, description=f"meal {i}", kcal=500 + i, source="labeled", date=d, at=at)
+        add_activity(db, description=f"walk {i}", factor=1.4, date=d, at=at + 3600,
+                     source="labeled")
+
+
+def test_list_food_bounded_at_both_ends(db):
+    """Both bounds, for the reason `list_weight` documents: with a lower bound alone,
+    viewing an older day listed meals that had not been eaten yet."""
+    _seed_days(db)
+    rows = list_food(db, since="2026-08-26", until="2026-08-28")
+    assert [r["date"] for r in rows] == ["2026-08-28", "2026-08-27", "2026-08-26"]
+
+
+def test_list_food_windowed_is_newest_first(db):
+    """The opposite of the `date=` order, deliberately: a log you scroll wants today at
+    the top, a day you read wants breakfast first."""
+    _seed_days(db)
+    rows = list_food(db, since="2026-08-25", until="2026-08-29")
+    assert [r["date"] for r in rows] == sorted([r["date"] for r in rows], reverse=True)
+
+
+def test_list_food_by_date_is_unchanged_and_chronological(db):
+    """`summary.build_payload` and the Day tab read this. A digest that lists dinner
+    before breakfast is a different digest."""
+    import datetime as dt
+
+    base = int(dt.datetime.fromisoformat("2026-08-25T07:00").timestamp())
+    add_food(db, description="late", kcal=700, source="labeled", date="2026-08-25",
+             at=base + 40000)
+    add_food(db, description="early", kcal=300, source="labeled", date="2026-08-25", at=base)
+    assert [r["description"] for r in list_food(db, date="2026-08-25")] == ["early", "late"]
+
+
+def test_list_food_with_no_bounds_is_every_row(db):
+    """`all` resolves to `start=None`, which has to mean no lower bound rather than
+    no rows."""
+    _seed_days(db)
+    assert len(list_food(db, until="2026-08-29")) == 5
+
+
+def test_list_food_respects_its_limit(db):
+    _seed_days(db, n=5)
+    assert len(list_food(db, until="2026-08-29", limit=2)) == 2
+
+
+def test_list_activity_bounded_at_both_ends(db):
+    _seed_days(db)
+    rows = list_activity(db, since="2026-08-26", until="2026-08-27")
+    assert [r["date"] for r in rows] == ["2026-08-27", "2026-08-26"]
+
+
+def test_list_activity_by_date_is_unchanged_and_chronological(db):
+    """`resolved_factor` picks a day's latest inference and the digest lists the day."""
+    import datetime as dt
+
+    base = int(dt.datetime.fromisoformat("2026-08-25T07:00").timestamp())
+    add_activity(db, description="evening", factor=1.6, date="2026-08-25", at=base + 40000,
+                 source="labeled")
+    add_activity(db, description="morning", factor=1.4, date="2026-08-25", at=base,
+                 source="labeled")
+    assert [r["description"] for r in list_activity(db, date="2026-08-25")] == [
+        "morning", "evening",
+    ]
+
+
+def test_asking_for_both_a_date_and_a_window_is_refused(db):
+    """Two different questions with two different orders. Silently preferring one would
+    make the caller's intent unknowable from the call."""
+    import pytest
+
+    with pytest.raises(BodyError):
+        list_food(db, date="2026-08-25", since="2026-08-01")
+    with pytest.raises(BodyError):
+        list_activity(db, date="2026-08-25", until="2026-08-30")
+
+
+def test_list_weight_respects_its_limit(db):
+    """The cap is a safety net on a pathological "all time", and the header says
+    "(capped)" off the back of it — so it has to actually bound the query."""
+    import datetime as dt
+
+    for i in range(6):
+        d = (dt.date(2026, 8, 20) + dt.timedelta(days=i)).isoformat()
+        at = int(dt.datetime.fromisoformat(f"{d}T07:00").timestamp())
+        add_weight(db, kg=80.0 - i, date=d, at=at)
+    assert len(list_weight(db, limit=3)) == 3
+    assert len(list_weight(db, since="2026-08-20", until="2026-08-25", limit=2)) == 2

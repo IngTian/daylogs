@@ -550,10 +550,12 @@ async def test_food_feedback_names_burn_when_a_level_is_set(make_app, make_cfg, 
             await pilot.press("space" if ch == " " else ch)
         await pilot.press("enter")
         await pilot.pause()
-        head = str(app.query_one("#food-head").content)
+        panel = str(app.query_one("#energy-body").content)
     assert any("burn" in m for m in seen), f"the toast does not name burn: {seen}"
     assert not any("BMR" in m for m in seen), f"the toast still says BMR: {seen}"
-    assert "burn" in head, "the header should be naming burn too"
+    # The panel, not the FOOD header: that header describes the window of rows beneath it
+    # now, and the day's baseline is stated once, where the arithmetic that uses it lives.
+    assert "burn" in panel, f"the panel should be naming burn too: {panel!r}"
 
 
 async def test_an_unchanged_weigh_in_reports_a_neutral_arrow(make_app, db, type_into):

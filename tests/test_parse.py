@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from daylogs.categories import slugs
+from daylogs.fmt import hhmm
 from daylogs.parse import (
     ParseError,
     parse_activity,
@@ -109,21 +110,35 @@ def test_weigh_rejects_empty_and_nonpositive(bad):
         W(bad)
 
 
+def _stamp(date: str, hh: int, mm: int, ss: int = 43) -> int:
+    """A stamp carrying seconds, so the round trip has something to lose."""
+    y, m, d = (int(x) for x in date.split("-"))
+    return int(datetime(y, m, d, hh, mm, ss, tzinfo=TZ).timestamp())
+
+
 WEIGH_ROWS = [
-    dict(kg=78.2, note="post-run", date="2026-08-20"),
-    dict(kg=79.4, note="weighed at 6:50 before food", date="2026-08-22"),
-    dict(kg=80.0, note="80 was the goal", date="2026-08-22"),
-    dict(kg=81.5, note=None, date="2026-08-27"),
-    dict(kg=77.0, note="felt !light", date="2026-08-27"),
+    dict(kg=78.2, note="post-run", date="2026-08-20",
+         measured_at=_stamp("2026-08-20", 7, 5)),
+    dict(kg=79.4, note="weighed at 6:50 before food", date="2026-08-22",
+         measured_at=_stamp("2026-08-22", 6, 50)),
+    dict(kg=80.0, note="80 was the goal", date="2026-08-22",
+         measured_at=_stamp("2026-08-22", 10, 40)),
+    dict(kg=81.5, note=None, date="2026-08-27",
+         measured_at=_stamp("2026-08-27", 0, 0)),
+    dict(kg=77.0, note="felt !light", date="2026-08-27",
+         measured_at=_stamp("2026-08-27", 23, 59)),
 ]
 
 
 @pytest.mark.parametrize("row", WEIGH_ROWS, ids=[str(r["kg"]) for r in WEIGH_ROWS])
 def test_weigh_round_trips(row):
-    got = W(render_weigh(row))
+    got = W(render_weigh(row, TZ_NAME))
     assert got.kg == row["kg"]
     assert (got.note or None) == row["note"]
     assert got.date == row["date"]
+    # The clock time survives too, now that the line carries it. Midnight and 23:59 are
+    # in the corpus because an off-by-one in the date/time split lands on exactly those.
+    assert hhmm(got.at, TZ_NAME) == hhmm(row["measured_at"], TZ_NAME)
 
 
 # ── food ─────────────────────────────────────────────────────────────────
@@ -764,3 +779,59 @@ def test_activity_round_trips(row):
     assert dt.datetime.fromtimestamp(got.at, TZ).strftime("%Y-%m-%d %H:%M") == (
         dt.datetime.fromtimestamp(row["logged_at"], TZ).strftime("%Y-%m-%d %H:%M")
     )
+
+
+# ── a weigh-in's clock time is now in the line ───────────────────────────
+# The weight table shows `time` because a day weighed twice rendered as two rows both
+# reading `2026-09-04`, indistinguishable — while `measured_at` was the tie-breaker
+# `weight_series` used to pick between them. What you can see is what you can edit, so
+# the time had to become editable at the same moment it became visible.
+#
+# `render_weigh`'s old comment said re-deriving the stamp "would shave the seconds off
+# every edit". That is what `body.restamp` exists to prevent — its own docstring names
+# weight as the motivating case — and it was simply never wired up here.
+
+# 2026-08-27 07:05:43 in Toronto is 11:05:43 UTC — the same stamp test_timezone.py uses,
+# so a zone bug shows up as the same four-hour shift in both files.
+_TZ = TZ_NAME
+STAMP = int(datetime(2026, 8, 27, 7, 5, 43, tzinfo=TZ).timestamp())
+
+
+def _weigh_row(**kw):
+    base = dict(kg=78.2, date="2026-08-27", measured_at=STAMP, note=None)
+    return {**base, **kw}
+
+
+def test_render_weigh_carries_the_reading_time():
+    line = render_weigh(_weigh_row(), _TZ)
+    assert "@2026-08-27/07:05" in line, line
+
+
+def test_a_weigh_in_round_trips_to_the_minute():
+    row = _weigh_row(note="post-run")
+    got = parse_weigh(render_weigh(row, _TZ), now=NOW)
+    assert got.kg == 78.2
+    assert got.note == "post-run"
+    assert got.date == "2026-08-27"
+    assert hhmm(got.at, _TZ) == hhmm(STAMP, _TZ)
+
+
+def test_rendering_a_weigh_in_is_stable_under_a_round_trip():
+    """The property the edit prompt needs: open it twice, submit unchanged twice, and
+    nothing drifts. Asserted as stability rather than instant-preservation for the same
+    reason `render_food`'s is — the grammar's only time token is HH:MM."""
+    row = _weigh_row(note="post-run")
+    once = render_weigh(row, _TZ)
+    parsed = parse_weigh(once, now=NOW)
+    twice = render_weigh(
+        _weigh_row(kg=parsed.kg, date=parsed.date, measured_at=parsed.at, note=parsed.note),
+        _TZ,
+    )
+    assert once == twice
+
+
+def test_the_time_is_rendered_in_the_zone_it_is_given():
+    """Same trap `render_food` documents: rendering in the machine's zone while the
+    parser resolves in the configured one moved every edited row by the offset."""
+    assert "07:05" in render_weigh(_weigh_row(), "America/Toronto")
+    assert "11:05" in render_weigh(_weigh_row(), "UTC")

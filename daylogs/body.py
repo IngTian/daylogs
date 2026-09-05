@@ -228,12 +228,52 @@ def add_food(conn, *, description: str, kcal: int, source: str, date: str, at: i
     return int(cur.lastrowid)
 
 
-def list_food(conn, *, date: str) -> list[sqlite3.Row]:
-    return list(
-        conn.execute(
-            "SELECT * FROM food WHERE date = ? ORDER BY ate_at ASC, id ASC",
-            (_check_date(date),),
+def _day_or_window(
+    conn, table: str, *, stamp: str, date, since, until, limit
+) -> list[sqlite3.Row]:
+    """A single day in the order it happened, or a window newest-first.
+
+    One function, two questions, and the orders differ on purpose. `date=` serves the
+    digest and the Day tab, which read a day out loud and want breakfast before dinner.
+    The window serves the Body table, which is a log you scroll and wants today at the
+    top — the same order `list_weight` returns.
+
+    Both bounds for the window, for the reason `list_weight` documents: with a lower
+    bound alone, viewing an older day listed rows that had not happened yet.
+
+    Passing both a date and a bound is refused rather than resolved. They are different
+    questions with different orders, and picking one silently would make a call site's
+    intent unreadable.
+    """
+    if date is not None and (since is not None or until is not None):
+        raise BodyError(f"list a {table} by date or by window, not both")
+    if date is not None:
+        return list(
+            conn.execute(
+                f"SELECT * FROM {table} WHERE date = ? ORDER BY {stamp} ASC, id ASC",
+                (_check_date(date),),
+            )
         )
+    sql = f"SELECT * FROM {table} WHERE 1=1"
+    args: list = []
+    if since:
+        sql += " AND date >= ?"
+        args.append(_check_date(since))
+    if until:
+        sql += " AND date <= ?"
+        args.append(_check_date(until))
+    sql += f" ORDER BY date DESC, {stamp} DESC, id DESC LIMIT ?"
+    args.append(int(limit))
+    return list(conn.execute(sql, args))
+
+
+def list_food(
+    conn, *, date: str | None = None, since: str | None = None,
+    until: str | None = None, limit: int = 2000,
+) -> list[sqlite3.Row]:
+    """A day's meals, or a window's. See `_day_or_window`."""
+    return _day_or_window(
+        conn, "food", stamp="ate_at", date=date, since=since, until=until, limit=limit
     )
 
 
@@ -418,13 +458,13 @@ def delete_activity(conn, id: int) -> dict | None:
     return _delete(conn, "activity", id)
 
 
-def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
-    """A day's activities, oldest first — the order they happened."""
-    return list(
-        conn.execute(
-            "SELECT * FROM activity WHERE date = ? ORDER BY logged_at ASC",
-            (_check_date(date),),
-        )
+def list_activity(
+    conn, *, date: str | None = None, since: str | None = None,
+    until: str | None = None, limit: int = 2000,
+) -> list[sqlite3.Row]:
+    """A day's activities oldest first, or a window's newest first. See `_day_or_window`."""
+    return _day_or_window(
+        conn, "activity", stamp="logged_at", date=date, since=since, until=until, limit=limit
     )
 
 
