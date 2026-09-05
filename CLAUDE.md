@@ -371,7 +371,17 @@ appended prose where it was convenient rather than editing the map.
   `render_weigh` emits `@date/HH:MM` so it can be edited. The recorded objection was that
   re-deriving the stamp "would shave the seconds off every edit"; that is exactly what
   `body.restamp` exists to prevent — its own docstring names weight as the motivating
-  case — and it had simply never been wired up. Restamped only when the minute moved. Expense's `~note` is currently write-only (settable, faithfully
+  case — and it had simply never been wired up.
+  `body_tab._restamp_for` is the one rule every edit path should use: a line naming a time
+  restamps to it; a line naming only a **date** keeps the row's own clock time and moves it
+  to that date; a line naming neither changes nothing, because `restamp` then compares equal
+  and returns None. The middle case is why the helper exists — the grammar resolves a
+  missing time to *now*, so restamping from the parsed instant moved a 07:05 reading to
+  whenever the edit happened, while keeping the stored stamp left it on the old day and
+  inverted `morning_weight`/`latest_weight`. `restamp` compares the whole local **minute**,
+  date included; comparing `%H:%M` alone is what made a date-only move look like nothing
+  had changed.
+  Expense's `~note` is currently write-only (settable, faithfully
   round-tripped through the edit prefill, displayed nowhere). An edit writes only
   the fields it parsed. The submitted line is authoritative: drop the note words
   and the note is cleared; submit unchanged and the note survives.

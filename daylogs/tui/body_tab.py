@@ -393,7 +393,12 @@ class BodyTab(PanelTab):
                 # in the ACTIVITY header, which now describes a window rather than a day.
                 # Named as a key, not a file — telling someone to edit config.toml is how
                 # this panel stayed empty before.
-                lines.append("  activity        —   press h to set an ordinary day")
+                # Two lines, like the BMR guidance above: one line of 52 cells clipped to
+                # "press h to set an ordin…" in a 46-column panel, and `.panel-body` uses
+                # `text-overflow: ellipsis`, so it truncated silently while a substring
+                # assertion on its prefix went on passing.
+                lines.append("  activity        —   press h to set an")
+                lines.append("                      ordinary day")
             else:
                 # BMR and activity derive `burn`; `in`, `burn` and `net` are the sum.
                 # So BMR drops its minus sign: it is no longer a term of `net`, and a
@@ -565,14 +570,22 @@ class BodyTab(PanelTab):
         self.reload()
 
     def key_prev_period(self) -> None:
-        self._shift_day(-1)
+        self._shift(-1)
 
     def key_next_period(self) -> None:
-        self._shift_day(1)
+        self._shift(1)
 
-    def _shift_day(self, delta: int) -> None:
-        base = dt.date.fromisoformat(self.viewing_date or self.app.today())
-        self.viewing_date = (base + dt.timedelta(days=delta)).isoformat()
+    def _shift(self, delta: int) -> None:
+        """Step the anchor by one whole horizon, the way Money always has.
+
+        It stepped one calendar day, which was the right size while the food and activity
+        tables were per-day. Against a windowed tab it means thirty presses to page back a
+        month — and at `all` it moved the right edge of a window whose header says ALL TIME,
+        so the list silently stopped including today while claiming to show everything.
+        `horizon.shift` makes `all` a no-op, because `_STEP["all"]` is `(0, 0)`.
+        """
+        anchor = self.viewing_date or self.app.today()
+        self.viewing_date = hz.shift(self.horizon, anchor, delta)
         self.reload()
 
     def key_jump_now(self) -> None:
@@ -818,14 +831,9 @@ class BodyTab(PanelTab):
         # `measured_at` carries seconds, the grammar's only time token is HH:MM, and those
         # seconds are the tie-breaker `weight_series` uses to pick a day's reading. That is
         # precisely the case `body.restamp` was written for.
-        at = before["measured_at"]
-        if self._line_sets_a_time(value):
-            tz = self.app.cfg.timezone
-            moved = body.restamp(
-                before["measured_at"], date=r.date, hhmm=hhmm(r.at, tz), tz=tz
-            )
-            if moved is not None:
-                at = moved
+        at = self._restamp_for(
+            before["measured_at"], parsed_at=r.at, date=r.date, line=value
+        )
         body.update_weight(
             self.app.conn, row_id, kg=r.kg, date=r.date, note=r.note or "", measured_at=at
         )
@@ -838,11 +846,35 @@ class BodyTab(PanelTab):
 
         Not `"@" in value`: an escaped `\@` inside a description is a plain word, and
         reading raw text for a sigil is the scavenging this grammar exists to remove.
+
+        Every `/`-separated part is checked, not just the last. `parse.resolve_when` is
+        deliberately order-free, so `@09:30/2026-09-04` means exactly what
+        `@2026-09-04/09:30` means — and matching only the tail read the reversed form as
+        "no time given", so an edit that plainly set one silently kept the old stamp.
         """
         for tok in sigil.tokenize(value):
-            if tok.sigil == "@" and parse.TIME_RE.match(tok.value.split("/")[-1]):
+            if tok.sigil == "@" and any(
+                parse.TIME_RE.match(part) for part in tok.value.split("/")
+            ):
                 return True
         return False
+
+    def _restamp_for(self, stored: int, *, parsed_at: int, date: str, line: str) -> int:
+        """The timestamp an edited row should carry.
+
+        One rule for every case, because the three that matter each went wrong on their own
+        before: a line naming both a date and a time restamps to it; a line naming only a
+        time keeps the anchor's date; a line naming only a **date** keeps the row's own
+        clock time and moves it to that date — the grammar resolves a missing time to *now*,
+        so restamping from the parsed instant would move a 07:05 reading to whenever the
+        edit happened, and keeping the stored stamp instead left it on the old day, which
+        inverts `morning_weight` and `latest_weight`. A line naming neither changes nothing,
+        because `restamp` then compares equal and returns None.
+        """
+        tz = self.app.cfg.timezone
+        clock = hhmm(parsed_at if self._line_sets_a_time(line) else stored, tz)
+        moved = body.restamp(stored, date=date, hhmm=clock, tz=tz)
+        return stored if moved is None else moved
 
     def _submit_food(self, value: str) -> None:
         r = parse_food(value, now=self.app.now())

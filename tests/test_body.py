@@ -17,6 +17,7 @@ from daylogs.body import (
     list_activity,
     list_food,
     list_weight,
+    morning_weight,
     restamp,
     update_food,
     update_weight,
@@ -398,3 +399,97 @@ def test_list_weight_respects_its_limit(db):
         add_weight(db, kg=80.0 - i, date=d, at=at)
     assert len(list_weight(db, limit=3)) == 3
     assert len(list_weight(db, since="2026-08-20", until="2026-08-25", limit=2)) == 2
+
+
+def test_restamp_follows_a_changed_date_even_when_the_minute_is_the_same(db):
+    """The guard compared only `%H:%M`, so it answered "nothing changed" for an edit that
+    moved the row to a different day at the same clock time — and the caller then wrote the
+    new `date` beside the old day's timestamp.
+
+    That inverts the two named weight concepts. Reproduced: an after-dinner 82.0 on the 4th
+    and a fasted 80.0 on the 5th; move the evening row to the 5th and `morning_weight`
+    returns 82.0 while `latest_weight` returns 80.0 — exactly backwards, so the trend, the
+    7d/30d deltas and the digest's `weight_kg` (documented as the reading "before any of the
+    food listed") all take the after-dinner one.
+    """
+    at = _stamp(2026, 8, 20, 21, 0, 17)
+    out = restamp(at, date="2026-08-21", hhmm="21:00", tz=RE_TZ)
+    assert out is not None, "a date-only move left the stamp on the old day"
+    assert _wall(out) == datetime(2026, 8, 21, 21, 0, tzinfo=_RZ)
+
+
+def test_restamp_still_returns_none_when_neither_half_moved(db):
+    """The whole reason `None` exists: the stamp carries seconds the grammar cannot express,
+    and those seconds are the tie-breaker `weight_series` uses to pick a day's reading."""
+    assert restamp(_stamp(2026, 8, 20, 7, 5, 43), date="2026-08-20", hhmm="07:05",
+                   tz=RE_TZ) is None
+
+
+def test_a_date_only_weight_edit_keeps_the_two_concepts_straight(db):
+    """The end-to-end shape of it, through the data layer the UI calls."""
+    evening = _stamp(2026, 9, 4, 21, 0, 17)
+    morning = _stamp(2026, 9, 5, 6, 30, 41)
+    rid = add_weight(db, kg=82.0, date="2026-09-04", at=evening, note="after dinner")
+    add_weight(db, kg=80.0, date="2026-09-05", at=morning)
+
+    moved = restamp(evening, date="2026-09-05", hhmm="21:00", tz=RE_TZ)
+    update_weight(db, rid, kg=82.0, date="2026-09-05", note="after dinner",
+                  measured_at=moved if moved is not None else evening)
+
+    assert morning_weight(db, on_or_before="2026-09-05")["kg"] == 80.0, (
+        "the fasted reading is no longer the day's first"
+    )
+    assert latest_weight(db, on_or_before="2026-09-05")["kg"] == 82.0, (
+        "the after-dinner reading is no longer the day's last"
+    )
+
+
+def test_a_date_only_activity_edit_moves_the_days_factor_with_it(db, tmp_path):
+    """`resolved_factor` picks a day's *latest* inference by `logged_at`. A row whose date
+    moved but whose stamp did not is counted for the new day at the old day's position, so
+    it can win a tie it should lose — rescaling every calorie figure for that day."""
+    from daylogs.body import add_activity, resolved_factor, update_activity
+
+    add_activity(db, description="walk", factor=1.3, date="2026-08-25",
+                 at=_stamp(2026, 8, 25, 8, 0), source="labeled")
+    add_activity(db, description="gym", factor=1.8, date="2026-08-25",
+                 at=_stamp(2026, 8, 25, 18, 0), source="labeled")
+    stretch = _stamp(2026, 8, 27, 7, 5)
+    sid = add_activity(db, description="stretch", factor=1.6, date="2026-08-27",
+                       at=stretch, source="labeled")
+    cfg = _cfg(tmp_path, timezone=RE_TZ)
+    assert resolved_factor(db, cfg, date="2026-08-25") == (1.8, "logged")
+
+    moved = restamp(stretch, date="2026-08-25", hhmm="07:05", tz=RE_TZ)
+    update_activity(db, sid, description="stretch", date="2026-08-25",
+                    **({} if moved is None else {"logged_at": moved}))
+    assert resolved_factor(db, cfg, date="2026-08-25") == (1.8, "logged"), (
+        "the moved row won a tie it should lose — its stamp stayed on the old day"
+    )
+
+
+def test_a_windowed_day_reads_in_the_order_it_happened(db):
+    """`1d` has to *be* the old per-day view, order included — the claim appears in
+    `_fill_table`, in CLAUDE.md, in the README and in a test name, and only row counts were
+    ever asserted. Measured before the fix: `list_food(date=…)` gave breakfast/lunch/dinner
+    while the window with `start == end` gave dinner/lunch/breakfast, so the screen read a
+    day backwards while the digest read it forwards."""
+    for hh, mm, name in ((8, 5, "breakfast"), (12, 40, "lunch"), (19, 20, "dinner")):
+        add_food(db, description=name, kcal=500, source="labeled", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, hh, mm))
+    by_date = [r["description"] for r in list_food(db, date="2026-09-04")]
+    windowed = [r["description"] for r in list_food(db, since="2026-09-04", until="2026-09-04")]
+    assert by_date == ["breakfast", "lunch", "dinner"]
+    assert windowed == by_date, "a single-day window reads the day backwards"
+
+
+def test_a_multi_day_window_puts_the_newest_day_first_and_reads_each_forwards(db):
+    """Most recent day at the top, each day in the order it happened. Reverse-chronological
+    all the way down would make every day read backwards; chronological all the way down
+    would bury today under a month of history."""
+    for d in ("2026-09-03", "2026-09-04"):
+        for hh, name in ((8, "breakfast"), (19, "dinner")):
+            add_food(db, description=f"{name} {d[-2:]}", kcal=500, source="labeled", date=d,
+                     at=_stamp(2026, int(d[5:7]), int(d[8:]), hh, 0))
+    got = [r["description"] for r in list_food(db, since="2026-09-01", until="2026-09-04")]
+    assert got == ["breakfast 04", "dinner 04", "breakfast 03", "dinner 03"], got

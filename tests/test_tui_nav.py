@@ -143,16 +143,34 @@ async def test_shift_tab_wraps_backwards(make_app):
 
 
 # ── periods ──────────────────────────────────────────────────────────────
-async def test_brackets_step_a_day_on_body_and_a_month_on_money(make_app):
+async def test_brackets_step_one_whole_horizon_on_both_tabs(make_app):
+    """`[` used to step one calendar day on Body and one whole horizon on Money. The day was
+    the right size while Body's food and activity tables were per-day; once every table
+    follows the window it means thirty presses to page back a month, and at `all` it moved
+    the right edge of a window whose header says ALL TIME. Both tabs use `horizon.shift`
+    now, so Body's default `1m` steps a month — and at `1d` it still steps a day."""
     app = make_app(now=lambda: NOW)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await go_body(pilot, app)
+        body = await go_body(pilot, app)
+        assert body.horizon == "1m", "this test reads the default horizon"
         await pilot.press("left_square_bracket")
-        assert app.query_one("#body").viewing_date == "2026-08-26"
+        assert app.query_one("#body").viewing_date == "2026-07-27"
         await go_money(pilot, app)
         await pilot.press("left_square_bracket")
         assert app.query_one("#money").view.anchor == "2026-07-27"
+
+
+async def test_brackets_still_step_a_day_on_body_at_one_day(make_app):
+    """Day-by-day browsing did not go away; it moved to the horizon that means one day,
+    which is where Money has always kept the same idea."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        body = await go_body(pilot, app)
+        body.horizon = "1d"
+        await pilot.press("left_square_bracket")
+        assert app.query_one("#body").viewing_date == "2026-08-26"
 
 
 async def test_brackets_step_by_the_active_range(make_app):

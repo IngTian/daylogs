@@ -233,10 +233,16 @@ def _day_or_window(
 ) -> list[sqlite3.Row]:
     """A single day in the order it happened, or a window newest-first.
 
-    One function, two questions, and the orders differ on purpose. `date=` serves the
-    digest and the Day tab, which read a day out loud and want breakfast before dinner.
-    The window serves the Body table, which is a log you scroll and wants today at the
-    top — the same order `list_weight` returns.
+    One function, two questions, one order: **most recent day first, each day read
+    forwards.** `date=` serves the digest and the Day tab, which read a day out loud and
+    want breakfast before dinner; the window serves the Body table, which is a log you
+    scroll and wants today at the top.
+
+    Those two agree at `1d`, which is the point — `_fill_table` claims a single-day window
+    reproduces the per-day view exactly. It did not: the window was reverse-chronological
+    throughout, so a day on screen read dinner-first while the digest read it breakfast
+    first, and only row counts were ever asserted. Descending by date and ascending within
+    it satisfies both, and makes each day's top row the one `morning_weight` picks.
 
     Both bounds for the window, for the reason `list_weight` documents: with a lower
     bound alone, viewing an older day listed rows that had not happened yet.
@@ -262,7 +268,7 @@ def _day_or_window(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    sql += f" ORDER BY date DESC, {stamp} DESC, id DESC LIMIT ?"
+    sql += f" ORDER BY date DESC, {stamp} ASC, id ASC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
@@ -298,8 +304,8 @@ def update_food(conn, id: int, **fields) -> bool:
 
 
 def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
-    """The new epoch-second timestamp for a row whose clock time was edited, or
-    `None` when the minute did not change.
+    """The new epoch-second timestamp for a row whose date or clock time was edited, or
+    `None` when neither moved.
 
     Stored timestamps carry seconds; the grammar's only time token is `HH:MM`. So
     re-deriving the timestamp on every edit would quietly shave the seconds off a
@@ -308,12 +314,22 @@ def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
     means "leave the column alone", which is what the caller wants far more often
     than a rewrite.
 
+    The guard compares the whole local **minute**, date included. It compared only
+    `%H:%M`, which made an edit that moved a row to another day at the same clock time
+    look like nothing had changed — so the caller wrote the new `date` beside the old
+    day's timestamp. For weight that inverts the two named concepts: an after-dinner
+    reading moved onto the next day became that day's `morning_weight` while the fasted
+    reading became its `latest_weight`, so the trend, the 7d/30d deltas and the digest's
+    `weight_kg` all took the wrong one. For activity it lets a moved row win a
+    `resolved_factor` tie it should lose, rescaling every calorie figure for that day.
+    Both were reproduced before this line changed.
+
     `tz` has to be the zone the line was *rendered* in. Comparing in a different one
     makes every edit look like a time change, so it rewrites the tie-breaker column on
     an edit that only touched a description.
     """
     zone = ZoneInfo(tz)
-    if dt.datetime.fromtimestamp(int(at), zone).strftime("%H:%M") == hhmm:
+    if dt.datetime.fromtimestamp(int(at), zone).strftime("%Y-%m-%d %H:%M") == f"{date} {hhmm}":
         return None
     hh, mm = (int(part) for part in hhmm.split(":"))
     return int(
