@@ -159,3 +159,88 @@ def test_the_picker_illustration_is_output_the_picker_can_produce():
     )
     assert f"of {len(names)}" in box[0], f"the count is stale: {box[0]!r}"
     assert "esc restores nord" in box[2], f"the subtitle names the wrong theme: {box[2]!r}"
+
+
+# ── the data section ─────────────────────────────────────────────────────
+def test_the_readme_names_every_table_the_export_writes():
+    """The README enumerated six of seven and omitted `activity`, one clause above a
+    sentence promising "the table list comes from the database rather than a hand-kept
+    list, so nothing is silently left out". The enumeration *is* the hand-kept list, so it
+    is pinned to the schema here — the same treatment the theme-picker box gets.
+
+    This is the durability section on the PyPI front page: a reader who logs activities was
+    being told their activity log does not leave the app, and `day export` writes
+    `activity.csv`.
+    """
+    import sqlite3
+
+    from daylogs.db import ensure_schema, table_names
+
+    conn = sqlite3.connect(":memory:")
+    ensure_schema(conn)
+    tables = table_names(conn)
+
+    text = README.read_text()
+    start = text.index("day export <dir>` writes one CSV per table")
+    passage = text[start : start + 400]
+    for t in tables:
+        assert f"`{t}`" in passage, f"the export list omits {t!r}: {passage!r}"
+    # And the count stated in the Data section has to agree with the schema.
+    words = {6: "six", 7: "seven", 8: "eight"}
+    assert f"SQLite, {words[len(tables)]} tables" in text, (
+        f"the Data section's table count disagrees with the {len(tables)}-table schema"
+    )
+
+
+def test_the_profile_prompt_box_is_rectangular_and_matches_its_hint():
+    """The third hand-drawn widget box to be wrong: 72 / 73 / 73 columns, a top border one
+    short of its sides — the same defect the theme-picker box had, in a README that declares
+    the project does not hand-draw widget art.
+
+    Pinned to the data the widget itself renders from, so the three slots cannot drift:
+    border title = the label, body = the example, border subtitle = the grammar.
+    """
+    from daylogs.tui.hints import for_label
+
+    lines = README.read_text().splitlines()
+    top = next(i for i, ln in enumerate(lines) if ln.startswith("╭─ profile"))
+    box = lines[top : top + 3]
+
+    widths = {len(ln) for ln in box}
+    assert len(widths) == 1, f"the box is not rectangular: {sorted(widths)}"
+
+    h = for_label("profile")
+    assert box[0].startswith(f"╭─ {h.label} › "), box[0]
+    assert box[1].strip(" │") == h.example, (
+        f"the body is not the hint's example:\n  README: {box[1].strip(' │')!r}\n"
+        f"  hint:   {h.example!r}"
+    )
+    assert box[2].startswith(f"╰─ {h.grammar} "), (
+        f"the subtitle is not the hint's grammar:\n  README: {box[2]!r}\n  hint: {h.grammar!r}"
+    )
+
+
+def test_the_readme_never_describes_weight_as_last_reading_wins():
+    """It did, and it prescribed an action in the same breath: "correcting a day means
+    logging it again, the same last-reading-wins rule two weigh-ins on one day follow" —
+    twenty-eight lines above the passage that correctly says the trend uses each day's
+    *first* reading.
+
+    A reader with a bad weigh-in would re-weigh to fix the trend, and the trend keeps the
+    first reading. Latest-wins is the *activity factor's* rule; weight is the opposite, and
+    `weight_series`/`morning_weight` both take `MIN(measured_at)` to prove it.
+    """
+    text = README.read_text()
+    assert "last-reading-wins" not in text, (
+        "that phrase only ever appeared in a false claim about weight — if it is back, "
+        "check which table it is describing"
+    )
+    assert "each day's **first** reading" in text, (
+        "the README must state which of a day's readings the trend uses"
+    )
+    # And the contrast has to be stated where the activity rule is, because that is where a
+    # reader learns "log again and the newer row wins" and could carry it across.
+    assert "Weight is the opposite" in text, (
+        "the activity-factor passage must say weight does NOT follow latest-wins — that is "
+        "the sentence a reader carries into the wrong action"
+    )

@@ -4,7 +4,7 @@
 losing your laptop and the wrong one for looking at three years of spend in a
 spreadsheet, so this writes one CSV per table instead.
 
-CSV rather than JSON because every one of the six tables is flat scalars, so
+CSV rather than JSON because every one of the seven tables is flat scalars, so
 JSON's type fidelity would buy almost nothing, while "double-click it" is the
 most likely thing anyone actually does with an export. The one real cost is that
 CSV cannot tell NULL from an empty string — a note that was never written and a
@@ -38,7 +38,7 @@ def export_csv(
 ) -> list[Path]:
     """Write one CSV per table under a dated directory. Returns what it wrote.
 
-    The date goes on the directory rather than the filenames — six files cannot
+    The date goes on the directory rather than the filenames — seven files cannot
     each carry it the way `backup`'s single file does — so exporting twice on
     different days keeps both snapshots, and twice on the same day replaces it.
 
