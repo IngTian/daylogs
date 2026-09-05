@@ -123,3 +123,39 @@ def test_readme_example_parses(prompt: str, example: str) -> None:
         import datetime as dt
         parsed_time = dt.datetime.fromtimestamp(result.at, ZoneInfo("America/Toronto"))
         assert parsed_time.hour == 7 and parsed_time.minute == 30, "@07:30 → time must be 07:30"
+
+
+# ── the theme picker illustration ────────────────────────────────────────
+def test_the_picker_illustration_is_output_the_picker_can_produce():
+    """Hand-drawn art of a live widget is banned here for a reason — `tools/screenshots.py`
+    exists because the Day tab's ASCII "drifted twice … an illustration maintained by hand
+    cannot be verified against the thing it illustrates".
+
+    The picker block came back hand-written and was wrong in three ways at once: its top
+    border was one column short of its sides, it showed a *truncated* name (`solarized…`)
+    that `strip` can never emit — it only ever appends `" …"` after a whole name — and it
+    named a neighbourhood of the list the cursor position does not produce.
+
+    So it is pinned to the pure function that generates it. A three-row box at 84 columns
+    leaves 80 for content: two border columns and two of padding.
+    """
+    from daylogs.tui import themes
+
+    lines = README.read_text().splitlines()
+    top = next(i for i, ln in enumerate(lines) if ln.startswith("╭─ theme"))
+    box = lines[top : top + 3]
+
+    widths = {len(ln) for ln in box}
+    assert len(widths) == 1, f"the box is not rectangular: {sorted(widths)}"
+    width = widths.pop()
+
+    body = box[1]
+    assert body.startswith("│ ") and body.endswith("│"), body
+    content = body[2:-1].rstrip()
+    names = themes.names()
+    assert content == themes.strip(names, names.index("nord"), width - 4), (
+        f"the illustration is not what `strip` produces:\n  README: {content!r}\n"
+        f"  real:   {themes.strip(names, names.index('nord'), width - 4)!r}"
+    )
+    assert f"of {len(names)}" in box[0], f"the count is stale: {box[0]!r}"
+    assert "esc restores nord" in box[2], f"the subtitle names the wrong theme: {box[2]!r}"

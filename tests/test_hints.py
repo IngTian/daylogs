@@ -49,9 +49,10 @@ PARSERS = {
 # have a grammar, and left its example unchecked by the parametrized case.
 PLAIN_PARSERS = {"profile": parse_profile, "new category": parse_category}
 
-# `theme` takes one name from a fixed list, validated by `themes.check` rather than
-# by a grammar — there is nothing to parse, so it belongs here deliberately.
-NO_PARSER = {"filter", "photo path", "fix category", "go to date", "theme"}
+# Prompts with no grammar behind them: free text, a filesystem path, a bare category, a
+# date. `theme` used to be here too, described as "validated by `themes.check`" — both the
+# prompt and that function are gone, replaced by a picker, and the entry outlived them.
+NO_PARSER = {"filter", "photo path", "fix category", "go to date"}
 
 
 def test_every_prompt_opened_in_the_app_has_a_hint():
@@ -135,6 +136,17 @@ def test_labels_without_a_parser_are_deliberate_not_forgotten():
     assert not uncovered, f"classify these in PARSERS, PLAIN_PARSERS or NO_PARSER: {uncovered}"
 
 
+def test_the_parser_tables_name_no_prompt_that_stopped_existing():
+    """The other direction, which nothing checked. `theme` sat in NO_PARSER for a release
+    after both its prompt and `themes.check` were deleted, describing a function that no
+    longer existed — and since the assertion above only subtracts, a stale extra entry was
+    invisible. A label that lingers here is a slot a future prompt of the same name would
+    silently inherit, with its example unchecked by anything."""
+    labels = {h.label for h in hints.HINTS}
+    stale = sorted((set(PARSERS) | set(PLAIN_PARSERS) | NO_PARSER) - labels)
+    assert not stale, f"these are classified but no prompt has them any more: {stale}"
+
+
 def test_labels_in_source_finds_both_call_shapes():
     text = 'self.app.prompt.open("weigh")\nself.prompt.open("filter", self.view.filter_text)\n'
     assert hints.labels_in_source(text) == {"weigh", "filter"}
@@ -207,17 +219,17 @@ def test_an_example_that_uses_a_sigil_has_it_named_in_the_grammar():
                 ), f"{h.label}: example uses {tok.sigil}, grammar does not"
 
 
-def test_theme_completes_without_a_sigil():
-    """Its whole input is a theme name, so the implicit sigil is the empty string —
-    the same shape as `fix category`."""
-    v = hints.vocab_for(hints.for_label("theme"))
-    assert "gruvbox" in v[""]
-    assert "tokyo-night" in v[""]
+def test_no_hint_declares_a_vocabulary_it_cannot_resolve():
+    """`vocab_for` had a `label == "theme"` branch that returned Textual's theme list,
+    because that prompt completed a bare word and `fix category` completes a different
+    one — the empty sigil alone could not decide between them. `T` is a picker now, so
+    that branch is gone and the empty sigil means categories again, unambiguously.
 
-
-def test_theme_offers_textuals_list_not_a_frozen_copy():
-    """If this ever diverges from themes.names(), completion is offering names the
-    prompt will reject."""
-    from daylogs.tui import themes
-
-    assert hints.vocab_for(hints.for_label("theme"))[""] == themes.names()
+    Which makes the general property assertable: every sigil a hint declares resolves to
+    a non-empty vocabulary. A hint declaring one that resolves to nothing would make the
+    prompt answer "no match" to everything typed into it.
+    """
+    for h in hints.HINTS:
+        vocab = hints.vocab_for(h)
+        for sig in h.sigils:
+            assert vocab.get(sig), f"{h.label} declares {sig!r} and gets nothing back"
