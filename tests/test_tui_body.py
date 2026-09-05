@@ -1257,6 +1257,37 @@ async def test_returning_to_a_tab_redraws_at_the_real_panel_width(make_app, db):
     assert again == first, f"the return visit drew at {again} columns, the first at {first}"
 
 
+async def test_the_return_visit_does_not_depend_on_a_resize_arriving(make_app, db, monkeypatch):
+    """The property that made the first version of this flaky.
+
+    Correcting a pre-layout build from the following `Resize` held locally and failed on CI,
+    where the event is often not delivered before the assertion — so the same test passed on
+    one PR and failed on the next with identical code. `show_scope` defers its reload with
+    `call_after_refresh` instead, which is a Textual callback rather than a terminal event.
+    Asserted with every Resize dropped, because "it works when the event arrives" is exactly
+    what was not good enough.
+    """
+    from daylogs.body import add_weight
+    from daylogs.tui.common import PanelTab
+
+    for i in range(8):
+        add_weight(db, kg=78.0 + i * 0.2, date=f"2026-08-{21 + i:02d}", at=1787000000 + i * 86400)
+    monkeypatch.setattr(PanelTab, "on_resize", lambda self, event: None)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(200, 50)) as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        first = _chart_width(app)
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("2")
+        await pilot.pause()
+        again = _chart_width(app)
+    assert first > 46 and again == first, (
+        f"without a Resize the return visit drew at {again}, the first at {first}"
+    )
+
+
 async def test_a_rebuild_that_had_to_guess_is_not_treated_as_settled(make_app, db):
     """Why `_used_fallback` is cleared *before* the reload, not after.
 
