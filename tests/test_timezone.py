@@ -329,6 +329,7 @@ def test_only_the_ui_layer_imports_textual():
         "tui/hints.py",
         "tui/keymap.py",
         "tui/money_tab.py",
+        "tui/progress.py",
         "tui/prompt.py",
         "tui/summary_tab.py",
         "tui/themes.py",

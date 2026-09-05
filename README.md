@@ -92,6 +92,19 @@ The footer is two rows: what you're looking at on top (range, sort, filters), an
 the keys below, grouped into actions, view controls and navigation and coloured by
 group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
 
+Anything that calls Claude — a calorie estimate, an activity factor, the daily read —
+takes seconds to a minute, so a small popup appears above the prompt for exactly as long
+as the call runs, counting elapsed against the time that call is allowed:
+
+```
+╭───────────────────────────────────╮
+│ • estimating calories   18s / 60s │
+╰───────────────────────────────────╯
+```
+
+It is app-level, so switching tabs while you wait doesn't hide it, and two calls at once
+show as two lines.
+
 **Everywhere**
 
 | Key | Does |

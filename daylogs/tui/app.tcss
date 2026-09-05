@@ -23,6 +23,20 @@ Screen {
     border: round $error;
 }
 
+/* The in-progress popup. Bordered in the accent colour and hidden entirely when
+   nothing is running — `height: auto` on #bottom means it costs no rows when absent,
+   so an idle screen looks exactly as it did. */
+#work {
+    /* `width: auto` so the box hugs its text — full width reads as a status bar, and
+       the point is that something transient is happening. `height: auto` plus
+       #bottom's own auto height is what makes it cost no rows at all when hidden. */
+    width: auto;
+    height: auto;
+    border: round $accent;
+    padding: 0 1;
+    margin: 0 1;
+}
+
 /* Two rows: state on top, grouped keys below. One row meant nineteen hints in
    a single 190-character line, where nothing stood out. */
 #keyfooter {

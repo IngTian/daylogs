@@ -33,6 +33,7 @@ from daylogs.tui.body_tab import BodyTab
 from daylogs.tui.footer import KeyFooter
 from daylogs.tui.help import HelpScreen
 from daylogs.tui.money_tab import MoneyTab
+from daylogs.tui.progress import WorkPopup
 from daylogs.tui.prompt import InlinePrompt
 from daylogs.tui.summary_tab import SummaryTab
 from daylogs.tui.themes import ThemeError
@@ -98,6 +99,9 @@ class DaylogsApp(App):
         self.undo_stack = UndoStack()
         self.prompt = InlinePrompt()
         self.key_footer = KeyFooter()
+        # App-level, not per-tab: a running estimate used to disappear the moment you
+        # pressed `3`, and its answer arrived later as a prompt with no explanation.
+        self.work_popup = WorkPopup(id="work")
         self.summary_worker_started = False
         self._confirm: Callable[[], None] | None = None
 
@@ -125,6 +129,12 @@ class DaylogsApp(App):
         # docking both made the footer claim the last row and clip the prompt's
         # bottom border.
         with Vertical(id="bottom"):
+            # Above the prompt, inside the one bottom-docked container rather than on a
+            # layer of its own: floating it would cover the row you are reading, and a
+            # second independently-docked widget is what clipped the prompt's border
+            # before. Appearing here pushes content up instead of hiding it, in the place
+            # the eye already goes for the prompt and the footer.
+            yield self.work_popup
             yield self.prompt
             yield self.key_footer
 
@@ -155,19 +165,48 @@ class DaylogsApp(App):
     def scope(self) -> str:
         return _SCOPE_OF[self.active_tab_id]
 
-    def _active_tab(self):
+    def _tab_for(self, tab_id: str):
         return {
             "tab-body": lambda: self.query_one("#body", BodyTab),
             "tab-money": lambda: self.query_one("#money", MoneyTab),
             "tab-summary": lambda: self.query_one("#summary", SummaryTab),
-        }[self.active_tab_id]()
+        }[tab_id]()
+
+    def _active_tab(self):
+        return self._tab_for(self.active_tab_id)
+
+    def _prompt_tab(self):
+        """The tab an open prompt's answer belongs to — the one that opened it.
+
+        Not `_active_tab()`. `confirm food` and `confirm activity` are opened by a worker
+        up to a minute after the keypress, and the popup exists so you can look at another
+        tab while you wait; handing the answer to whatever is on screen gave it to a tab
+        with no branch for that label and silently dropped a logged meal or activity.
+        Falls back to the active tab, so a prompt opened before this existed still routes
+        somewhere rather than raising.
+        """
+        owner = self.prompt.owner
+        return self._tab_for(_TAB_OF[owner]) if owner in _TAB_OF else self._active_tab()
 
     def show_scope(self, scope: str) -> None:
+        """Switch tabs, and rebuild the arriving tab *after* it has been laid out.
+
+        `call_after_refresh`, not a direct `reload()`. The pane being switched to has not
+        been laid out yet at this point, so its panels measure 0 and `panel_width` takes the
+        46-column `_FALLBACK` — every visit after the first drew a 46-column chart inside a
+        96-column panel. Correcting that from the following `Resize` is a race: it holds
+        locally and does not hold on CI, where the event is often not delivered before the
+        next thing happens. One frame later the layout is settled and the measurement is
+        real. This is the same reason `on_mount` ends in `call_after_refresh(_after_layout)`.
+
+        The tab still holds the previous visit's content for that one frame, which is why
+        the reload can be deferred rather than doubled.
+        """
         if self.prompt.is_open or scope not in _TAB_OF:
             return
         self.query_one("#tabs", TabbedContent).active = _TAB_OF[scope]
         tab = self._active_tab()
-        tab.reload()
+        self.call_after_refresh(tab.reload)
         tab.focus_default()
         self.refresh_footer()
 
@@ -321,14 +360,17 @@ class DaylogsApp(App):
         self.refresh_tabs()
 
     # ── prompt plumbing ──────────────────────────────────────────────────
-    def _cancel_editing(self) -> None:
+    def _cancel_editing(self, owner: str = "") -> None:
         """Drop an armed edit id so the next entry does not corrupt that row.
 
         The edit prompts share their labels with the entry prompts now, so an
         abandoned edit has to drop its row id here — otherwise the next plain
         `w` or `e` is consumed as an update of the row you walked away from.
+
+        Routed to the tab that opened the prompt. `owner` is passed in on the cancel path
+        because `InlinePrompt.close()` runs before the message is handled and clears it.
         """
-        tab = self._active_tab()
+        tab = self._tab_for(_TAB_OF[owner]) if owner in _TAB_OF else self._prompt_tab()
         cancel = getattr(tab, "cancel_editing", None)
         if cancel is not None:
             cancel()
@@ -344,11 +386,14 @@ class DaylogsApp(App):
             return
         event.stop()
         label, value = self.prompt.label, event.value.strip()
-        tab = self._active_tab()
+        # The answer belongs to the tab that ASKED; focus belongs to the tab on SCREEN.
+        # They differ only for the two worker-opened confirm prompts, and conflating them
+        # both dropped the entry and tried to focus a hidden tab's table.
+        tab = self._prompt_tab()
         if not value:
             self._cancel_editing()
             self.prompt.close()
-            tab.focus_default()
+            self._active_tab().focus_default()
             return
         before = (self.prompt.is_open, self.prompt.label)
         try:
@@ -368,12 +413,12 @@ class DaylogsApp(App):
         # it, so only close the prompt we were given.
         if (self.prompt.is_open, self.prompt.label) == before:
             self.prompt.close()
-            tab.focus_default()
+            self._active_tab().focus_default()
         self.refresh_footer()
 
     def on_inline_prompt_cancelled(self, event: InlinePrompt.Cancelled) -> None:
         event.stop()
-        self._cancel_editing()
+        self._cancel_editing(event.owner)
         self._active_tab().focus_default()
 
     # ── confirm ──────────────────────────────────────────────────────────
@@ -392,6 +437,18 @@ class DaylogsApp(App):
             self.notify("cancelled", timeout=2)
 
     # ── notifications ────────────────────────────────────────────────────
+    def begin_work(self, key: str, label: str, timeout_sec: int) -> None:
+        """Show `label` in the popup until `end_work(key)`.
+
+        The one place a tab says "this is running". Keyed by job rather than a boolean,
+        because a food estimate, an activity inference and the daily read can all be in
+        flight at once — the first two have separate worker groups on purpose.
+        """
+        self.work_popup.begin(key, label, timeout_sec)
+
+    def end_work(self, key: str) -> None:
+        self.work_popup.end(key)
+
     def notify(self, message: str, **kwargs) -> None:
         """Toasts are plain text unless a caller insists otherwise.
 

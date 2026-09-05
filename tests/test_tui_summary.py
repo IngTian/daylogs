@@ -434,7 +434,12 @@ async def test_browsing_reports_leaves_the_panels_alone(make_app, db):
     assert day_after == day_before, "browsing changed the TODAY header"
 
 
-async def test_generating_shows_on_the_summary_header_only(make_app, db):
+async def test_the_popup_shows_the_daily_read_being_written(make_app, db):
+    """The indicator used to be a `"   generating…"` suffix on the SUMMARY header — and on
+    that header only, never on TODAY's figures, which are not being regenerated. It is the
+    app-level popup now, so the check moves with it: the two headers stay clean, and the
+    popup carries the state from whichever tab you are on.
+    """
     import asyncio
 
     from textual.widgets import Static
@@ -458,17 +463,25 @@ async def test_generating_shows_on_the_summary_header_only(make_app, db):
         await pilot.press("r")
         await asyncio.wait_for(started.wait(), 5)
         await pilot.pause()
+        from daylogs.tui.progress import WorkPopup
+
+        popup = app.query_one(WorkPopup)
+        mid = str(popup.render()) if popup.display else ""
         day = str(app.query_one("#day-head", Static).content)
         summ = str(app.query_one("#summary-head", Static).content)
         release.set()
         await pilot.pause()
         await pilot.pause()
-        after = str(app.query_one("#summary-head", Static).content)
-    assert "generating" in summ.lower(), f"no progress on the summary header: {summ!r}"
+        after = str(popup.render()) if popup.display else ""
+        after_head = str(app.query_one("#summary-head", Static).content)
+    assert "daily read" in mid.lower(), f"no progress in the popup: {mid!r}"
+    assert "120s" in mid, f"the popup must show the summary's own budget, not 60s: {mid!r}"
+    assert "generating" not in summ.lower(), f"the SUMMARY header duplicates it: {summ!r}"
     assert "generating" not in day.lower(), (
         f"the TODAY header claims to be generating, but the figures are not: {day!r}"
     )
-    assert "generating" not in after.lower(), "the indicator outlived the run"
+    assert after == "", f"the popup outlived the run: {after!r}"
+    assert "generating" not in after_head.lower()
 
 
 async def test_the_panels_do_not_clip_or_wrap_at_eighty_columns(make_app, db):
