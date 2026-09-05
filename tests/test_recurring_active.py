@@ -287,3 +287,51 @@ async def test_o_with_no_rows_at_all_does_not_raise(make_app, db):
         await pilot.press("o")
         await pilot.pause()
         assert app.is_running is True
+
+
+# ── the cursor, and the empty pane ───────────────────────────────────────
+async def test_a_second_o_undoes_the_first_rather_than_pausing_another_row(make_app, db):
+    """`o` is the only write key you press twice on purpose, and the only one with neither
+    a confirmation naming the row (`x`) nor a prefill echoing it (`enter`).
+
+    `reload()` calls `_fill_table`, whose `table.clear(columns=True)` resets the cursor to
+    row 0, and pausing does not reorder the pane — so the obvious way to undo a mistaken
+    pause silently paused whatever sat on row 0 instead, and the next `r` skipped both.
+    """
+    _seed(db, name="Gym", cost=50.0, category="entertainment")
+    _seed(db, name="Streaming", cost=20.99)
+    _seed(db, name="Storage", cost=10.0, category="housing")
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await _on_recurring(pilot, app)
+        table = app.query_one("#money-table")
+        await pilot.press("down")
+        await pilot.press("down")
+        await pilot.pause()
+        assert table.cursor_row == 2, "this test would prove nothing without a moved cursor"
+        await pilot.press("o")
+        await pilot.pause()
+        assert {r["name"]: r["active"] for r in list_recurring(db)} == {
+            "Gym": 1, "Streaming": 1, "Storage": 0,
+        }, "the wrong row was paused"
+        assert app.query_one("#money-table").cursor_row == 2, "the cursor left the row it acted on"
+        await pilot.press("o")
+        await pilot.pause()
+    assert {r["name"]: r["active"] for r in list_recurring(db)} == {
+        "Gym": 1, "Streaming": 1, "Storage": 1,
+    }, "a second o did not undo the first"
+
+
+async def test_o_on_an_empty_recurring_pane_says_so(make_app, db):
+    """The one state where `o` looks unbound. `x` already explains itself here and `r`
+    reports rolling nothing; silence is what a dropped keypress looks like, and this is
+    the pane you land on before adding your first subscription."""
+    said = []
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await _on_recurring(pilot, app)
+        app.notify = lambda msg, **kw: said.append(str(msg))
+        await pilot.press("o")
+        await pilot.pause()
+    assert said, "o was silent on an empty pane"
+    assert "s" in said[0], f"the toast should point at the key that adds one: {said[0]}"
