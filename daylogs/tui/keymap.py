@@ -110,6 +110,17 @@ KEYMAP: tuple[Key, ...] = (
     # even though a category is a config-wide thing: Money is the only tab that shows or
     # consumes one, so this is where you are standing when you need it.
     Key("n", "new category", "category", "money", "write"),
+    # `o` for the `on` column it flips. A key rather than a field in the recurring
+    # grammar: a boolean's whole edit is a toggle, and in the line every item would carry
+    # a token reading "on". It is the one displayed column the edit line does not carry,
+    # and the exception is written down in CLAUDE.md rather than left to be discovered.
+    # footer=False, like `T`: money is the fullest scope and its two rows were already at
+    # 180 of 200 columns, so this hint alone pushed `next view`, `prev`, `next`, `today`
+    # and `go to date` off the end — a test catches exactly that. `?` lists it, the `on`
+    # column it flips is on screen when it applies, and pausing a subscription is a
+    # once-a-season action next to `e`/`b`/`s`. The next money key needs the same
+    # treatment or a shorter label somewhere.
+    Key("o", "on/off", "toggle_active", "money", "write", footer=False),
     Key("r", "roll", "roll", "money", "write"),
     Key("d", "by date", "sort_date", "money", "view"),
     Key("c", "by cost", "sort_cost", "money", "view"),

@@ -274,11 +274,28 @@ appended prose where it was convenient rather than editing the map.
   round-tripped through the edit prefill, displayed nowhere). An edit writes only
   the fields it parsed. The submitted line is authoritative: drop the note words
   and the note is cleared; submit unchanged and the note survives.
+  The one displayed column deliberately **not** in an edit line is recurring's `on`,
+  which `o` toggles instead: a boolean's entire edit is a toggle, and as a field every
+  recurring line would carry a token that reads "on" almost always. It stayed
+  unreachable for four versions — the column rendered `yes` for every row forever while
+  `roll_month_budgets` filtered on a flag nothing could set — so the exception is
+  written down here rather than left to be rediscovered as a bug.
 - **`update_recurring` is keyed by id, and nothing may edit through
   `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
   nothing and INSERTs a second row; both then look active and the next
   `roll_month_budgets` writes two budget lines for one subscription. `monthly_cost`
   is a stored derived column and is recomputed whenever cost or cycle moves.
+  `active` is absent from the ON CONFLICT clause for the same class of reason:
+  `s` is add-*or-update* and its grammar cannot express the flag, so
+  `active = excluded.active` meant every re-add carried the parameter's `True`
+  default — raising a paused subscription's price un-paused it and the next roll
+  charged for it. `note` is still overwritten there, on purpose: the recurring
+  grammar has no `~note`, so that column is unreachable in both directions and
+  fixing half of it would be pretending.
+- **Pausing means "not from now on", never "this never happened".** A budget line
+  already rolled for the month stays when you pause the item — you may have paid it —
+  and next month's roll simply omits it. Same stance `_rename_rolled_budgets` takes on
+  a deleted item's line, and the reason there is no un-roll.
 - **Undo is an upsert on the primary key**, so one statement means "restore this row
   to these values" — covering a delete (row gone → insert) and an edit (row present
   → update) without the stack needing to know which. A plain INSERT raised on an
