@@ -685,7 +685,12 @@ class BodyTab(PanelTab):
         """Show the estimate as an editable line. Correcting it goes through the
         same grammar as typing it, so there is one code path, not two."""
         self._pending = est
-        self.app.prompt.open("confirm food", f"{sigil.escape(est.description)} ={est.kcal}")
+        # `owner=self.id`, unlike every other prompt here: this one is opened by a worker
+        # up to a minute after the keypress, so the active tab is whatever the user wandered
+        # to while waiting — and the answer belongs to Body regardless.
+        self.app.prompt.open(
+            "confirm food", f"{sigil.escape(est.description)} ={est.kcal}", owner=self.id
+        )
 
     # ── prompt handling ──────────────────────────────────────────────────
     def handle_prompt(self, label: str, value: str) -> None:
@@ -975,9 +980,11 @@ class BodyTab(PanelTab):
             return
         self._set_inferring(False)
         self._pending_activity = effort
+        # Worker-opened, like `confirm food` — see the note there.
         self.app.prompt.open(
             "confirm activity",
             f"{sigil.escape(r.description)} ={effort.factor:g}",
+            owner=self.id,
         )
 
     def _write_food(self, r, *, source: str) -> None:

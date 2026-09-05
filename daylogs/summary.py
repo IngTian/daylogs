@@ -269,18 +269,26 @@ def upsert_report(conn, *, date: str, content: str) -> None:
     )
 
 
-async def generate(conn, cfg, *, date: str, runner, retries: int = 1) -> str:
+async def generate(conn, cfg, *, date: str, runner, retries: int = 1, on_attempt=None) -> str:
     """One call, plus `retries` extra attempts.
 
     Nothing is persisted unless a non-empty result comes back, so a failed run
     leaves the existing report (or its absence) untouched rather than writing
     a stub that looks like a real summary.
+
+    `on_attempt` is called before each attempt. Every attempt gets the *whole*
+    `summary_timeout_sec`, so a caller showing elapsed against that budget has to be told
+    when the clock restarts — otherwise a first attempt that used its full 120 s leaves the
+    second reading "121s / 120s" and climbing, which is neither the budget nor the running
+    call's elapsed. The retry itself stays invisible: it is not a state the user acts on.
     """
     payload = build_payload(conn, cfg, date=date)
     user_prompt = json.dumps(payload, ensure_ascii=False, indent=2)
 
     last: Exception | None = None
     for attempt in range(retries + 1):
+        if on_attempt is not None:
+            on_attempt()
         try:
             out = await runner(
                 SYSTEM_PROMPT,

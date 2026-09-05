@@ -25,14 +25,21 @@ _HISTORY = 50
 
 class InlinePrompt(Input):
     class Cancelled(Message):
-        def __init__(self, label: str) -> None:
+        """Carries the owner as well as the label, because `close()` clears both and the
+        app needs to disarm the tab the prompt belonged to — not the one on screen."""
+
+        def __init__(self, label: str, owner: str = "") -> None:
             super().__init__()
             self.label = label
+            self.owner = owner
 
     def __init__(self) -> None:
         super().__init__(id="prompt")
         self.display = False
         self.label = ""
+        # The tab that opened this prompt. Its answer belongs to that tab even if another
+        # one is on screen when it arrives — see `open`.
+        self.owner = ""
         self.error = ""
         self._history: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=_HISTORY))
         self._idx = 0
@@ -43,7 +50,19 @@ class InlinePrompt(Input):
     def is_open(self) -> bool:
         return bool(self.display)
 
-    def open(self, label: str, prefill: str = "") -> None:
+    def open(self, label: str, prefill: str = "", *, owner: str = "") -> None:
+        """Show the prompt, and remember which tab it belongs to.
+
+        The owner matters because two prompts are opened by a *worker*, not a keypress:
+        `confirm food` and `confirm activity` arrive up to a minute after `f`/`a`, by which
+        time the user may be looking at another tab — which the in-progress popup exists to
+        make comfortable. Routing the answer to whatever was on screen handed it to a tab
+        with no branch for that label and no `else`, so `enter` closed the prompt and wrote
+        nothing: no row, no toast, and no way back, since `show_scope` refuses to switch
+        while a prompt is open. A prompt opened by a keypress cannot be mis-routed for that
+        same reason, so this only ever corrects the asynchronous pair.
+        """
+        self.owner = owner or self.app.scope
         self.label = label
         self.value = prefill
         self.display = True
@@ -57,6 +76,7 @@ class InlinePrompt(Input):
         self.value = ""
         self.display = False
         self.label = ""
+        self.owner = ""
         # After clearing the label, so the slots are blanked rather than repainted
         # with the label that is going away.
         self.clear_error()
@@ -143,9 +163,9 @@ class InlinePrompt(Input):
         if event.key == "escape":
             event.stop()
             event.prevent_default()
-            label = self.label
+            label, owner = self.label, self.owner
             self.close()
-            self.post_message(self.Cancelled(label))
+            self.post_message(self.Cancelled(label, owner))
             return
         if event.key in ("up", "down"):
             event.stop()
