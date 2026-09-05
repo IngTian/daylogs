@@ -222,9 +222,17 @@ appended prose where it was convenient rather than editing the map.
   `content_size` is 0 during `on_mount`, so the app re-renders once via
   `call_after_refresh`, and each widget handles its own `on_resize` — `Resize` is
   delivered to widgets, **not** to the App, so an App-level handler never fires.
-  `PanelTab.on_resize` reloads **only on a width change**, because that is the entire
-  reason it exists: a height change rebuilds nothing, and rebuilding anyway calls
-  `_fill_table`, whose `table.clear(columns=True)` resets the DataTable cursor to row 0.
+  `PanelTab.on_resize` reloads **only on a width change, and only if the last build
+  measured rather than guessed**. The width half is the entire reason the handler exists: a
+  height change rebuilds nothing, and rebuilding anyway calls `_fill_table`, whose
+  `table.clear(columns=True)` resets the DataTable cursor to row 0. The `_used_fallback`
+  half is why a width alone is not enough — `show_scope` reloads the tab it just switched
+  to *before* that pane is laid out, so `panel_width` measures 0 and takes the 46-column
+  `_FALLBACK`; the Resize that would fix it arrives at the same *tab* width, and a
+  width-only guard dropped it, so every visit after the first drew at 46 columns inside a
+  96-column panel. `refresh_tabs()` (`u`, `h`, `n`) has the same shape for the off-screen
+  tabs. The flag is cleared *before* the reload so `panel_width` can set it again for that
+  build.
   Everything in the bottom container shortens the tab by appearing — the prompt (recorded
   as a known wart for a while), the in-progress popup, the theme picker — so without the
   guard, starting a photo estimate threw away the food row you had selected. Test it by
@@ -247,6 +255,18 @@ appended prose where it was convenient rather than editing the map.
   spend; a negative row keeps its amount and shows no share.
 - **`chart.py` and `widgets.py` import no Textual.** They are pure functions and
   unit-test as such.
+- **A prompt belongs to the tab that opened it, not the tab on screen.**
+  `InlinePrompt.owner` is a scope id, defaulting to the active one. Two prompts are opened
+  by a *worker* rather than a keypress — `confirm food` and `confirm activity`, arriving up
+  to a minute later — and the popup exists precisely so you can look at another tab while
+  you wait. Routed by the active tab, the answer went to a tab with no branch for that
+  label and no `else`: `enter` closed the prompt and wrote **nothing**, with no toast and no
+  way back, since `show_scope` refuses to switch while a prompt is open. A logged activity
+  vanishing is what the NULL-factor invariant exists to prevent, and this lost it on the
+  success path. The two async call sites pass `owner=self.id`; a keypress-opened prompt
+  cannot be mis-routed, because the tab cannot change while it is open. The *answer* routes
+  by owner and *focus* goes to the active tab — focusing a hidden tab's table is not a
+  thing.
 - **Work in flight is announced by the popup, app-level, and nowhere else.** A
   `claude -p` call runs for seconds to a minute, so the indicator has to outlive a
   toast — that part was already true as a `"   estimating…"` suffix on the FOOD header
@@ -260,7 +280,9 @@ appended prose where it was convenient rather than editing the map.
   with animations off a static word cannot say "still alive"; the timer exists only while
   a job does. It lives in `#bottom` with the prompt and the footer rather than floating,
   so it pushes content up instead of covering the row you are reading, and costs no rows
-  when hidden.
+  when hidden. `summary.generate` takes `on_attempt` because each retry gets the *whole*
+  timeout, so the clock has to restart per attempt or the second attempt reads "200s / 120s"
+  — larger than the budget it is shown against.
 - **Animations stay off** (`self.animation_level = "none"`). Measured: 383 ms →
   127 ms per tab switch. It is an *instance* attribute in textual 8.2; a class
   attribute named `ANIMATION_LEVEL` is a silent no-op.

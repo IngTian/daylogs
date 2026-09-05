@@ -254,7 +254,157 @@ async def test_two_calls_at_once_show_two_lines(make_app, db, type_into, monkeyp
         await pilot.pause()
         both = _shown(app)
         release.set()
-        await pilot.pause()
-        await pilot.pause()
+        for _ in range(6):
+            await pilot.pause()
+        after = _shown(app)
     assert len(both.splitlines()) == 2, f"one call hid the other: {both!r}"
     assert "calories" in both and "activity factor" in both, both
+    # Both keys have to be released, not just the one whose worker happened to finish last.
+    assert after == "", f"a line outlived its call: {after!r}"
+
+
+# ── the other half of "switch tabs while you wait" ───────────────────────
+# The popup makes waiting-while-you-work the advertised flow (README: "switching tabs
+# while you wait doesn't hide it"). So the answer has to survive the switch too: a
+# worker-opened `confirm food` / `confirm activity` prompt used to be handed to whichever
+# tab was active when it arrived, and SummaryTab/MoneyTab have no branch for those labels
+# and no `else` — so `enter` fell through, closed the prompt, and wrote nothing. No toast,
+# no row, and no way back, because `show_scope` returns early while a prompt is open.
+
+
+async def _gated(app, pilot, monkeypatch, key: str, line: str, attr: str, value):
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def gate(**kw):
+        started.set()
+        await release.wait()
+        return value
+
+    monkeypatch.setattr(f"daylogs.tui.body_tab.estimate.{attr}", gate)
+    await go_body(pilot, app)
+    await pilot.press(key)
+    for ch in line:
+        await pilot.press("space" if ch == " " else ch)
+    await pilot.press("enter")
+    await asyncio.wait_for(started.wait(), 5)
+    return release
+
+
+async def test_a_food_estimate_accepted_from_another_tab_still_writes_the_row(
+    make_app, db, monkeypatch
+):
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        release = await _gated(
+            app, pilot, monkeypatch, "f", "mystery stew", "from_text",
+            Estimate(description="stew", kcal=500),
+        )
+        await pilot.press("3")                 # wander off while it runs
+        await pilot.pause()
+        assert app.scope == "money"
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label == "confirm food"
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list(db.execute("SELECT * FROM food"))
+    assert len(rows) == 1, "the meal was silently discarded"
+    assert rows[0]["kcal"] == 500
+
+
+async def test_an_activity_inference_accepted_from_another_tab_still_writes_the_row(
+    make_app, db, monkeypatch
+):
+    """The one CLAUDE.md is most explicit about: "the description is the user's data and
+    the multiplier is a guess; losing the first because the second failed is the worse
+    outcome". Losing it because the user looked at another tab is worse still — and a day
+    with no activity row silently takes the profile baseline, rebasing every calorie
+    figure for that day."""
+    from daylogs.estimate import Effort
+
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        release = await _gated(
+            app, pilot, monkeypatch, "a", "gym 1h", "factor_from_text", Effort(factor=1.6),
+        )
+        await pilot.press("1")
+        await pilot.pause()
+        assert app.scope == "summary"
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label == "confirm activity"
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list(db.execute("SELECT * FROM activity"))
+    assert len(rows) == 1, "the logged activity vanished"
+    assert rows[0]["factor"] == 1.6
+
+
+async def test_escaping_a_confirm_prompt_from_another_tab_disarms_the_right_tab(
+    make_app, db, monkeypatch
+):
+    """The cancel path routes by owner too. Otherwise BodyTab keeps `_pending` armed and
+    the next plain `f` silently inherits the abandoned estimate's calories."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        release = await _gated(
+            app, pilot, monkeypatch, "f", "mystery stew", "from_text",
+            Estimate(description="stew", kcal=500),
+        )
+        await pilot.press("3")
+        await pilot.pause()
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.query_one("#body")._pending is None, "the abandoned estimate stayed armed"
+
+
+async def test_the_summarys_popup_clock_restarts_on_a_retry(make_app, db, monkeypatch):
+    """`summary.generate` allows one retry, and each attempt gets the FULL
+    `summary_timeout_sec`. The popup began once, so a first attempt that used its whole
+    budget left the second rendering `121s / 120s` … `240s / 120s` — a number that is
+    neither the job's budget nor the running call's elapsed, against a bar that says 120.
+
+    The clock therefore restarts per attempt rather than the label widening.
+    """
+    clock = [1000.0]
+    calls = []
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def flaky(system_prompt, user_prompt, *, timeout_sec, model=None):
+        calls.append(1)
+        if len(calls) == 1:
+            clock[0] += 200.0          # the first attempt burns more than the budget
+            raise RuntimeError("claude fell over")
+        started.set()
+        await release.wait()           # hold the second attempt open to be looked at
+        return "# fresh\n\nbody"
+
+    app = make_app(runner_text=flaky, now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        app.query_one(WorkPopup)._clock = lambda: clock[0]
+        await go_day(pilot, app)
+        await pilot.press("r")
+        await asyncio.wait_for(started.wait(), 5)
+        await pilot.pause()
+        # Paint at the instant the second attempt is running.
+        app.query_one(WorkPopup)._repaint()
+        mid = _shown(app)
+        release.set()
+        for _ in range(6):
+            await pilot.pause()
+    assert len(calls) == 2, f"the retry never happened: {calls}"
+    # Parsed, not matched as a substring: `"0s / 120s" in "200s / 120s"` is TRUE, so the
+    # obvious assertion passes on exactly the output it is meant to reject. Fifth time this
+    # class of mistake has bitten in this feature's history — see the sibling tests.
+    import re
+
+    m = re.search(r"(\d+)s / (\d+)s", mid)
+    assert m, f"no elapsed/budget pair in the popup: {mid!r}"
+    elapsed, budget = int(m.group(1)), int(m.group(2))
+    assert budget == 120, f"the popup is showing the wrong budget: {mid!r}"
+    assert elapsed < 5, f"the clock carried the failed attempt's time over: {mid!r}"

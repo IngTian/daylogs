@@ -1,7 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from helpers import go_body
+from helpers import go_body, go_day
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
 from daylogs.estimate import Estimate
@@ -1218,6 +1218,65 @@ def _resize(tab, width: int, height: int) -> None:
 
     size = Size(width, height)
     tab.on_resize(Resize(size, size))
+
+
+def _chart_width(app) -> int:
+    from textual.widgets import Static
+
+    c = app.query_one("#weight-chart", Static).content
+    c = c if isinstance(c, str) else c.plain
+    return max((len(ln) for ln in c.splitlines()), default=0)
+
+
+async def test_returning_to_a_tab_redraws_at_the_real_panel_width(make_app, db):
+    """The trap the width guard walked into, and the reason it needs `_used_fallback`.
+
+    `show_scope` calls `tab.reload()` while the pane it just switched to has not been laid
+    out, so `panel_width` measures 0 and takes the 46-column `_FALLBACK`. The Resize that
+    would correct it arrives at the *same tab width*, so a width-only guard drops it and
+    the fallback build sticks: from the second visit onward every chart and bar drew at 46
+    columns inside a 96-column panel, and only healed on the next key that reloaded.
+
+    `refresh_tabs()` (from `u`, `h`, `n`) has the same shape for the two hidden tabs.
+    """
+    from daylogs.body import add_weight
+
+    for i in range(8):
+        add_weight(db, kg=78.0 + i * 0.2, date=f"2026-08-{21 + i:02d}", at=1787000000 + i * 86400)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(200, 50)) as pilot:
+        await go_body(pilot, app)
+        await pilot.pause()
+        first = _chart_width(app)
+        assert first > 46, f"the panel must be wider than the fallback to prove anything: {first}"
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("2")
+        await pilot.pause()
+        again = _chart_width(app)
+    assert again == first, f"the return visit drew at {again} columns, the first at {first}"
+
+
+async def test_a_rebuild_that_had_to_guess_is_not_treated_as_settled(make_app, db):
+    """Why `_used_fallback` is cleared *before* the reload, not after.
+
+    A Resize delivered to a tab that is not on screen rebuilds it with panels that measure
+    0, so that build guesses. Clearing the flag afterwards would throw away exactly that
+    fact, the next Resize at the same width would be dropped, and the guessed build would
+    latch — the bug this flag exists to prevent, one layer down. `refresh_tabs()` (`u`,
+    `h`, `n`) reloads both off-screen tabs, so it is a reachable state and not a
+    hypothetical.
+    """
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(200, 50)) as pilot:
+        await go_day(pilot, app)                     # Body is now off screen
+        await pilot.pause()
+        body_tab = app.query_one("#body")
+        _resize(body_tab, 200, 40)
+        await pilot.pause()
+        assert body_tab._used_fallback is True, (
+            "a build whose panels measured 0 was recorded as settled"
+        )
 
 
 async def test_a_height_change_does_not_rebuild_the_tab(make_app, db):
@@ -2510,6 +2569,10 @@ async def test_a_meal_estimate_and_a_factor_inference_do_not_cancel_each_other(
         label = app.prompt.label
         body = app.query_one("#body")
         inferring, pending = body._inferring, body._pending_activity
+        # The painted popup, not just the flag. `_inferring` is write-only since the
+        # indicator moved off the header, so asserting on it alone let `end_work` be
+        # deleted with the suite green and the popup line stuck on screen forever.
+        popup = _popup(app)
     assert calls["n"] == 2, f"one of the two calls never happened: {calls}"
     # A surviving inference offers its answer, which replaces the food confirm. Sharing
     # the group cancels the factor worker instead, so the label stays "confirm food" and
@@ -2517,6 +2580,7 @@ async def test_a_meal_estimate_and_a_factor_inference_do_not_cancel_each_other(
     # by the failure path, with no factor.
     assert label == "confirm activity", f"the inference was cancelled: {label!r}"
     assert pending is not None and pending.factor == 1.6
-    # A cancelled worker never reaches `_set_inferring(False)`, so the "estimating…"
-    # indicator would stick on forever rather than clearing.
-    assert inferring is False, "the estimating indicator never cleared"
+    # A cancelled worker never reaches `_set_inferring(False)`, so the indicator would
+    # stick on forever rather than clearing.
+    assert inferring is False, "the estimating flag never cleared"
+    assert popup == "", f"the popup outlived both calls: {popup!r}"

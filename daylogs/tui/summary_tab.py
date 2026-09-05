@@ -258,6 +258,10 @@ class SummaryTab(PanelTab):
                 self.app.cfg,
                 date=date,
                 runner=self.app.runner_text,
+                # Restart the popup's clock per attempt: each one is allowed the full
+                # timeout, so carrying the first attempt's elapsed into the second shows a
+                # figure larger than the budget it is displayed against.
+                on_attempt=lambda: self._set_busy(True),
             )
         except Exception as e:  # noqa: BLE001 - surfaced to the user, not swallowed
             self._set_busy(False)
