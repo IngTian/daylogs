@@ -189,11 +189,24 @@ class DaylogsApp(App):
         return self._tab_for(_TAB_OF[owner]) if owner in _TAB_OF else self._active_tab()
 
     def show_scope(self, scope: str) -> None:
+        """Switch tabs, and rebuild the arriving tab *after* it has been laid out.
+
+        `call_after_refresh`, not a direct `reload()`. The pane being switched to has not
+        been laid out yet at this point, so its panels measure 0 and `panel_width` takes the
+        46-column `_FALLBACK` — every visit after the first drew a 46-column chart inside a
+        96-column panel. Correcting that from the following `Resize` is a race: it holds
+        locally and does not hold on CI, where the event is often not delivered before the
+        next thing happens. One frame later the layout is settled and the measurement is
+        real. This is the same reason `on_mount` ends in `call_after_refresh(_after_layout)`.
+
+        The tab still holds the previous visit's content for that one frame, which is why
+        the reload can be deferred rather than doubled.
+        """
         if self.prompt.is_open or scope not in _TAB_OF:
             return
         self.query_one("#tabs", TabbedContent).active = _TAB_OF[scope]
         tab = self._active_tab()
-        tab.reload()
+        self.call_after_refresh(tab.reload)
         tab.focus_default()
         self.refresh_footer()
 

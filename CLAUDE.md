@@ -226,13 +226,19 @@ appended prose where it was convenient rather than editing the map.
   measured rather than guessed**. The width half is the entire reason the handler exists: a
   height change rebuilds nothing, and rebuilding anyway calls `_fill_table`, whose
   `table.clear(columns=True)` resets the DataTable cursor to row 0. The `_used_fallback`
-  half is why a width alone is not enough — `show_scope` reloads the tab it just switched
-  to *before* that pane is laid out, so `panel_width` measures 0 and takes the 46-column
-  `_FALLBACK`; the Resize that would fix it arrives at the same *tab* width, and a
-  width-only guard dropped it, so every visit after the first drew at 46 columns inside a
-  96-column panel. `refresh_tabs()` (`u`, `h`, `n`) has the same shape for the off-screen
-  tabs. The flag is cleared *before* the reload so `panel_width` can set it again for that
-  build.
+  half is why a width alone is not enough — `refresh_tabs()` (`u`, `h`, `n`) builds the
+  off-screen tabs before they are laid out, so `panel_width` measures 0 and takes the
+  46-column `_FALLBACK`; the Resize that would fix it arrives at the same *tab* width, and a
+  width-only guard dropped it. The flag is cleared *before* the reload so `panel_width` can
+  set it again for that build.
+  **`show_scope` defers its reload with `call_after_refresh` for the same reason, and does
+  not rely on the guard to save it.** Reloading a pane that has not been laid out yet drew
+  every visit after the first at 46 columns inside a 96-column panel; correcting that from
+  the following `Resize` is a *race* — it held locally and failed on CI, where the event is
+  often not delivered before the next thing happens, so one test passed on one PR and failed
+  on the next with identical code. A Textual callback fires deterministically; a terminal
+  event does not. There is a test asserting the return visit is correct with every `Resize`
+  dropped, because "it works when the event arrives" is what was not good enough.
   Everything in the bottom container shortens the tab by appearing — the prompt (recorded
   as a known wart for a while), the in-progress popup, the theme picker — so without the
   guard, starting a photo estimate threw away the food row you had selected. Test it by
