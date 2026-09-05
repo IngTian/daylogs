@@ -269,9 +269,9 @@ theme Textual ships is on offer (gruvbox, nord, tokyo-night, dracula, catppuccin
 solarized, rose-pine and a dozen more), and you pick one by looking at it:
 
 ```
-╭─ theme › nord   13 of 21 ───────────────────────────────────────────────────────╮
-│ … flexoki   gruvbox   monokai   ▸nord◂   rose-pine   rose-pine-dawn   solarized… │
-╰─ ← → preview · enter keeps it · esc restores gruvbox ────────────────────────────╯
+╭─ theme › nord   13 of 21 ────────────────────────────────────────────────────────╮
+│ … gruvbox   monokai   ▸nord◂   rose-pine   rose-pine-dawn   rose-pine-moon …     │
+╰─ ← → preview · enter keeps it · esc restores nord ───────────────────────────────╯
 ```
 
 `←` and `→` apply each theme immediately, so the app you are looking at *is* the

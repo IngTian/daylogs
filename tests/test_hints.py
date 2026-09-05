@@ -49,9 +49,10 @@ PARSERS = {
 # have a grammar, and left its example unchecked by the parametrized case.
 PLAIN_PARSERS = {"profile": parse_profile, "new category": parse_category}
 
-# `theme` takes one name from a fixed list, validated by `themes.check` rather than
-# by a grammar — there is nothing to parse, so it belongs here deliberately.
-NO_PARSER = {"filter", "photo path", "fix category", "go to date", "theme"}
+# Prompts with no grammar behind them: free text, a filesystem path, a bare category, a
+# date. `theme` used to be here too, described as "validated by `themes.check`" — both the
+# prompt and that function are gone, replaced by a picker, and the entry outlived them.
+NO_PARSER = {"filter", "photo path", "fix category", "go to date"}
 
 
 def test_every_prompt_opened_in_the_app_has_a_hint():
@@ -133,6 +134,17 @@ def test_labels_without_a_parser_are_deliberate_not_forgotten():
     covered = set(PARSERS) | set(PLAIN_PARSERS) | NO_PARSER
     uncovered = sorted({h.label for h in hints.HINTS} - covered)
     assert not uncovered, f"classify these in PARSERS, PLAIN_PARSERS or NO_PARSER: {uncovered}"
+
+
+def test_the_parser_tables_name_no_prompt_that_stopped_existing():
+    """The other direction, which nothing checked. `theme` sat in NO_PARSER for a release
+    after both its prompt and `themes.check` were deleted, describing a function that no
+    longer existed — and since the assertion above only subtracts, a stale extra entry was
+    invisible. A label that lingers here is a slot a future prompt of the same name would
+    silently inherit, with its example unchecked by anything."""
+    labels = {h.label for h in hints.HINTS}
+    stale = sorted((set(PARSERS) | set(PLAIN_PARSERS) | NO_PARSER) - labels)
+    assert not stale, f"these are classified but no prompt has them any more: {stale}"
 
 
 def test_labels_in_source_finds_both_call_shapes():

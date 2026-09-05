@@ -307,6 +307,18 @@ appended prose where it was convenient rather than editing the map.
   the same route `InlinePrompt` takes for `escape` — which is *why* those keys are
   deliberately not priority bindings. `themes.check` went with the prompt: every name the
   picker can produce came out of `names()`, and a validator with no caller rots.
+  Because its exit runs from `on_key`, it has to be **told** when something else takes the
+  keyboard: `InlinePrompt.open` calls `picker.cancel()`. Otherwise any write key left it
+  displayed but deaf — `esc` no longer restoring the theme its own subtitle named, the next
+  digit press re-stealing focus from the table, and an `enter` aimed at a row writing the
+  preview to `config.toml`. `cancel` posts no `Cancelled` message on purpose: that is what
+  returns focus to the tab, and the prompt that just took focus must keep it. A second `T`
+  mid-preview is a no-op, because `open` re-anchors what `esc` restores and reopening threw
+  away the one-keypress way back.
+  The README's picker box is **generated, not drawn** — a test pins it to `themes.strip`.
+  Hand-drawn art of a live widget is what `tools/screenshots.py` exists to prevent, and the
+  first version of that box had a border one column short of its sides, a truncated name
+  `strip` cannot emit, and a neighbourhood of the list the cursor does not produce.
 - **Every prompt declares a hint in `daylogs/tui/hints.py`**, and a test greps the
   `prompt.open("…")` call sites to fail when one doesn't. `profile` shipped with a
   working grammar and no way to discover it because the label *was* the placeholder,

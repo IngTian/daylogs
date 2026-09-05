@@ -315,7 +315,15 @@ class DaylogsApp(App):
 
         `self.theme` rather than `cfg.theme`: they differ after a cancelled preview, and
         the picker's `esc` has to restore what is on screen, not what was last written.
+
+        A second `T` mid-preview does nothing. `open` re-anchors the theme `esc` restores,
+        so reopening threw away the one-keypress way back to where you started — which is
+        the entire answer to the objection the typed prompt was built around. The picker is
+        already showing its own title, position and subtitle, so there is nothing for a
+        second press to add.
         """
+        if self.theme_picker.is_open:
+            return
         self.theme_picker.open(self.theme)
 
     def on_theme_picker_chosen(self, event: ThemePicker.Chosen) -> None:

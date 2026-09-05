@@ -62,6 +62,13 @@ class InlinePrompt(Input):
         while a prompt is open. A prompt opened by a keypress cannot be mis-routed for that
         same reason, so this only ever corrects the asynchronous pair.
         """
+        # Only one surface in the bottom container may own the keyboard. The theme picker
+        # exits through its own `on_key`, so it has to be told rather than discovering that
+        # focus has gone — otherwise it lingers, advertising keys the prompt now holds.
+        # `getattr` because a bare InlinePrompt is constructed in tests with no app around.
+        picker = getattr(self.app, "theme_picker", None)
+        if picker is not None and picker.is_open:
+            picker.cancel()
         self.owner = owner or self.app.scope
         self.label = label
         self.value = prefill

@@ -270,3 +270,91 @@ async def test_reopening_after_a_cancel_starts_where_you_are_again(make_app, mak
         await pilot.press("T")
         await pilot.pause()
         assert _picker(app).selected == "nord"
+
+
+# ── losing focus, and reopening ──────────────────────────────────────────
+async def test_a_prompt_cancels_the_preview_rather_than_leaving_it_orphaned(
+    make_app, make_cfg, type_into
+):
+    """The picker's only exit ran from its own `on_key`, which needs focus. Any write key
+    opens a prompt and `InlinePrompt.open` calls `focus()`, so the picker was left
+    displayed-but-deaf: three keys advertised on its border did something else, `esc` no
+    longer restored the theme its subtitle named, the next digit press re-stole focus from
+    the table, and an `enter` aimed at a row wrote the previewed theme to config.toml.
+    """
+    cfg = make_cfg(theme="nord")
+    app = make_app(cfg=cfg)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("T")
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.theme != "nord", "nothing was previewed, so this proves nothing"
+        await pilot.press("e")                     # any write key
+        await pilot.pause()
+        assert app.prompt.is_open is True
+        assert _picker(app).is_open is False, "the picker stayed on screen behind the prompt"
+        assert app.theme == "nord", "the preview was left applied with no way to undo it"
+        # And the prompt keeps the keyboard. `cancel` deliberately posts no `Cancelled`
+        # message: that is what returns focus to the tab, so posting it here would yank
+        # focus off the prompt that just opened and leave it unable to be typed into.
+        assert app.focused is app.prompt, f"the prompt lost focus to {app.focused}"
+        await type_into(pilot, "12.40 lunch !restaurant")
+        assert app.prompt.value == "12.40 lunch !restaurant", (
+            f"typing did not reach the prompt: {app.prompt.value!r}"
+        )
+    written = cfg.root / "config.toml"
+    assert not written.exists() or 'theme = "nord"' not in written.read_text()
+
+
+async def test_the_table_gets_its_enter_back_after_a_prompt_interrupted_a_preview(
+    make_app, make_cfg, db
+):
+    """The consequence that reaches config.toml. With the picker orphaned, `3` re-focused
+    it and `enter` — aimed at the selected row — persisted the previewed theme instead."""
+    from daylogs.money import add_expense
+
+    add_expense(db, amount=12.0, description="lunch", category="restaurant", date="2026-08-04")
+    cfg = make_cfg(theme="nord")
+    app = make_app(cfg=cfg)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("T")
+        await pilot.press("right")
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("3")
+        await pilot.pause()
+        assert app.focused is app.query_one("#money").query_one("#money-table"), app.focused
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.theme == "nord", "enter persisted a theme instead of acting on the row"
+    written = cfg.root / "config.toml"
+    if written.exists():
+        assert "theme" not in written.read_text(), "a theme was written without being chosen"
+
+
+async def test_T_pressed_again_mid_preview_keeps_the_original_escape_target(
+    make_app, make_cfg
+):
+    """`open()` re-anchors `_restore` to whatever is on screen, so a second `T` threw away
+    the one-keypress way back — which is the whole answer to the objection the typed prompt
+    was built around."""
+    app = make_app(cfg=make_cfg(theme="nord"))
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("T")
+        await pilot.press("right")
+        await pilot.press("right")
+        await pilot.pause()
+        assert app.theme != "nord"
+        await pilot.press("T")                     # again, mid-preview
+        await pilot.pause()
+        assert "restores nord" in str(_picker(app).border_subtitle), (
+            f"the escape target moved: {_picker(app).border_subtitle}"
+        )
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.theme == "nord", "esc no longer reaches the theme you started on"

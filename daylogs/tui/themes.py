@@ -170,6 +170,21 @@ class ThemePicker(Static):
     def close(self) -> None:
         self.display = False
 
+    def cancel(self) -> None:
+        """Put the theme back and go away, without asking for focus.
+
+        The picker's only exit used to run from `on_key`, which needs focus — and every
+        write key opens a prompt, which takes it. That left the picker displayed but deaf:
+        three keys advertised on its own border doing something else, `esc` no longer
+        restoring the theme its subtitle named, and an `enter` aimed at a table row
+        persisting the preview to config.toml instead.
+
+        No `Cancelled` message, deliberately: that is what returns focus to the tab, and
+        the prompt that just took focus should keep it.
+        """
+        self.app.theme = self._restore
+        self.close()
+
     def repaint(self) -> None:
         if not self._names:
             return
