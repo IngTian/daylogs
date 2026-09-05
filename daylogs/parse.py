@@ -134,6 +134,15 @@ class ExpenseInput:
 
 
 @dataclass(frozen=True)
+class CategoryInput:
+    """A category to add. `display` is optional because `all_categories` already falls
+    back to the slug, so writing the slug twice would only be noise that goes stale."""
+
+    slug: str
+    display: str | None
+
+
+@dataclass(frozen=True)
 class BudgetInput:
     amount: float
     name: str
@@ -413,6 +422,38 @@ def render_recurring(row) -> str:
         f"{row['cost']:.2f} {sigil.escape(row['name'])} "
         f"!{row['category']} #{row['cycle']}"
     )
+
+
+# A slug's whole job is to be typed as `!gym`, so it must be one token the tokeniser
+# leaves alone: no whitespace, and nothing that is a sigil or an escape.
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def parse_category(raw: str, *, known_slugs=frozenset()) -> CategoryInput:
+    """`gym` or `gym Gym & Pool` — the first token is the slug, the rest is the name.
+
+    No colour: `categories.auto_color` hashes the slug to a stable palette entry, which
+    is already how a config-added category gets its hue, and picking one by hand is a
+    decision with no good answer at a prompt.
+
+    `known_slugs` is passed in rather than read from config, because this module is pure.
+    Rejecting a duplicate here is the point: `all_categories` *silently* drops a config
+    entry that shadows an existing slug, which is right for a hand-edited file and wrong
+    for a prompt, where the user would get no feedback and assume it worked.
+    """
+    words = raw.split()
+    if not words:
+        raise ParseError("give a slug, e.g. gym Gym")
+    slug = words[0].lower()
+    if not _SLUG_RE.match(slug):
+        raise ParseError(
+            f"{words[0]!r} cannot be a slug — lowercase letters, digits, - and _ only,"
+            " because you have to be able to type it as !gym"
+        )
+    if slug in known_slugs:
+        raise ParseError(f"{slug} already exists")
+    display = " ".join(words[1:]) or None
+    return CategoryInput(slug=slug, display=display)
 
 
 def _safe_date(y: int, m: int, d: int) -> dt.date:

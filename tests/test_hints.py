@@ -15,6 +15,7 @@ from daylogs.categories import slugs
 from daylogs.parse import (
     parse_activity,
     parse_budget,
+    parse_category,
     parse_expense,
     parse_food,
     parse_profile,
@@ -42,9 +43,15 @@ PARSERS = {
     "recurring": parse_recurring,
 }
 
+# Grammars whose whole input is the line: no `now` to resolve a date against and no
+# vocabulary to check a slug against. Same guarantee as PARSERS, one fewer argument —
+# `profile` sat in NO_PARSER for a while, which was a lie about a prompt that does
+# have a grammar, and left its example unchecked by the parametrized case.
+PLAIN_PARSERS = {"profile": parse_profile, "new category": parse_category}
+
 # `theme` takes one name from a fixed list, validated by `themes.check` rather than
 # by a grammar — there is nothing to parse, so it belongs here deliberately.
-NO_PARSER = {"filter", "photo path", "fix category", "go to date", "profile", "theme"}
+NO_PARSER = {"filter", "photo path", "fix category", "go to date", "theme"}
 
 
 def test_every_prompt_opened_in_the_app_has_a_hint():
@@ -90,10 +97,14 @@ def test_every_example_is_a_line_the_parser_accepts(label):
     PARSERS[label](hint.example, now=NOW, known_slugs=slugs())
 
 
-def test_the_profile_example_parses_too():
-    """parse_profile takes no `now`, so it sits outside the parametrized case. The
-    example carries all four fields, including the level — an example that omits the
-    field the slice added is how `profile` was undiscoverable in the first place."""
+@pytest.mark.parametrize("label", sorted(PLAIN_PARSERS))
+def test_every_plain_example_is_a_line_the_parser_accepts(label):
+    PLAIN_PARSERS[label](hints.for_label(label).example)
+
+
+def test_the_profile_example_carries_every_field():
+    """Beyond parsing: the example has to *show* all four fields. One that omits the
+    field a slice added is how `profile` was undiscoverable in the first place."""
     p = parse_profile(hints.for_label("profile").example)
     assert p.height_cm and p.sex and p.birthday and p.activity
 
@@ -119,9 +130,9 @@ def test_profile_declares_no_bare_word_vocabulary():
 def test_labels_without_a_parser_are_deliberate_not_forgotten():
     """Keeps the parser map honest: a new grammar-backed prompt must be added to
     PARSERS rather than quietly landing in the free-text bucket."""
-    covered = set(PARSERS) | NO_PARSER
+    covered = set(PARSERS) | set(PLAIN_PARSERS) | NO_PARSER
     uncovered = sorted({h.label for h in hints.HINTS} - covered)
-    assert not uncovered, f"classify these in PARSERS or NO_PARSER: {uncovered}"
+    assert not uncovered, f"classify these in PARSERS, PLAIN_PARSERS or NO_PARSER: {uncovered}"
 
 
 def test_labels_in_source_finds_both_call_shapes():

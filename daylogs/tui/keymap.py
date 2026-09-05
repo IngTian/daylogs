@@ -106,6 +106,10 @@ KEYMAP: tuple[Key, ...] = (
     Key("e", "expense", "expense", "money", "write"),
     Key("b", "budget", "budget", "money", "write"),
     Key("s", "recurring", "recurring", "money", "write"),
+    # `n` because every letter in "category" is taken and `c` sorts by cost. Money-scoped
+    # even though a category is a config-wide thing: Money is the only tab that shows or
+    # consumes one, so this is where you are standing when you need it.
+    Key("n", "new category", "category", "money", "write"),
     Key("r", "roll", "roll", "money", "write"),
     Key("d", "by date", "sort_date", "money", "view"),
     Key("c", "by cost", "sort_cost", "money", "view"),

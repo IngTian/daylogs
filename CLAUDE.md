@@ -22,7 +22,7 @@ deliberately cut, and adding one back is a scope decision, not a detail:
 
 ```
 daylogs/
-  config.py   tomllib config + update_config; DAYLOGS_HOME overrides the data root
+  config.py   tomllib config + update_config/add_category; DAYLOGS_HOME overrides the root
   db.py       connect + seven-table schema (no schema-migration framework)
   categories.py  constant category tuple, extensible via config.toml
   sigil.py    tokeniser: `!` category, `@` time, `~` note, `=` kcal, `#` cycle
@@ -193,10 +193,25 @@ appended prose where it was convenient rather than editing the map.
   line runs past 200 columns — a wall where nothing stands out. It also drops any
   key the active scope has no handler for, asking the app's own resolver so the
   footer and the dispatcher cannot disagree.
-- **`config.toml` is written through `config.update_config`**, which inserts new
-  scalars **before the first table header**. A scalar after `[[category]]` is a
-  field of that table as far as TOML cares — it still parses, so nothing complains,
-  and the setting is simply never read.
+- **`config.toml` is written by two functions that write to opposite ends, on
+  purpose.** `update_config` inserts scalars **before the first table header**;
+  `add_category` appends a `[[category]]` block **after everything**. TOML's scoping
+  is positional and both failures are silent, because the file still parses either
+  way: a scalar after `[[category]]` is a field of that table and is simply never read
+  again, and a table header among the scalars swallows every scalar below it. Both
+  edit the file as text so a hand-written comment survives. Neither is the general
+  case of the other — don't unify them.
+- **`b` prefills from the selected category, and only on the categories pane.** Editing
+  a budget otherwise meant reading the amount off the pane and retyping the line;
+  `upsert_budget` is keyed on `(month, name)`, so a changed number always replaced the
+  line and what was missing was seeing the current one. It writes to
+  `view.months()[-1]` — the month **on screen**, not today's, since `[` walks the
+  anchor back — and the toast states that month. A group header on the expenses pane is
+  the only other row carrying a slug, and it deliberately prefills nothing: that pane
+  shows spend, and one key meaning two things depending on whether `G` is on is the
+  cost. `budget` is `UNIQUE(month, name)`, not `(month, category)`, so a category can
+  hold several lines; `money.budget_line` offers the newest, and the pane keeps summing
+  all of them.
 - **An empty state names the fix.** A month nobody rolled has no budget rows, and
   "0.00 budget / 1,234.00 over" is true, useless, and reads as stale data. It says
   what `r` would do instead. `money.pending_roll` must agree with

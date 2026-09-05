@@ -174,6 +174,32 @@ def _toml_scalar(value: float | int | str) -> str:
     return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def add_category(path: Path | str, *, slug: str, display: str | None) -> None:
+    """Append a `[[category]]` block to config.toml.
+
+    Appends where `update_config` *prepends*, and the asymmetry is deliberate rather than
+    an inconsistency to tidy up. Both rules exist because TOML's scoping is positional and
+    both failures are silent — the file still parses either way:
+
+    - a **scalar** written after a table header becomes a field of that table, so the
+      setting is simply never read again;
+    - a **table block** written among the scalars swallows every scalar below it.
+
+    So one has to go first and the other last. Edited as text, like `update_config`, so a
+    hand-written comment or a `[[category]]` block you added yourself survives.
+
+    `display` is omitted when absent: `categories.all_categories` already falls back to
+    the slug. No colour either — `auto_color` derives a stable one from the slug.
+    """
+    path = Path(path).expanduser()
+    text = path.read_text() if path.exists() else ""
+    block = ["[[category]]", f"slug = {_toml_scalar(slug)}"]
+    if display:
+        block.append(f"display = {_toml_scalar(display)}")
+    prefix = "" if not text or text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
+    path.write_text(text + prefix + "\n".join(block) + "\n")
+
+
 def update_config(path: Path | str, values: dict[str, float | int | str]) -> None:
     """Set top-level scalar keys in config.toml, leaving the rest of the file alone.
 
