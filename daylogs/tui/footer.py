@@ -23,6 +23,10 @@ _GLYPH = {
     "question_mark": "?",
     "slash": "/",
     "plus": "+",
+    # `=` is the same physical key as `+` without shift, and it is `footer=False`, so it
+    # only ever renders in the `?` overlay — which is why it went a release showing the raw
+    # Textual name `equals_sign`, the exact absurdity this table exists to prevent.
+    "equals_sign": "=",
     "minus": "-",
     "shift+tab": "S-tab",
     "escape": "esc",

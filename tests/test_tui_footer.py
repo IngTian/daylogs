@@ -74,7 +74,8 @@ def test_glyphs_are_human_readable_not_textual_names():
 def test_footer_never_shows_a_raw_textual_key_name():
     for scope in km.SCOPES:
         text = render_keys(scope, width=400)
-        for ugly in ("left_square_bracket", "question_mark", "right_curly_bracket"):
+        for ugly in ("left_square_bracket", "question_mark", "equals_sign",
+                     "right_curly_bracket"):
             assert ugly not in text
 
 
@@ -99,6 +100,18 @@ async def test_footer_shows_the_tabs_state_chip(make_app):
         await pilot.pause()
         text = str(app.query_one("#keyfooter").content)
     assert "2026" in text or "august" in text.lower()
+
+
+def test_no_key_renders_as_a_raw_textual_name():
+    """`glyph` exists because "Textual's key names are for code; `left_square_bracket` in a
+    footer would be absurd". An underscore is the tell, and it catches keys the footer never
+    shows: `equals_sign` is `footer=False`, so it rendered as itself in the `?` overlay for a
+    release while every footer test passed.
+    """
+    for k in km.KEYMAP:
+        assert "_" not in glyph(k.key), (
+            f"{k.key!r} reaches the screen as {glyph(k.key)!r} — add it to footer._GLYPH"
+        )
 
 
 async def test_question_mark_opens_the_help_overlay(make_app):
@@ -131,14 +144,71 @@ async def test_question_mark_also_closes_the_overlay(make_app):
 
 
 async def test_help_lists_every_key_in_the_map(make_app):
-    """Generated from KEYMAP, so a bound key can never be undocumented."""
+    """Generated from KEYMAP, so a bound key can never be undocumented.
+
+    Asserted on the RENDERED text, not on `str(w.content)`. The source is what the code
+    wrote; the rendered string is what the reader gets, and the two differ precisely where
+    markup is involved — which is the whole failure mode here. This test passed for a
+    release while the overlay silently dropped two keys.
+    """
     app = make_app()
     async with app.run_test() as pilot:
         await pilot.press("question_mark")
         await pilot.pause()
-        text = "\n".join(str(w.content) for w in app.screen.query("Static"))
+        text = "\n".join(plain(str(w.content)) for w in app.screen.query("Static"))
     for k in km.KEYMAP:
         assert k.label in text, f"{k.label!r} missing from the help overlay"
+        # The glyph too. `[` is itself a key, and unescaped it opens a markup tag that
+        # swallowed `[       prev` and the `]` row's glyph with it — so `?`, the one screen
+        # the README promises "can't be out of date", listed neither horizon key. The
+        # footer's `_hint` escapes for exactly this reason and carries a comment saying so;
+        # the fix never landed in `help.py`.
+        assert glyph(k.key) in text, (
+            f"the glyph for {k.key!r} ({glyph(k.key)!r}) never reached the screen"
+        )
+
+
+async def test_the_help_overlays_key_column_stays_aligned(make_app):
+    """Markup goes on *after* width arithmetic — the project's own rule, and the reason the
+    key cell is padded before it is escaped.
+
+    Escaping first makes the 8-column field measure the two characters of `\\[` rather than
+    the one column of `[`, so every bracket row's label sits one column left of the rest.
+    A test that only asks whether the glyph is present cannot see that.
+
+    Each key row is `"  " + glyph.ljust(8) + " " + label`, so the label starts at column 11.
+    """
+    app = make_app()
+    async with app.run_test(size=(120, 44)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        columns = [plain(str(w.content)) for w in app.screen.query(".help-col")]
+    assert columns, "no help columns rendered"
+    for col in columns:
+        rows = [ln for ln in col.splitlines() if ln.startswith("  ") and ln.strip()]
+        assert rows, f"no key rows in a column:\n{col}"
+        for ln in rows:
+            # `"  " + glyph.ljust(8) + " " + label`, so the label starts at column 11 —
+            # unless the glyph is itself wider than 8, which legitimately pushes it right.
+            key = ln[2:].split(" ", 1)[0]
+            expected = 2 + max(8, len(key)) + 1
+            assert ln[expected - 1] == " " and ln[expected] != " ", (
+                f"label starts at the wrong column ({expected} expected) — the key cell was "
+                f"padded after escaping rather than before: {ln!r}"
+            )
+
+
+async def test_the_help_overlay_shows_both_horizon_keys(make_app):
+    """The specific pair the escaping bug ate, named so a regression says which keys.
+    They are also the keys 0.4.0 redefined, so the overlay dropping them was worst here."""
+    app = make_app()
+    async with app.run_test(size=(120, 44)) as pilot:
+        await pilot.press("question_mark")
+        await pilot.pause()
+        text = "\n".join(plain(str(w.content)) for w in app.screen.query("Static"))
+    assert "[" in text and "]" in text, f"the bracket keys are missing:\n{text}"
+    for row in ("prev", "next"):
+        assert row in text
 
 
 async def test_help_groups_keys_under_headings(make_app):

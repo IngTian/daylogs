@@ -127,10 +127,12 @@ appended prose where it was convenient rather than editing the map.
   BMR is multiplied by it.** Assuming `desk` for an unset profile would raise
   maintenance 20% and silently restate every figure on screen and in every digest
   already written, so "no factor" is a real state in which every calorie number sits
-  against resting BMR exactly as it did before. Four surfaces read the burn — the
-  ENERGY panel, the FOOD header, the Day tab's BODY block, `summary.build_payload` —
-  and four separate compositions is four chances for one panel to measure the same
-  day against two baselines. `resolved_factor` also returns *where* the factor came
+  against resting BMR exactly as it did before. Several surfaces read the burn — the
+  ENERGY panel, the Day tab's BODY block, `summary.build_payload`, and the write toasts —
+  and each separate composition is another chance for one of them to measure the same day
+  against a different baseline. The FOOD header used to be on that list and no longer is:
+  it describes the window of rows beneath it, which is why the day's balance is stated
+  once, in the panel. `resolved_factor` also returns *where* the factor came
   from, because that reaches the screen: a multiplier rescales every calorie
   judgement for its day, so it must not arrive with nothing to make you doubt it.
   The level keywords are standard PAL bands **re-described** to mean "a day with
@@ -372,10 +374,14 @@ appended prose where it was convenient rather than editing the map.
   re-deriving the stamp "would shave the seconds off every edit"; that is exactly what
   `body.restamp` exists to prevent — its own docstring names weight as the motivating
   case — and it had simply never been wired up.
-  `body_tab._restamp_for` is the one rule every edit path should use: a line naming a time
+  `body_tab._restamp_for` is the one rule **all three** edit paths use: a line naming a time
   restamps to it; a line naming only a **date** keeps the row's own clock time and moves it
   to that date; a line naming neither changes nothing, because `restamp` then compares equal
-  and returns None. The middle case is why the helper exists — the grammar resolves a
+  and returns None. It said "should use" while only weight did, and the other two failed in
+  the two opposite directions it exists to prevent — food left `ate_at` on the old day, and
+  activity restamped from the parsed instant, so a date-only edit moved `logged_at` to
+  *now's* clock, on the column `resolved_factor` uses as its tie-breaker. Both reproduced,
+  both routed through the helper, one parametrized test across all three. The middle case is why the helper exists — the grammar resolves a
   missing time to *now*, so restamping from the parsed instant moved a 07:05 reading to
   whenever the edit happened, while keeping the stored stamp left it on the old day and
   inverted `morning_weight`/`latest_weight`. `restamp` compares the whole local **minute**,

@@ -182,7 +182,7 @@ Sigils mark the fields, so nothing is ever taken out of your own words:
     #  a cycle                      tab completes
     @  a date and/or a time         @2026-08-24  @08-24  @14:30  @08-24/14:30
     ~  a note (may contain spaces)
-    =  calories
+    =  calories on food, the whole day's activity factor on activity
 
 Everything unsigiled is the description. The first token is the amount. `\` escapes
 a leading sigil, so `\!important` is just a word.
@@ -190,9 +190,9 @@ a leading sigil, so `\!important` is just a word.
 Every prompt shows what it wants, in three places and no extra screen rows:
 
 ```
-╭─ profile › ──────────────────────────────────────────────────────────╮
-│ 180 male 1990-01-01 desk America/Toronto                              │
-╰─ height · m/f · birthday · desk/light/active/heavy · zone — any order ╯
+╭─ profile › ──────────────────────────────────────────────────────────────╮
+│ 180 male 1990-01-01 desk America/Toronto                                 │
+╰─ height · m/f · birthday · desk/light/active/heavy · zone — any order ───╯
 ```
 
 The example is the placeholder, so it gets out of the way as soon as you type. The
@@ -403,9 +403,10 @@ review line you can correct before it lands, and is clamped to 1.2–1.9.
 
 What is stored is the **whole day's** multiplier, not the session's own contribution:
 a PAL describes a day and is not additive, so `gym` plus `walked` is not 1.375 + 1.2.
-Log again and the newer row wins, the same last-reading-wins rule two weigh-ins on one
-day follow — so correcting a day means logging it again, and the earlier rows stay as a
-record of what was believed when.
+Log again and the newer row wins — so correcting a day's factor means logging it again,
+and the earlier rows stay as a record of what was believed when. Weight is the opposite:
+a day's **first**, fasted reading is the one the trend, the deltas and the digest use, so
+re-weighing does not replace it — see the chart section below.
 
 If the estimate fails — no CLI, a timeout — the activity is still recorded, with no
 factor, and the day falls back to your ordinary-day level. What you did is your data;
@@ -550,7 +551,7 @@ A failed estimate leaves the file pending rather than silently consuming it.
 
 ## Data
 
-SQLite, six tables, at `~/Documents/daylogs/daylogs.db`. Logs at
+SQLite, seven tables, at `~/Documents/daylogs/daylogs.db`. Logs at
 `~/.daylogs/logs/`. Override the data root with `DAYLOGS_HOME`.
 
 This project was called **daybook** until 0.2.0, and the data root moved with the
@@ -570,8 +571,8 @@ from cron.
 
 **And get it out.** A backup only daylogs can open is a weaker promise than a file
 anything can read, so `day export <dir>` writes one CSV per table into a dated
-subdirectory — `weight`, `food`, `expense`, `recurring`, `budget`, `report`, with
-the schema's own column names as headers. The table list comes from the database
+subdirectory — `weight`, `food`, `activity`, `expense`, `recurring`, `budget`,
+`report`, with the schema's own column names as headers. The table list comes from the database
 rather than a hand-kept list, so nothing is silently left out. It prints the
 directory on stdout and per-table row counts on stderr, so `cd "$(day export
 ~/Drive/daylogs)"` works and cron logs stay readable.
@@ -602,7 +603,7 @@ Runtime dependency: `textual`. Everything else is the standard library.
 The README's three screenshots are generated, not drawn:
 
 ```bash
-python tools/screenshots.py       # rewrites assets/{day,body,money}.{svg,png}
+python tools/screenshots.py       # rewrites assets/{day,body,money}.png
 ```
 
 Run it after anything that moves the layout and commit the result. The seed data

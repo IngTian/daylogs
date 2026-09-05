@@ -891,20 +891,11 @@ class BodyTab(PanelTab):
         if before is None:
             self.app.notify("that row is gone", timeout=3)
             return
-        # render_food emits ate_at as @date/time. Only restamp if the user actually
-        # set a time — an escaped \@ in the description is not a time token.
-        if not self._line_sets_a_time(value):
-            at = before["ate_at"]
-        else:
-            tz = self.app.cfg.timezone
-            before_minute = wall(before["ate_at"], tz).strftime("%Y-%m-%d %H:%M")
-            parsed_minute = wall(r.at, tz).strftime("%Y-%m-%d %H:%M")
-            if before_minute == parsed_minute:
-                at = before["ate_at"]
-            else:
-                at = body.restamp(before["ate_at"], date=r.date, hhmm=hhmm(r.at, tz), tz=tz)
-                if at is None:
-                    at = before["ate_at"]
+        # The shared rule — see `_restamp_for`. This hand-rolled its own version and had no
+        # date-only case, so an edit naming a date and no time moved `date` while leaving
+        # `ate_at` on the old day; the row then sorted within its new day by a timestamp
+        # belonging to the old one.
+        at = self._restamp_for(before["ate_at"], parsed_at=r.at, date=r.date, line=value)
         # `source` is deliberately absent from the grammar: it is provenance
         # (labelled vs estimated) that the digest reads, not something an edit of the
         # description should rewrite. Pre-image after the write.
@@ -955,12 +946,13 @@ class BodyTab(PanelTab):
             if before is None:
                 self.app.notify("that row is gone", timeout=3)
                 return
-            # Only restamp when the minute actually moved, so the seconds survive —
-            # `logged_at` is the tie-breaker `resolved_factor` uses to pick a day's
-            # latest inference, and the grammar's only time token is HH:MM.
-            at = body.restamp(
-                before["logged_at"], date=r.date,
-                hhmm=hhmm(r.at, self.app.cfg.timezone), tz=self.app.cfg.timezone,
+            # The shared rule — see `_restamp_for`. This restamped from the *parsed*
+            # instant, and the grammar fills a missing time from `now`, so an edit naming
+            # only a date moved `logged_at` to whenever the edit happened. That column is
+            # the tie-breaker `resolved_factor` uses to pick a day's latest inference, so a
+            # description fix could hand the day a different factor.
+            at = self._restamp_for(
+                before["logged_at"], parsed_at=r.at, date=r.date, line=value
             )
             body.update_activity(
                 self.app.conn, row_id,

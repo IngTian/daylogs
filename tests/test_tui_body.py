@@ -1,6 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+import pytest
 from helpers import go_body, go_day
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
@@ -705,7 +706,11 @@ async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, t
     description must not rewrite it."""
     import datetime as dt
 
-    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=1787223943,
+    # `date` and `at` must agree, or this pins nothing about seconds: 1787223943 is
+    # 2026-08-20 07:05:43, eight days from the `date` it was filed under — a row the app
+    # cannot write, and one an edit now reconciles onto the stated date on purpose.
+    at = int(dt.datetime(2026, 8, 28, 7, 5, 43).timestamp())
+    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=at,
              source="estimated")
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
@@ -723,7 +728,7 @@ async def test_enter_on_a_food_row_edits_it_and_keeps_its_source(make_app, db, t
     assert rows[0]["description"] == "oatmeal with berries"
     assert rows[0]["kcal"] == 400
     assert rows[0]["source"] == "estimated"
-    assert rows[0]["ate_at"] == 1787223943, "an unchanged minute keeps the seconds"
+    assert rows[0]["ate_at"] == at, "an unchanged minute keeps the seconds"
 
 
 async def test_dropping_kcal_on_food_edit_is_rejected(make_app, db, type_into):
@@ -984,8 +989,13 @@ async def test_editing_a_food_with_escaped_at_preserves_timestamp(
 ):
     r"""An escaped \@ inside the description is not a time token — ate_at must not change."""
     import datetime as dt
+
+    # `date` and `at` agree, or the stamp moves for a different reason entirely: an edit now
+    # settles a row whose two columns disagree onto the stated date, so an inconsistent
+    # fixture would fail this test while the escaped-`@` rule it names worked perfectly.
+    at = int(dt.datetime(2026, 8, 28, 7, 5, 43).timestamp())
     add_food(
-        db, description="meeting", kcal=300, date="2026-08-28", at=1787223943, source="labeled"
+        db, description="meeting", kcal=300, date="2026-08-28", at=at, source="labeled"
     )
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
@@ -1000,7 +1010,7 @@ async def test_editing_a_food_with_escaped_at_preserves_timestamp(
     rows = list_food(db, date="2026-08-28")
     assert len(rows) == 1
     assert rows[0]["description"] == "@work meeting", "the backslash is escape syntax, not content"
-    assert rows[0]["ate_at"] == 1787223943, "escaped @ must not trigger a restamp"
+    assert rows[0]["ate_at"] == at, "escaped @ must not trigger a restamp"
 
 
 # ── the estimate progress indicator ──────────────────────────────────────
@@ -3140,3 +3150,108 @@ async def test_the_readme_food_box_matches_what_the_app_renders(make_app, db):
         f"the README header has a different shape:\n  README: {shape}\n"
         f"  app:    {re.sub(r'[\\d,]+', 'N', real_head)}"
     )
+
+
+@pytest.mark.parametrize(
+    "kind,line,table,col",
+    [
+        ("weight", "80 @2026-09-02", "weight", "measured_at"),
+        ("food", "salad =610 @2026-09-02", "food", "ate_at"),
+        ("activity", "gym 1h =1.55 @2026-09-02", "activity", "logged_at"),
+    ],
+)
+async def test_a_date_only_edit_moves_every_tables_stamp_the_same_way(
+    make_app, db, kind, line, table, col
+):
+    """One rule for all three edit paths: a line naming a date and no time keeps the row's
+    own clock time and moves it to that date.
+
+    Only the weight path went through `_restamp_for`, and the other two failed in the two
+    opposite directions the helper exists to prevent — reproduced with the row stored at
+    2026-09-01 07:05:30 and the clock at 21:42:
+
+      food     `date` moved to the 2nd while `ate_at` stayed on the 1st, so the row sorted
+               within its new day by a timestamp belonging to the old one;
+      activity `logged_at` jumped to 21:42, *now's* clock — and that column is the
+               tie-breaker `resolved_factor` uses to pick a day's latest inference.
+    """
+    from daylogs.body import add_activity
+
+    at = int(dt.datetime(2026, 9, 1, 7, 5, 30).timestamp())
+    if kind == "weight":
+        add_weight(db, kg=80.0, date="2026-09-01", at=at)
+    elif kind == "food":
+        add_food(db, description="salad", kcal=610, source="labeled", date="2026-09-01", at=at)
+    else:
+        add_activity(db, description="gym 1h", factor=1.55, date="2026-09-01", at=at,
+                     source="labeled")
+
+    app = make_app(now=lambda: dt.datetime(2026, 9, 5, 21, 42))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, kind)
+        tab.horizon = "all"
+        tab.viewing_date = "2026-09-01"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "the row did not arm for editing"
+        app.prompt.value = line
+        await pilot.press("enter")
+        await pilot.pause()
+        tz = app.cfg.timezone
+
+    row = list(db.execute(f"SELECT * FROM {table}"))[0]
+    assert row["date"] == "2026-09-02"
+    moved = wall(row[col], tz)
+    assert moved.date().isoformat() == "2026-09-02", (
+        f"{kind}: the stamp stayed on the old day ({moved})"
+    )
+    assert moved.strftime("%H:%M") == "07:05", (
+        f"{kind}: the row's own clock time was replaced ({moved}) — 21:42 means it took now's"
+    )
+
+
+async def test_an_edit_settles_a_row_whose_date_and_stamp_disagree(make_app, db):
+    """CLAUDE.md's stance, now that one rule drives all three edit paths: "`date` stays
+    authoritative over `ate_at` when the two disagree … the render is asserted to be
+    *stable* rather than instant-preserving: it settles once instead of creeping on every
+    edit."
+
+    The app never writes such a row, but a zone change can produce one — Aug 27 in Toronto
+    is Aug 28 in Kiritimati — and the two columns are stored separately. An edit moves the
+    stamp onto the stated date at its own clock time, and a second identical edit changes
+    nothing, which is what "settles once" means.
+    """
+    stamp = int(dt.datetime(2026, 8, 20, 7, 5, 43).timestamp())
+    add_food(db, description="oatmeal", kcal=350, source="labeled", date="2026-08-28",
+             at=stamp)
+    app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "all"
+        tab.viewing_date = "2026-08-28"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        first = app.prompt.value
+        await pilot.press("enter")               # submit the prefill unchanged
+        await pilot.pause()
+        settled = list(db.execute("SELECT * FROM food"))[0]["ate_at"]
+        tz = app.cfg.timezone
+        # Again, unchanged: it must not creep.
+        await pilot.press("enter")
+        await pilot.pause()
+        second = app.prompt.value
+        await pilot.press("enter")
+        await pilot.pause()
+    again = list(db.execute("SELECT * FROM food"))[0]["ate_at"]
+    assert wall(settled, tz).date().isoformat() == "2026-08-28", (
+        f"the stamp did not settle onto the stated date: {wall(settled, tz)}"
+    )
+    assert wall(settled, tz).strftime("%H:%M") == "07:05", "the clock time should survive"
+    assert again == settled, "a second identical edit moved it again — it is creeping"
+    assert second == first, f"the rendered line is not stable: {first!r} -> {second!r}"

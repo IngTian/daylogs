@@ -497,8 +497,11 @@ def resolved_factor(conn, cfg, *, date: str) -> tuple[float | None, str | None]:
     2. otherwise the profile baseline, which is the common case and needs no input;
     3. otherwise `(None, None)`, and `net` sits against resting BMR as it did before.
 
-    Latest-wins rather than first: re-logging supersedes, which is the same rule the
-    weight series applies to two weigh-ins on one day. A row whose factor is NULL —
+    Latest-wins rather than first: re-logging supersedes, so correcting a day's factor
+    means logging it again. Note this is the *opposite* of the weight series, which
+    collapses a day to its **first** reading — `weight_series` and `morning_weight` both
+    take `MIN(measured_at)`, because a fasted reading is the only comparable one. Two rules,
+    for two different questions. A row whose factor is NULL —
     an inference that never landed — falls through to the baseline rather than
     poisoning the day with nothing, and reports the baseline's origin, not the log's.
 
