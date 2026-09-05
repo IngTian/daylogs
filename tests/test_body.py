@@ -493,3 +493,20 @@ def test_a_multi_day_window_puts_the_newest_day_first_and_reads_each_forwards(db
                      at=_stamp(2026, int(d[5:7]), int(d[8:]), hh, 0))
     got = [r["description"] for r in list_food(db, since="2026-09-01", until="2026-09-04")]
     assert got == ["breakfast 04", "dinner 04", "breakfast 03", "dinner 03"], got
+
+
+def test_a_days_weigh_ins_are_listed_first_reading_first(db):
+    """Same order the food and activity windows use, so the three Body tables agree — and
+    within a day it puts `morning_weight`'s reading on top, which is the one the trend, the
+    7d/30d deltas and the digest all take. `latest_weight` is the headline's and sits below.
+    """
+    add_weight(db, kg=80.5, date="2026-09-04", at=_stamp(2026, 9, 4, 10, 40))
+    add_weight(db, kg=80.0, date="2026-09-04", at=_stamp(2026, 9, 4, 7, 5))
+    add_weight(db, kg=81.0, date="2026-09-03", at=_stamp(2026, 9, 3, 7, 30))
+    rows = list_weight(db, since="2026-09-01", until="2026-09-04")
+    assert [(r["date"], r["kg"]) for r in rows] == [
+        ("2026-09-04", 80.0), ("2026-09-04", 80.5), ("2026-09-03", 81.0),
+    ], "newest day first, each day forwards"
+    assert rows[0]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
+        "the top row of a day should be the reading the trend uses"
+    )

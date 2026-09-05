@@ -64,7 +64,11 @@ def list_weight(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    sql += " ORDER BY date DESC, measured_at DESC LIMIT ?"
+    # Most recent day first, each day read forwards — the same order `_day_or_window`
+    # returns, so the three tables on the Body tab agree. Within a day that puts the
+    # *first* reading on top, which is the one `morning_weight` picks for the trend, the
+    # deltas and the digest; `latest_weight` is the headline's and sits below it.
+    sql += " ORDER BY date DESC, measured_at ASC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
