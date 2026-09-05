@@ -5,6 +5,7 @@ from helpers import go_body, go_day
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
 from daylogs.estimate import Estimate
+from daylogs.fmt import hhmm, wall
 
 WEIGHT_TZ = ZoneInfo("America/Toronto")
 
@@ -376,7 +377,7 @@ async def test_food_header_omits_bmr_without_a_profile(make_app, db):
     assert "BMR" not in head
 
 
-async def test_food_header_shows_net_with_a_profile(make_app, make_cfg, db):
+async def test_the_days_net_is_shown_once_with_a_profile(make_app, make_cfg, db):
     add_weight(db, kg=80.0, date="2026-08-27", at=1)
     add_food(db, description="salad", kcal=610, source="labeled", date="2026-08-27", at=2)
     cfg = make_cfg(height_cm=180, sex="male", birthday="1996-08-27")
@@ -388,8 +389,18 @@ async def test_food_header_shows_net_with_a_profile(make_app, make_cfg, db):
         body.viewing_date = "2026-08-27"
         body.reload()
         await pilot.pause()
+        panel = str(app.query_one("#energy-body").content)
         head = str(app.query_one("#food-head").content)
-    assert "BMR" in head and "net" in head
+    # The day's balance lives in the ENERGY panel now. The FOOD header describes the
+    # window of rows beneath it, which is a different question, and duplicating `burn`
+    # across surfaces is what CLAUDE.md warns produces two baselines for one day.
+    assert "BMR" in panel and "net" in panel
+    assert "610" in panel, panel
+    # "once" is the claim in this test's name, so it is the header that must NOT restate
+    # the baseline. `"salad" not in head` was the first version of this and was vacuous:
+    # no version of the FOOD header has ever printed a food description.
+    assert "BMR" not in head, f"the header restates the day's baseline: {head!r}"
+    assert "net" not in head, f"the header restates the day's net: {head!r}"
 
 
 async def test_photo_path_prompt_rejects_a_non_image(make_app, tmp_path, type_into, monkeypatch):
@@ -469,7 +480,13 @@ async def test_h_sets_the_profile_and_bmr_appears_at_once(make_app, db, type_int
         text = _energy(app)
         cfg = app.cfg
     assert "BMR" in text
-    assert "press h" not in text
+    # The BMR guidance is gone because height/sex/birthday are now set. The *activity*
+    # guidance is still there and should be: `h` can set a level too, and this profile
+    # line set none, so the day is still measured against resting BMR.
+    assert "press h to set height" not in text, text
+    # The guidance wraps onto a second line to fit a 46-column panel, so match the phrase
+    # that stays on the first — not the whole sentence, which no width renders intact.
+    assert "press h to set an" in text, text
     assert (cfg.height_cm, cfg.sex, cfg.birthday) == (182.0, "male", "1995-06-15")
     assert (tmp_path / "config.toml").exists()
 
@@ -580,9 +597,18 @@ async def test_editing_a_weight_updates_in_place(make_app, db, type_into):
     assert rows[0]["note"] == "", "what's on the line is authoritative; no note = clear"
 
 
-async def test_editing_a_weight_never_restamps_the_timestamp(make_app, db, type_into):
-    """measured_at is the tie-breaker that decides which of a day's readings counts
-    (weight_series takes MAX per day), so an edit must not touch it."""
+async def test_a_bare_number_moves_the_row_and_its_stamp_together(make_app, db, type_into):
+    """The submitted line is authoritative, and the stamp has to agree with the date.
+
+    A line with no `@` token resolves to *now*, so submitting a bare `81.5` says "81.5,
+    taken now" and the row becomes today's. `update_weight` has always written `date=r.date`
+    here — so the row already moved — while `measured_at` was left on the old day. That is
+    the inconsistency: every query filters on `date`, and `morning_weight`/`latest_weight`
+    then order by a stamp belonging to a different month. This asserts they move together.
+
+    Clearing the prefill is how you reach this deliberately; keeping it is the ordinary
+    path, and the test below pins that it preserves the stamp to the second.
+    """
     add_weight(db, kg=78.2, date="2026-08-27", at=1787223943, note="")
     app = make_app()
     async with app.run_test(size=(120, 30)) as pilot:
@@ -594,7 +620,42 @@ async def test_editing_a_weight_never_restamps_the_timestamp(make_app, db, type_
         await type_into(pilot, "81.5")
         await pilot.press("enter")
         await pilot.pause()
-    assert list_weight(db)[0]["measured_at"] == 1787223943
+        today = app.today()
+    row = list_weight(db)[0]
+    assert row["date"] == today, "the line said now, so the row is today's"
+    assert wall(row["measured_at"], app.cfg.timezone).date().isoformat() == today, (
+        f"the stamp stayed on the old day: {row['measured_at']}"
+    )
+
+
+async def test_submitting_the_prefill_unchanged_preserves_the_stamp_to_the_second(
+    make_app, db
+):
+    """The reason `restamp` returns None at all. The stored stamp carries seconds the
+    grammar cannot express, and for weight those seconds are the tie-breaker
+    `weight_series` uses to pick a day's reading — so the ordinary edit, where you change a
+    weight or a note and leave the time alone, must not touch them."""
+    at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
+    add_weight(db, kg=80.0, date="2026-09-04", at=at, note="post-run")
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "weight")
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        prefill = app.prompt.value
+        app.prompt.value = prefill.replace("80", "80.4", 1)   # the weight only
+        await pilot.press("enter")
+        await pilot.pause()
+    row = list_weight(db)[0]
+    assert row["kg"] == 80.4
+    assert row["measured_at"] == at, (
+        f"the seconds were shaved off an edit that did not touch the time: "
+        f"{row['measured_at']} != {at}"
+    )
 
 
 async def test_undoing_an_edit_restores_rather_than_duplicates(make_app, db, type_into):
@@ -1884,8 +1945,15 @@ async def test_without_a_level_the_energy_panel_is_untouched(make_app, make_cfg,
     bmr = _row(text, "BMR")
     assert "−" in bmr and f"{_BMR:,}" in bmr, f"BMR is not the subtrahend: {bmr!r}"
     assert _has_no_row(text, "burn"), f"a burn line with no factor to build it: {text!r}"
-    assert _has_no_row(text, "activity"), f"an activity line, no factor: {text!r}"
     assert "-580" in _row(text, "net"), f"net is not 1,200 − 1,780: {text!r}"
+    # There IS an activity row now, and it must never look like a factor. A dash and the
+    # key that sets one — the same shape the BMR row uses when height is missing. This
+    # assertion used to be `_has_no_row("activity")`, written when the only alternative
+    # was a line implying a multiplier that had never been set.
+    activity = _row(text, "activity")
+    assert "—" in activity, f"the activity row should be a dash: {activity!r}"
+    assert "press h" in activity, f"and should name the fix: {activity!r}"
+    assert "×" not in activity, f"no factor was set, so none may be shown: {activity!r}"
 
 
 async def test_a_logged_factor_says_it_was_logged(make_app, make_cfg, db):
@@ -1948,7 +2016,15 @@ async def test_the_horizon_average_net_is_per_day(make_app, make_cfg, db):
     assert "-1,348" not in flat and "-280" not in flat
 
 
-async def test_the_food_header_measures_against_burn(make_app, make_cfg, db):
+async def test_the_day_is_measured_against_burn_not_resting_bmr(make_app, make_cfg, db):
+    """"burn", not "BMR": with a factor the baseline is what the day actually cost, and
+    naming it BMR would measure against resting expenditure while claiming otherwise.
+
+    Asserted on the ENERGY panel. This lived in the FOOD header until that header became a
+    description of the *window* of rows beneath it — a different question, and one surface
+    fewer reading `burn`, which CLAUDE.md wants because each extra one is another chance
+    for two panels to measure the same day against two baselines.
+    """
     add_weight(db, kg=80.0, date=DAY, at=1)
     add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
     app = make_app(cfg=_profile(make_cfg, activity="desk"))
@@ -1956,10 +2032,13 @@ async def test_the_food_header_measures_against_burn(make_app, make_cfg, db):
         await go_body(pilot, app)
         await _energy_on(app)
         await pilot.pause()
+        panel = str(app.query_one("#energy-body").content)
         head = str(app.query_one("#food-head").content)
-    assert f"{_DESK_BURN:,} burn" in head, f"header still on resting BMR: {head!r}"
-    assert "BMR" not in head
-    assert "-936 net" in head.replace("−", "-"), f"net is wrong: {head!r}"
+    flat = panel.replace("−", "-")
+    assert f"{_DESK_BURN:,}" in flat, f"panel still on resting BMR: {panel!r}"
+    assert "burn" in flat, panel
+    assert "-936" in flat, f"net is wrong: {panel!r}"
+    assert "burn" not in head, f"the header duplicates the day's baseline: {head!r}"
 
 
 # ── BMI ──────────────────────────────────────────────────────────────────
@@ -2287,7 +2366,7 @@ async def test_the_activity_table_lists_the_days_rows(make_app, db):
     assert any(c == "—" for c in cells), f"a factorless row needs a dash: {cells}"
 
 
-async def test_the_activity_header_names_the_days_factor_and_its_origin(
+async def test_the_days_factor_and_its_origin_are_shown_once(
     make_app, make_cfg, db
 ):
     from daylogs.body import add_activity
@@ -2302,22 +2381,31 @@ async def test_the_activity_header_names_the_days_factor_and_its_origin(
         body.viewing_date = DAY
         body.reload()
         await pilot.pause()
+        panel = str(app.query_one("#energy-body").content)
         head = str(app.query_one("#food-head").content)
     assert head.startswith("ACTIVITY"), f"the header names the wrong view: {head!r}"
-    assert "×1.6" in head and "logged" in head
-    assert f"{_GYM_BURN:,}" in head, f"the burn it produces is missing: {head!r}"
+    # The factor, its origin and the burn it produces are in the ENERGY panel. They were
+    # in this header too, which was one day's three facts above a table that now lists a
+    # window — a label that is wrong is worse than one that is missing.
+    assert "×1.6" in panel and "logged" in panel, panel
+    assert f"{_GYM_BURN:,}" in panel.replace("−", "-"), f"the burn is missing: {panel!r}"
 
 
-async def test_the_activity_header_names_the_fix_when_there_is_no_factor(make_app, db):
-    app = make_app()
+async def test_no_factor_names_the_fix_where_the_fallback_happens(make_app, make_cfg, db):
+    """With no factor the day is measured against *resting* BMR, and the ENERGY panel
+    showed that without a word about it — the guidance was in the ACTIVITY header, which
+    now describes a window. It belongs beside the number it explains."""
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    app = make_app(cfg=make_cfg(height_cm=180, sex="male", birthday="1996-08-27"))
     async with app.run_test(size=(110, 34)) as pilot:
         await go_body(pilot, app)
         body = app.query_one("#body")
-        body.table_mode = "activity"
+        body.viewing_date = DAY
         body.reload()
         await pilot.pause()
-        head = str(app.query_one("#food-head").content)
-    assert "press h" in head, f"an empty state that names no fix: {head!r}"
+        panel = str(app.query_one("#energy-body").content)
+    assert "BMR" in panel, panel
+    assert "press h" in panel, f"the resting-BMR fallback names no fix: {panel!r}"
 
 
 async def test_enter_edits_an_activity_row(make_app, db, type_into):
@@ -2474,8 +2562,10 @@ async def test_stepping_the_period_moves_the_table(make_app, db):
         await _weight_view(app, date="2026-09-02")
         await pilot.pause()
         assert _weight_rows(app) == ["2026-09-02"]
-        for _ in range(31):
-            await pilot.press("left_square_bracket")
+        # One press, not thirty-one: `[` steps one whole horizon now, and the default is
+        # `1m`. Pressing it a month at a time was the friction that made the old day-step
+        # wrong for a tab where every table follows the window.
+        await pilot.press("left_square_bracket")
         await pilot.pause()
         stepped = _weight_rows(app)
     assert stepped == ["2026-08-02"], f"the table did not follow `[`: {stepped}"
@@ -2518,7 +2608,7 @@ async def test_an_empty_window_names_the_fix(make_app, db):
         await _weight_view(app, date=DAY)
         await pilot.pause()
         head = str(app.query_one("#food-head").content)
-    assert "no weigh-ins" in head, f"{head!r}"
+    assert "nothing logged" in head, f"{head!r}"
     assert "press w" in head, f"the empty state names no fix: {head!r}"
 
 
@@ -2615,3 +2705,438 @@ async def test_a_meal_estimate_and_a_factor_inference_do_not_cancel_each_other(
     # stick on forever rather than clearing.
     assert inferring is False, "the estimating flag never cleared"
     assert popup == "", f"the popup outlived both calls: {popup!r}"
+
+
+# ── one window: every table on the tab answers to the horizon ─────────────
+# Measured before this change: `+`/`-` moved the chart and the weight table, and did
+# nothing whatsoever to the food or activity tables — one row at `1d` and the same one
+# row at `all`. Meanwhile the chart above the food table was still plotting weight. The
+# window is one concept (`horizon.py`); the tab now has one window.
+#
+# `1d` is exactly the old behaviour: `horizon.resolve("1d")` gives start == end == the
+# anchor, and its label is the day itself.
+
+
+def _seed_window(db, days=6, start="2026-08-30"):
+    from daylogs.body import add_activity, add_food, add_weight
+
+    d0 = dt.date.fromisoformat(start)
+    for i in range(days):
+        d = (d0 + dt.timedelta(days=i)).isoformat()
+        at = int(dt.datetime.fromisoformat(f"{d}T07:05").timestamp())
+        add_weight(db, kg=80.0 - i * 0.2, date=d, at=at)
+        add_food(db, description=f"meal {i}", kcal=500 + i, source="labeled", date=d, at=at + 18000)
+        add_activity(db, description=f"walk {i}", factor=1.4, date=d, at=at + 36000,
+                     source="labeled")
+
+
+def _rows(app) -> int:
+    from textual.widgets import DataTable
+
+    return app.query_one("#body-table", DataTable).row_count
+
+
+def _cols(app) -> list[str]:
+    from textual.widgets import DataTable
+
+    return [str(c.label) for c in app.query_one("#body-table", DataTable).columns.values()]
+
+
+def _head(app) -> str:
+    from textual.widgets import Static
+
+    c = app.query_one("#food-head", Static).content
+    return c if isinstance(c, str) else c.plain
+
+
+async def _view(pilot, app, name: str):
+    """Land on a named Body sub-view without depending on where the tab opens."""
+    tab = await go_body(pilot, app)
+    tab.table_mode = name
+    tab.reload()
+    await pilot.pause()
+    return tab
+
+
+async def test_the_food_table_follows_the_horizon(make_app, db):
+    _seed_window(db)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "1d"
+        tab.reload()
+        await pilot.pause()
+        one_day = _rows(app)
+        tab.horizon = "1w"
+        tab.reload()
+        await pilot.pause()
+        one_week = _rows(app)
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        everything = _rows(app)
+    # The seed covers 2026-08-30 .. 09-04 and the clock is on 09-04, so `1d` is exactly
+    # that day's one meal — which is precisely the old per-day behaviour, reachable again
+    # by zooming all the way in.
+    assert one_day == 1, f"1d should be the anchor day alone: {one_day}"
+    assert one_week == 6, f"a week should reach back to Aug 30: {one_week}"
+    assert everything == 6, f"all time should list every meal: {everything}"
+    assert one_week > one_day, f"zooming out added no rows: {one_day} -> {one_week}"
+
+
+async def test_the_activity_table_follows_the_horizon(make_app, db):
+    _seed_window(db)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "activity")
+        tab.horizon = "1d"
+        tab.reload()
+        await pilot.pause()
+        one_day = _rows(app)
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        everything = _rows(app)
+    assert one_day == 1, f"1d should be the anchor day alone: {one_day}"
+    assert everything == 6, f"all time should list every activity: {everything}"
+
+
+async def test_one_day_is_exactly_the_day(make_app, db):
+    """`1d` has to reproduce the old per-day behaviour precisely, or zooming all the way
+    in is not a way back to "what did I eat today"."""
+    _seed_window(db, days=6, start="2026-08-30")
+    app = make_app(now=lambda: dt.datetime(2026, 9, 2, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "1d"
+        tab.reload()
+        await pilot.pause()
+        rows = _rows(app)
+        head = _head(app)
+    assert rows == 1, f"exactly one meal was logged on 2026-09-02: {rows}"
+    assert "Sep 2 2026" in head, f"the header should name the single day: {head!r}"
+
+
+async def test_an_older_anchor_does_not_list_newer_rows(make_app, db):
+    """The right edge matters, for the reason `list_weight`'s docstring gives: with a
+    lower bound alone, viewing an older day listed rows that had not happened yet."""
+    _seed_window(db, days=6, start="2026-08-30")
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.viewing_date = "2026-09-01"
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        table = app.query_one("#body-table")
+        dates = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+    assert dates, "nothing listed at all"
+    assert max(dates) <= "2026-09-01", f"listed rows from the future: {dates}"
+
+
+async def test_the_food_and_activity_tables_say_which_day_each_row_is(make_app, db):
+    """A window of rows with only a clock time is unreadable — two `08:00` rows five days
+    apart look like the same morning."""
+    _seed_window(db)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        food_cols = _cols(app)
+        tab.table_mode = "activity"
+        tab.reload()
+        await pilot.pause()
+        activity_cols = _cols(app)
+    assert food_cols[:2] == ["date", "time"], food_cols
+    assert activity_cols[:2] == ["date", "time"], activity_cols
+
+
+async def test_the_weight_table_shows_the_reading_time(make_app, db):
+    """Two readings on one day rendered as two rows both saying `2026-09-04`, and
+    `measured_at` — the tie-breaker `weight_series` uses to choose between them — was
+    invisible. The morning reading is the trend's; the later one is the headline's."""
+    from daylogs.body import add_weight
+
+    add_weight(db, kg=80.4, date="2026-09-04",
+               at=int(dt.datetime(2026, 9, 4, 7, 5).timestamp()))
+    add_weight(db, kg=80.9, date="2026-09-04",
+               at=int(dt.datetime(2026, 9, 4, 10, 40).timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "weight")
+        tab.horizon = "1d"
+        tab.reload()
+        await pilot.pause()
+        cols = _cols(app)
+        table = app.query_one("#body-table")
+        shown = [[str(c) for c in table.get_row_at(i)] for i in range(table.row_count)]
+    assert cols[:2] == ["date", "time"], cols
+    times = sorted(r[1] for r in shown)
+    assert times == ["07:05", "10:40"], f"the two readings are not distinguishable: {shown}"
+
+
+async def test_the_headers_all_name_the_window(make_app, db):
+    """Three tables over one window, so three headers of one shape. The day's own energy
+    balance stays in the ENERGY panel, which already carried it."""
+    _seed_window(db)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        heads = {}
+        for view in ("weight", "food", "activity"):
+            tab = await _view(pilot, app, view)
+            tab.horizon = "1w"
+            tab.reload()
+            await pilot.pause()
+            heads[view] = _head(app)
+    for view, head in heads.items():
+        assert "Aug 29 – Sep 4 2026" in head, f"{view} header does not name the window: {head!r}"
+    assert head.startswith("ACTIVITY"), heads["activity"]
+    assert heads["food"].startswith("FOOD"), heads["food"]
+    assert heads["weight"].startswith("WEIGHT"), heads["weight"]
+
+
+async def test_an_empty_window_names_the_key_that_fills_it(make_app, db):
+    """The same empty state the weight table already had: "true, useless, and reads as
+    stale data" is what a bare 0 would be."""
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        heads = {}
+        for view, key in (("food", "f"), ("activity", "a")):
+            tab = await _view(pilot, app, view)
+            tab.horizon = "1w"
+            tab.reload()
+            await pilot.pause()
+            heads[view] = (_head(app), key)
+    for view, (head, key) in heads.items():
+        assert f"press {key}" in head, f"{view}'s empty state names no fix: {head!r}"
+        assert "widen" in head, f"{view}'s empty state does not mention zooming out: {head!r}"
+
+
+async def test_editing_a_weights_time_moves_the_stamp(make_app, db):
+    """The converse of "an unchanged minute preserves the seconds". The time is in the
+    line because the table shows it, so changing it has to actually move `measured_at` —
+    which is the column `weight_series` uses to pick a day's reading, so a time edit that
+    silently did nothing would leave the trend on the wrong one of two weigh-ins.
+    """
+    at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
+    add_weight(db, kg=80.0, date="2026-09-04", at=at)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "weight")
+        tab.horizon = "1d"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open and "07:05" in app.prompt.value, app.prompt.value
+        app.prompt.value = "80 @2026-09-04/09:30"
+        await pilot.press("enter")
+        await pilot.pause()
+    row = list_weight(db)[0]
+    assert hhmm(row["measured_at"], app.cfg.timezone) == "09:30", (
+        f"the edited time did not land: {row['measured_at']}"
+    )
+    assert row["measured_at"] != at, "the stamp did not move at all"
+
+
+async def test_a_weight_edit_that_moves_only_the_date_takes_the_stamp_with_it(make_app, db):
+    """The other half of the date-only defect, at the UI layer.
+
+    A line naming a date and no time is legal, and the grammar resolves the missing time to
+    *now* — so restamping from the parsed instant would move a 07:05 reading to whenever the
+    edit happened. Keeping the stored stamp instead left it on the old day, which inverts
+    `morning_weight` and `latest_weight`. The rule is: reuse the row's own clock time, move
+    it to the stated date.
+    """
+    from daylogs.body import list_weight
+
+    at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
+    add_weight(db, kg=80.0, date="2026-09-04", at=at)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "weight")
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = "80 @2026-09-05"          # a date, deliberately no time
+        await pilot.press("enter")
+        await pilot.pause()
+    row = list_weight(db)[0]
+    assert row["date"] == "2026-09-05"
+    stamp = dt.datetime.fromtimestamp(row["measured_at"])
+    assert stamp.strftime("%Y-%m-%d") == "2026-09-05", (
+        f"the stamp stayed on the old day: {stamp}"
+    )
+    assert stamp.strftime("%H:%M") == "07:05", (
+        f"the reading's own clock time was replaced by the edit's: {stamp}"
+    )
+
+
+async def test_a_time_token_is_recognised_in_either_order(make_app, db):
+    """`parse.resolve_when` is deliberately order-free, so `@09:30/2026-09-04` means the
+    same as `@2026-09-04/09:30`. The guard only shape-matched the LAST `/`-separated part,
+    so the reversed form parsed a time and was then treated as "no time given" — the edit
+    silently kept the old stamp while the user had plainly typed one."""
+    from daylogs.body import list_weight
+
+    at = int(dt.datetime(2026, 9, 4, 7, 5, 43).timestamp())
+    add_weight(db, kg=80.0, date="2026-09-04", at=at)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 20, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "weight")
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        app.query_one("#body-table").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = "80 @09:30/2026-09-04"
+        await pilot.press("enter")
+        await pilot.pause()
+    row = list_weight(db)[0]
+    assert hhmm(row["measured_at"], app.cfg.timezone) == "09:30", (
+        f"the reversed token's time did not land: {row['measured_at']}"
+    )
+
+
+async def test_no_energy_panel_line_is_wider_than_the_panel(make_app, make_cfg, db):
+    """`.panel-body` truncates with an ellipsis, so an over-wide line disappears mid-word
+    and a substring assertion on its prefix goes on passing. The no-factor guidance shipped
+    at 52 cells against a 46-column panel and read "press h to set an ordin…".
+
+    Checked at the narrowest supported layout and at the size much of this suite uses.
+    """
+    add_weight(db, kg=80.0, date=DAY, at=1)
+    add_food(db, description="salad", kcal=1200, source="labeled", date=DAY, at=2)
+    for width in (100, 110):
+        app = make_app(cfg=make_cfg(height_cm=180, sex="male", birthday="1996-08-27"))
+        async with app.run_test(size=(width, 34)) as pilot:
+            await go_body(pilot, app)
+            tab = app.query_one("#body")
+            tab.viewing_date = DAY
+            tab.reload()
+            await pilot.pause()
+            avail = app.query_one("#panel-energy").content_size.width
+            body_text = str(app.query_one("#energy-body").content)
+        assert avail > 0, "the panel was never laid out, so this proves nothing"
+        too_wide = [ln for ln in body_text.splitlines() if len(ln) > avail]
+        assert not too_wide, f"at {width} columns ({avail} available): {too_wide}"
+
+
+async def test_bracket_steps_a_whole_window_not_a_single_day(make_app, db):
+    """`[` stepped one calendar day, which was the right size while the food and activity
+    tables were per-day. Against a windowed tab it means 30 presses to page back a month —
+    and at `all` it moved the right edge of a window whose own header says ALL TIME, so the
+    header excluded rows while claiming to show everything. Measured before the fix:
+    `FOOD   ALL TIME   9 meals` became `6 meals` after one press.
+
+    `horizon.shift` is what Money has always used; its `_STEP["all"]` is `(0, 0)`, so `[`
+    is deliberately a no-op there.
+    """
+    for d in ("2026-08-04", "2026-09-04"):
+        add_food(db, description=f"meal {d}", kcal=600, source="labeled", date=d,
+                 at=int(dt.datetime.fromisoformat(f"{d}T12:00").timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 22, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "1m"
+        tab.viewing_date = "2026-09-04"
+        tab.reload()
+        await pilot.pause()
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        stepped = tab.span()
+        assert stepped.end == "2026-08-04", f"one press should step a whole month: {stepped}"
+
+        tab.horizon = "all"
+        tab.viewing_date = "2026-09-04"
+        tab.reload()
+        await pilot.pause()
+        before = _head(app)
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        assert _head(app) == before, (
+            f"`[` moved a window labelled ALL TIME: {before!r} -> {_head(app)!r}"
+        )
+
+
+async def test_the_food_header_totals_the_whole_window(make_app, db):
+    """The header's intake is the sum of every row on screen, over multiple days. The only
+    assertion that read it had a one-meal, one-day fixture, so it could not tell "the
+    window's intake" from "the day's" — a mutation returning just the newest row's calories
+    left all 117 tests in this file passing."""
+    for d, k in (("2026-09-02", 500), ("2026-09-03", 600), ("2026-09-04", 700)):
+        add_food(db, description=f"meal {d}", kcal=k, source="labeled", date=d,
+                 at=int(dt.datetime.fromisoformat(f"{d}T12:00").timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 22, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "1w"
+        tab.reload()
+        await pilot.pause()
+        head = _head(app)
+    assert "3 meals" in head, head
+    assert "1,800 kcal in" in head, f"the header does not total the window: {head!r}"
+
+
+async def test_the_header_says_when_the_row_cap_bit(make_app, db, monkeypatch):
+    """The cap is a safety net on a pathological "all time", and the count beside it would
+    otherwise be a silent prefix of the truth."""
+    monkeypatch.setattr("daylogs.tui.body_tab._ROW_CAP", 2)
+    for d in ("2026-09-02", "2026-09-03", "2026-09-04"):
+        add_food(db, description=f"meal {d}", kcal=500, source="labeled", date=d,
+                 at=int(dt.datetime.fromisoformat(f"{d}T12:00").timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 22, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "all"
+        tab.reload()
+        await pilot.pause()
+        head = _head(app)
+        rows = _rows(app)
+    assert rows == 2, f"the cap did not bound the query: {rows}"
+    assert "(capped)" in head, f"a truncated list did not say so: {head!r}"
+
+
+async def test_the_readme_food_box_matches_what_the_app_renders(make_app, db):
+    """The README shows a FOOD box. Hand-drawn illustrations of live widgets are banned
+    here — `tools/screenshots.py` exists because the Day tab's ASCII "drifted twice" — and
+    one slipped in two slices ago with a border a column short and a truncation the code
+    cannot emit. This box was copied from a real render; this keeps it that way by pinning
+    the parts that drift: the header's shape and the column names."""
+    import re
+    from pathlib import Path
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text().splitlines()
+    start = next(i for i, ln in enumerate(readme) if ln.strip().startswith("FOOD   Aug"))
+    box = [ln for ln in readme[start:start + 3]]
+    header_line, _views, columns = box
+
+    # More than one, so the plural in the header matches the illustration's.
+    for d in ("2026-09-02", "2026-09-03", "2026-09-04"):
+        add_food(db, description="lunch", kcal=663, source="labeled", date=d,
+                 at=int(dt.datetime.fromisoformat(f"{d}T12:30").timestamp()))
+    app = make_app(now=lambda: dt.datetime(2026, 9, 4, 22, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        tab = await _view(pilot, app, "food")
+        tab.horizon = "1w"
+        tab.reload()
+        await pilot.pause()
+        real_head = _head(app)
+        real_cols = _cols(app)
+
+    assert columns.split() == real_cols, (
+        f"the README's columns are not the app's: {columns.split()} vs {real_cols}"
+    )
+    # Same shape, not the same numbers: the README's window and counts are illustrative.
+    shape = re.sub(r"[\d,]+", "N", header_line.strip())
+    assert re.sub(r"[\d,]+", "N", real_head) == shape, (
+        f"the README header has a different shape:\n  README: {shape}\n"
+        f"  app:    {re.sub(r'[\\d,]+', 'N', real_head)}"
+    )

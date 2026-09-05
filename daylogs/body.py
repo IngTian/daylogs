@@ -64,7 +64,11 @@ def list_weight(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    sql += " ORDER BY date DESC, measured_at DESC LIMIT ?"
+    # Most recent day first, each day read forwards — the same order `_day_or_window`
+    # returns, so the three tables on the Body tab agree. Within a day that puts the
+    # *first* reading on top, which is the one `morning_weight` picks for the trend, the
+    # deltas and the digest; `latest_weight` is the headline's and sits below it.
+    sql += " ORDER BY date DESC, measured_at ASC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
@@ -228,12 +232,58 @@ def add_food(conn, *, description: str, kcal: int, source: str, date: str, at: i
     return int(cur.lastrowid)
 
 
-def list_food(conn, *, date: str) -> list[sqlite3.Row]:
-    return list(
-        conn.execute(
-            "SELECT * FROM food WHERE date = ? ORDER BY ate_at ASC, id ASC",
-            (_check_date(date),),
+def _day_or_window(
+    conn, table: str, *, stamp: str, date, since, until, limit
+) -> list[sqlite3.Row]:
+    """A single day in the order it happened, or a window newest-first.
+
+    One function, two questions, one order: **most recent day first, each day read
+    forwards.** `date=` serves the digest and the Day tab, which read a day out loud and
+    want breakfast before dinner; the window serves the Body table, which is a log you
+    scroll and wants today at the top.
+
+    Those two agree at `1d`, which is the point — `_fill_table` claims a single-day window
+    reproduces the per-day view exactly. It did not: the window was reverse-chronological
+    throughout, so a day on screen read dinner-first while the digest read it breakfast
+    first, and only row counts were ever asserted. Descending by date and ascending within
+    it satisfies both, and makes each day's top row the one `morning_weight` picks.
+
+    Both bounds for the window, for the reason `list_weight` documents: with a lower
+    bound alone, viewing an older day listed rows that had not happened yet.
+
+    Passing both a date and a bound is refused rather than resolved. They are different
+    questions with different orders, and picking one silently would make a call site's
+    intent unreadable.
+    """
+    if date is not None and (since is not None or until is not None):
+        raise BodyError(f"list a {table} by date or by window, not both")
+    if date is not None:
+        return list(
+            conn.execute(
+                f"SELECT * FROM {table} WHERE date = ? ORDER BY {stamp} ASC, id ASC",
+                (_check_date(date),),
+            )
         )
+    sql = f"SELECT * FROM {table} WHERE 1=1"
+    args: list = []
+    if since:
+        sql += " AND date >= ?"
+        args.append(_check_date(since))
+    if until:
+        sql += " AND date <= ?"
+        args.append(_check_date(until))
+    sql += f" ORDER BY date DESC, {stamp} ASC, id ASC LIMIT ?"
+    args.append(int(limit))
+    return list(conn.execute(sql, args))
+
+
+def list_food(
+    conn, *, date: str | None = None, since: str | None = None,
+    until: str | None = None, limit: int = 2000,
+) -> list[sqlite3.Row]:
+    """A day's meals, or a window's. See `_day_or_window`."""
+    return _day_or_window(
+        conn, "food", stamp="ate_at", date=date, since=since, until=until, limit=limit
     )
 
 
@@ -258,8 +308,8 @@ def update_food(conn, id: int, **fields) -> bool:
 
 
 def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
-    """The new epoch-second timestamp for a row whose clock time was edited, or
-    `None` when the minute did not change.
+    """The new epoch-second timestamp for a row whose date or clock time was edited, or
+    `None` when neither moved.
 
     Stored timestamps carry seconds; the grammar's only time token is `HH:MM`. So
     re-deriving the timestamp on every edit would quietly shave the seconds off a
@@ -268,12 +318,22 @@ def restamp(at: int, *, date: str, hhmm: str, tz: str) -> int | None:
     means "leave the column alone", which is what the caller wants far more often
     than a rewrite.
 
+    The guard compares the whole local **minute**, date included. It compared only
+    `%H:%M`, which made an edit that moved a row to another day at the same clock time
+    look like nothing had changed — so the caller wrote the new `date` beside the old
+    day's timestamp. For weight that inverts the two named concepts: an after-dinner
+    reading moved onto the next day became that day's `morning_weight` while the fasted
+    reading became its `latest_weight`, so the trend, the 7d/30d deltas and the digest's
+    `weight_kg` all took the wrong one. For activity it lets a moved row win a
+    `resolved_factor` tie it should lose, rescaling every calorie figure for that day.
+    Both were reproduced before this line changed.
+
     `tz` has to be the zone the line was *rendered* in. Comparing in a different one
     makes every edit look like a time change, so it rewrites the tie-breaker column on
     an edit that only touched a description.
     """
     zone = ZoneInfo(tz)
-    if dt.datetime.fromtimestamp(int(at), zone).strftime("%H:%M") == hhmm:
+    if dt.datetime.fromtimestamp(int(at), zone).strftime("%Y-%m-%d %H:%M") == f"{date} {hhmm}":
         return None
     hh, mm = (int(part) for part in hhmm.split(":"))
     return int(
@@ -418,13 +478,13 @@ def delete_activity(conn, id: int) -> dict | None:
     return _delete(conn, "activity", id)
 
 
-def list_activity(conn, *, date: str) -> list[sqlite3.Row]:
-    """A day's activities, oldest first — the order they happened."""
-    return list(
-        conn.execute(
-            "SELECT * FROM activity WHERE date = ? ORDER BY logged_at ASC",
-            (_check_date(date),),
-        )
+def list_activity(
+    conn, *, date: str | None = None, since: str | None = None,
+    until: str | None = None, limit: int = 2000,
+) -> list[sqlite3.Row]:
+    """A day's activities oldest first, or a window's newest first. See `_day_or_window`."""
+    return _day_or_window(
+        conn, "activity", stamp="logged_at", date=date, since=since, until=until, limit=limit
     )
 
 

@@ -62,11 +62,11 @@ _VIEWS = ("weight", "food", "activity")
 # horizon and the width arithmetic already live here. Weight stays in the cycle because
 # it is the same question about the same window.
 _CHARTS = ("weight", "intake", "net")
-# A safety net on the weight query, not an advertised number. The table is filtered by
-# the tab's span now, so the header states the count it actually got; this only bounds
-# a pathological "all time". Matches money's `_LIMIT_CAP` in spirit — and if it ever
-# bites, the header says so rather than silently showing a prefix.
-_WEIGHT_CAP = 2000
+# A safety net on the three table queries, not an advertised number. All three are
+# filtered by the tab's span now, so each header states the count it actually got; this
+# only bounds a pathological "all time". Matches money's `_LIMIT_CAP` in spirit — and if
+# it ever bites, the header says so rather than silently showing a prefix.
+_ROW_CAP = 2000
 
 
 class BodyTab(PanelTab):
@@ -102,6 +102,10 @@ class BodyTab(PanelTab):
         self._pending_activity: estimate.Effort | None = None
         # The FOOD header line, assigned in whichever branch of `reload` built it.
         self._food_head = ""
+        # The kcal of the food rows the table actually listed, so the header's window
+        # total is the sum of what is on screen rather than a second query that could
+        # disagree with it — including when the row cap bites.
+        self._kcal_shown: list[int] = []
 
     def compose(self) -> ComposeResult:
         yield Static(id="weight-head", classes="pane-title")
@@ -219,54 +223,16 @@ class BodyTab(PanelTab):
         # count the query actually returned rather than a number it hopes is right.
         self._fill_table(date, span)
 
-        # The header describes the table directly beneath it, so it has to follow
-        # table_mode. It used to read "FOOD … kcal in / BMR → net" unconditionally,
-        # including while the table listed weigh-ins — a label that is wrong is
-        # worse than one that is missing.
-        if self.table_mode == "weight":
-            # It names the span now. It used to say "60 most recent" *because*
-            # `list_weight` ignored the span and the viewed date, so claiming the window
-            # would have been a lie — an honest label standing in for a fix.
-            n = len(self._ids)
-            if n == 0:
-                self._food_head = (
-                    f"WEIGHT   {span.label}   no weigh-ins — press w, or - to widen"
-                )
-            else:
-                capped = "  (capped)" if n >= _WEIGHT_CAP else ""
-                self._food_head = (
-                    f"WEIGHT   {span.label}   {n} weigh-in{'' if n == 1 else 's'}{capped}"
-                )
-        elif self.table_mode == "activity":
-            # The factor, its origin and the burn it produces — the same three facts
-            # the ENERGY panel shows, because this header sits above the rows that
-            # produced them and a header that omitted them would read as a bare log.
-            head = f"ACTIVITY   {human_date(date)}"
-            if factor is None:
-                # An empty state names the fix. Nothing logged and no baseline means
-                # there is no factor at all, and `h` is what changes that.
-                head += "   no day factor — press h to set an ordinary day"
-            else:
-                head += f"   day ×{factor:g} {origin}"
-                if burn is not None:
-                    head += f"   →  {burn:,} burn"
-            self._food_head = head
-        else:
-            label = human_date(date)
-            if burn is not None:
-                # "burn", not "BMR": with a factor the baseline is what the day
-                # actually cost, and naming it BMR would be measuring against resting
-                # expenditure while claiming otherwise.
-                self._food_head = (
-                    f"FOOD   {label}   {kcal:,} kcal in / {burn:,} burn"
-                    f" → {kcal - burn:+,} net"
-                )
-            elif bmr is None:
-                self._food_head = f"FOOD   {label}   {kcal:,} kcal in"
-            else:
-                self._food_head = (
-                    f"FOOD   {label}   {kcal:,} kcal in / {bmr:,} BMR → {kcal - bmr:+,} net"
-                )
+        # The header describes the table directly beneath it, so it follows table_mode —
+        # it used to read "FOOD … kcal in / BMR → net" even while the table listed
+        # weigh-ins, and a label that is wrong is worse than one that is missing.
+        #
+        # Three tables over one window, so three headers of one shape: what you are
+        # looking at, the window, and how many rows are in it. The day's own energy
+        # balance moved out rather than being duplicated per view — the ENERGY panel
+        # already carried every figure of it, and CLAUDE.md warns that each extra surface
+        # reading `burn` is another chance for two panels to disagree about a day.
+        self._food_head = self._table_head(span)
         self.query_one("#food-head", Static).update(self._food_head)
         self.query_one("#body-views", Static).update(view_row(_VIEWS, self.table_mode))
 
@@ -359,6 +325,38 @@ class BodyTab(PanelTab):
         """Braille cells inside the trend panel, after the y labels and the axis."""
         return max(16, self.panel_width("#panel-trend", minimum=24) - _YLABEL_W - 1)
 
+    # (name, key that adds one, singular, plural) per sub-view. As data, so the three
+    # headers cannot drift into three shapes again.
+    _HEADS = {
+        "weight": ("WEIGHT", "w", "weigh-in", "weigh-ins"),
+        "activity": ("ACTIVITY", "a", "activity", "activities"),
+        "food": ("FOOD", "f", "meal", "meals"),
+    }
+
+    def _table_head(self, span) -> str:
+        """`NAME   window   how much is in it`, plus the key that fills an empty one.
+
+        A bare `0` for an empty window would be "true, useless, and reads as stale data" —
+        the same reason Money's empty state names `r`. Each names both the key that adds a
+        row and that `-` widens the window, because at `1d` on a day you did not log, the
+        rows very likely exist one day over.
+        """
+        name, key, singular, plural = self._HEADS[self.table_mode]
+        n = len(self._ids)
+        if n == 0:
+            return f"{name}   {span.label}   nothing logged — press {key}, or - to widen"
+        # The cap is a safety net on a pathological "all time", so the number shown is
+        # always the number of rows actually listed — and it says when it bit.
+        capped = "  (capped)" if n >= _ROW_CAP else ""
+        head = f"{name}   {span.label}   {n} {singular if n == 1 else plural}{capped}"
+        if self.table_mode == "food":
+            # The window's intake: the sum of the rows on screen, so it agrees with them
+            # even when the cap bit. Deliberately not a window `net` — a factor describes
+            # one day, so net over a window is computed per day (`net_average`, in the
+            # ENERGY panel) and never as one subtraction.
+            head += f"   {sum(self._kcal_shown):,} kcal in"
+        return head
+
     def _energy_panel(
         self, conn, cfg, *, date, kcal, bmr, burn, factor, origin, span
     ) -> str:
@@ -389,6 +387,18 @@ class BodyTab(PanelTab):
             lines.append(f"  in        {kcal:>7,} kcal")
             if burn is None:
                 lines.append(f"  BMR      −{bmr:>7,}")
+                # An empty state names the fix, and this is where the fallback actually
+                # happens: with no factor the day is measured against *resting* BMR, and
+                # the panel used to show that without a word about it. The guidance lived
+                # in the ACTIVITY header, which now describes a window rather than a day.
+                # Named as a key, not a file — telling someone to edit config.toml is how
+                # this panel stayed empty before.
+                # Two lines, like the BMR guidance above: one line of 52 cells clipped to
+                # "press h to set an ordin…" in a 46-column panel, and `.panel-body` uses
+                # `text-overflow: ellipsis`, so it truncated silently while a substring
+                # assertion on its prefix went on passing.
+                lines.append("  activity        —   press h to set an")
+                lines.append("                      ordinary day")
             else:
                 # BMR and activity derive `burn`; `in`, `burn` and `net` are the sum.
                 # So BMR drops its minus sign: it is no longer a term of `net`, and a
@@ -426,24 +436,41 @@ class BodyTab(PanelTab):
         return "\n".join(lines)
 
     def _fill_table(self, date: str, span) -> None:
+        """All three tables over the tab's one window.
+
+        `date` is no longer what any of them filter by. `+`/`-` used to move the chart and
+        the weight table and do nothing at all to the other two — one row at `1d` and the
+        same one row at `all` — while the chart above the food table went on plotting
+        weight. `1d` reproduces the old per-day view exactly, because `horizon.resolve`
+        gives it `start == end == the anchor`.
+
+        Every row carries its date as well as its clock time: over a window, two `08:00`
+        rows five days apart are otherwise the same morning. `span.start` is None for "all
+        time", which the queries read as no lower bound.
+        """
         table = self.query_one("#body-table", DataTable)
         table.clear(columns=True)
         self._ids = []
+        self._kcal_shown = []
+        tz = self.app.cfg.timezone
+        bounds = dict(since=span.start, until=span.end, limit=_ROW_CAP)
         if self.table_mode == "weight":
-            table.add_columns("date", "kg", "note")
-            # Bounded by the span, like the chart above it. `span.start` is None for
-            # "all time", which `list_weight` reads as no lower bound.
-            rows = body.list_weight(
-                self.app.conn, since=span.start, until=span.end, limit=_WEIGHT_CAP
-            )
-            for r in rows:
-                table.add_row(r["date"], f"{r['kg']:g}", Text(r["note"] or ""))
+            table.add_columns("date", "time", "kg", "note")
+            for r in body.list_weight(self.app.conn, **bounds):
+                # The time is here because `measured_at` decides which of a day's
+                # readings the trend uses and which the headline shows. Two weigh-ins on
+                # one day were two rows with the same date and no way to tell them apart.
+                table.add_row(
+                    r["date"], hhmm(r["measured_at"], tz), f"{r['kg']:g}",
+                    Text(r["note"] or ""),
+                )
                 self._ids.append(r["id"])
         elif self.table_mode == "activity":
-            table.add_columns("time", "description", "factor", "src")
-            for r in body.list_activity(self.app.conn, date=date):
+            table.add_columns("date", "time", "description", "factor", "src")
+            for r in body.list_activity(self.app.conn, **bounds):
                 table.add_row(
-                    hhmm(r["logged_at"], self.app.cfg.timezone),
+                    r["date"],
+                    hhmm(r["logged_at"], tz),
                     Text(r["description"]),
                     # A dash, not a blank: an inference that never landed is a state
                     # worth seeing, because the day quietly used the baseline instead.
@@ -452,10 +479,11 @@ class BodyTab(PanelTab):
                 )
                 self._ids.append(r["id"])
         else:
-            table.add_columns("time", "description", "kcal", "src")
-            for r in body.list_food(self.app.conn, date=date):
+            table.add_columns("date", "time", "description", "kcal", "src")
+            for r in body.list_food(self.app.conn, **bounds):
                 table.add_row(
-                    hhmm(r["ate_at"], self.app.cfg.timezone),
+                    r["date"],
+                    hhmm(r["ate_at"], tz),
                     # Text, not str: a `str` cell is parsed as markup, so a description
                     # containing `[/b]` raised out of the render and one containing
                     # `[work]` quietly lost the word.
@@ -464,6 +492,7 @@ class BodyTab(PanelTab):
                     "lab" if r["source"] == "labeled" else "est",
                 )
                 self._ids.append(r["id"])
+                self._kcal_shown.append(int(r["kcal"]))
 
     def _selected_row(self):
         table = self.query_one("#body-table", DataTable)
@@ -514,7 +543,9 @@ class BodyTab(PanelTab):
             return
         if self.table_mode == "weight":
             self._editing = ("weight", row["id"])
-            self.app.prompt.open("weigh", prefill=parse.render_weigh(row))
+            self.app.prompt.open(
+                "weigh", prefill=parse.render_weigh(row, self.app.cfg.timezone)
+            )
         elif self.table_mode == "activity":
             self._editing = ("activity", row["id"])
             self.app.prompt.open(
@@ -539,14 +570,22 @@ class BodyTab(PanelTab):
         self.reload()
 
     def key_prev_period(self) -> None:
-        self._shift_day(-1)
+        self._shift(-1)
 
     def key_next_period(self) -> None:
-        self._shift_day(1)
+        self._shift(1)
 
-    def _shift_day(self, delta: int) -> None:
-        base = dt.date.fromisoformat(self.viewing_date or self.app.today())
-        self.viewing_date = (base + dt.timedelta(days=delta)).isoformat()
+    def _shift(self, delta: int) -> None:
+        """Step the anchor by one whole horizon, the way Money always has.
+
+        It stepped one calendar day, which was the right size while the food and activity
+        tables were per-day. Against a windowed tab it means thirty presses to page back a
+        month — and at `all` it moved the right edge of a window whose header says ALL TIME,
+        so the list silently stopped including today while claiming to show everything.
+        `horizon.shift` makes `all` a no-op, because `_STEP["all"]` is `(0, 0)`.
+        """
+        anchor = self.viewing_date or self.app.today()
+        self.viewing_date = hz.shift(self.horizon, anchor, delta)
         self.reload()
 
     def key_jump_now(self) -> None:
@@ -787,9 +826,17 @@ class BodyTab(PanelTab):
         if before is None:
             self.app.notify("that row is gone", timeout=3)
             return
-        # measured_at is deliberately absent: render_weigh emits no time, so an edit
-        # cannot re-stamp the reading that weight_series uses to pick the day.
-        body.update_weight(self.app.conn, row_id, kg=r.kg, date=r.date, note=r.note or "")
+        # `render_weigh` emits the time now, because the table shows it — so an edit can
+        # move it, and has to be able to. Restamped only when the minute actually changed:
+        # `measured_at` carries seconds, the grammar's only time token is HH:MM, and those
+        # seconds are the tie-breaker `weight_series` uses to pick a day's reading. That is
+        # precisely the case `body.restamp` was written for.
+        at = self._restamp_for(
+            before["measured_at"], parsed_at=r.at, date=r.date, line=value
+        )
+        body.update_weight(
+            self.app.conn, row_id, kg=r.kg, date=r.date, note=r.note or "", measured_at=at
+        )
         self.app.undo_stack.push("weight", dict(before))
         self.app.notify(f"{r.kg:g} kg on {r.date} · u to undo", timeout=4)
         self.reload()
@@ -799,11 +846,35 @@ class BodyTab(PanelTab):
 
         Not `"@" in value`: an escaped `\@` inside a description is a plain word, and
         reading raw text for a sigil is the scavenging this grammar exists to remove.
+
+        Every `/`-separated part is checked, not just the last. `parse.resolve_when` is
+        deliberately order-free, so `@09:30/2026-09-04` means exactly what
+        `@2026-09-04/09:30` means — and matching only the tail read the reversed form as
+        "no time given", so an edit that plainly set one silently kept the old stamp.
         """
         for tok in sigil.tokenize(value):
-            if tok.sigil == "@" and parse.TIME_RE.match(tok.value.split("/")[-1]):
+            if tok.sigil == "@" and any(
+                parse.TIME_RE.match(part) for part in tok.value.split("/")
+            ):
                 return True
         return False
+
+    def _restamp_for(self, stored: int, *, parsed_at: int, date: str, line: str) -> int:
+        """The timestamp an edited row should carry.
+
+        One rule for every case, because the three that matter each went wrong on their own
+        before: a line naming both a date and a time restamps to it; a line naming only a
+        time keeps the anchor's date; a line naming only a **date** keeps the row's own
+        clock time and moves it to that date — the grammar resolves a missing time to *now*,
+        so restamping from the parsed instant would move a 07:05 reading to whenever the
+        edit happened, and keeping the stored stamp instead left it on the old day, which
+        inverts `morning_weight` and `latest_weight`. A line naming neither changes nothing,
+        because `restamp` then compares equal and returns None.
+        """
+        tz = self.app.cfg.timezone
+        clock = hhmm(parsed_at if self._line_sets_a_time(line) else stored, tz)
+        moved = body.restamp(stored, date=date, hhmm=clock, tz=tz)
+        return stored if moved is None else moved
 
     def _submit_food(self, value: str) -> None:
         r = parse_food(value, now=self.app.now())

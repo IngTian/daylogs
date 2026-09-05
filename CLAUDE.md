@@ -158,6 +158,24 @@ appended prose where it was convenient rather than editing the map.
   on Money, so `+` meant different things per tab and neither offered MTD or YTD.
   Spend filters by **date**, not by month — filtering by month made a one-week
   horizon silently cover the whole month.
+- **On Body the window governs all three tables, not just the chart.** `+`/`-` moved the
+  chart and the weight table and did nothing at all to the food and activity tables — one
+  row at `1d` and the same one row at `all` — while the chart above the food table went on
+  plotting weight. Every table now takes `since`/`until` from `span`, and `1d` reproduces
+  the old per-day view exactly, because `horizon.resolve("1d")` gives `start == end == the
+  anchor` and labels it with the day. `body.list_food`/`list_activity` keep a `date=` mode
+  for `summary.build_payload` and the Day tab, which read a day out loud and want it
+  chronological; the window is newest-first, like `list_weight`. Asking for both raises
+  rather than resolving — two questions with two orders, and picking one silently would
+  make a call site's intent unreadable.
+- **Three tables over one window means three headers of one shape**: what you are looking
+  at, the window, how many rows are in it, and — for food — the intake those rows sum to.
+  The day's own energy balance is stated **once**, in the ENERGY panel, which already
+  carried every figure of it. That is one fewer surface reading `burn`, which is the point:
+  each extra one is another chance for two panels to measure the same day against two
+  baselines. The no-factor guidance moved to the panel with it, beside the resting-BMR
+  number it explains — the panel showed that fallback with no word about it, because the
+  words were in a header that now describes a window.
 - **A dated series is plotted against its dates, never its index.** `horizon.axis`
   resolves the plot extent and `braille_line(positions=…)` places each point.
   Index spacing rescales the x-axis to the *sample count*, so two weigh-ins a day
@@ -346,9 +364,24 @@ appended prose where it was convenient rather than editing the map.
   because `config.toml` can add categories, so a frozen literal would go stale.
 - **An edit line carries the columns its table displays, plus expense's write-only
   note.** What you can see is what you can edit. Columns with no visible representation
-  stay out of reach: food's `source` is provenance the digest reads, `created_at` must
-  survive, `measured_at` is the tie-breaker `weight_series` uses to pick a day's
-  reading. Expense's `~note` is currently write-only (settable, faithfully
+  stay out of reach: food's `source` is provenance the digest reads, and `created_at` must
+  survive. `measured_at` used to be on that list — the weight table showed only a date, so
+  a day weighed twice was two identical-looking rows while the invisible column decided
+  which one the trend used and which the headline showed. It is a `time` column now, and
+  `render_weigh` emits `@date/HH:MM` so it can be edited. The recorded objection was that
+  re-deriving the stamp "would shave the seconds off every edit"; that is exactly what
+  `body.restamp` exists to prevent — its own docstring names weight as the motivating
+  case — and it had simply never been wired up.
+  `body_tab._restamp_for` is the one rule every edit path should use: a line naming a time
+  restamps to it; a line naming only a **date** keeps the row's own clock time and moves it
+  to that date; a line naming neither changes nothing, because `restamp` then compares equal
+  and returns None. The middle case is why the helper exists — the grammar resolves a
+  missing time to *now*, so restamping from the parsed instant moved a 07:05 reading to
+  whenever the edit happened, while keeping the stored stamp left it on the old day and
+  inverted `morning_weight`/`latest_weight`. `restamp` compares the whole local **minute**,
+  date included; comparing `%H:%M` alone is what made a date-only move look like nothing
+  had changed.
+  Expense's `~note` is currently write-only (settable, faithfully
   round-tripped through the edit prefill, displayed nowhere). An edit writes only
   the fields it parsed. The submitted line is authoritative: drop the note words
   and the note is cleared; submit unchanged and the note survives.

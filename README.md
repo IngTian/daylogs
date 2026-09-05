@@ -112,7 +112,7 @@ show as two lines.
 | `1` `2` `3` | Day / Body / Money |
 | `←` `→` | previous / next tab — stops at the ends rather than wrapping |
 | `tab` `shift+tab` | next / previous sub-view *within* the tab — the strip above the table lists them and marks the one you're on (Body, Money) |
-| `[` `]` | previous / next period — report on Day, day on Body, month on Money |
+| `[` `]` | previous / next period — one whole horizon on Body and Money, one report on Day |
 | `t` | **jump to now** — today, this month, newest report |
 | `g` | go to a date (`2026-06-15` or `2026-06`) |
 | `+` or `=` | zoom **in** — a shorter time horizon, seen in more detail (Body, Money) |
@@ -240,18 +240,32 @@ from the start of that month or year. `[` and `]` then step by one whole horizon
 `MTD` that's a calendar month, so you compare the same elapsed slice of the previous
 month rather than a ragged window.
 
+On Body the window governs **everything on the tab** — the chart and all three tables.
+Zoom out and the weight, food and activity lists reach further back; `g` and `[` `]` move
+the whole window, and `[` `]` step by one whole horizon, so at `1d` they step a day. Every row carries its date as well as its clock time, because over a
+window two `08:00` rows five days apart are otherwise the same morning. `1d` is exactly
+one day, so zooming all the way in is how you ask "what did I eat today":
+
+```
+ FOOD   Aug 29 – Sep 4 2026   7 meals   4,494 kcal in
+ weight   food   activity
+  date        time   description  kcal  src
+  2026-09-04  12:30  lunch day 9  663   lab
+  2026-09-03  12:30  lunch day 8  656   lab
+```
+
+Newest day first, and each day reads in the order it happened — so `1d` is exactly the
+day, forwards, the way the digest reads it.
+
+Each header says the same three things — what you're looking at, the window, and how much
+is in it. The day's own calorie balance is in the ENERGY panel, stated once.
+
 **At `1d` and `3d` the weight chart switches to a clock.** The axis is labelled in
 hours instead of dates, and every weigh-in is plotted at the time it was taken —
 so two readings on one day sit apart rather than on top of each other. Wider
 horizons keep one point per day, deliberately: weight swings a kilo inside a day,
 and plotting every reading across a month makes the trend noisier without telling
 you anything a shorter window wouldn't tell you better.
-
-The horizon drives the whole Body tab, not just the chart: the **weight** table lists
-the weigh-ins inside the window and its header names it, so `+` / `-` / `[` / `]` move
-the table and the plot together. The **food** and **activity** tables are per-day —
-they follow the day you're on rather than the window, because a day's meals are a day's
-meals.
 
 `g 2026-06` lands on the **last** day of June, so under `MTD` you get all of it.
 
@@ -398,9 +412,9 @@ factor, and the day falls back to your ordinary-day level. What you did is your 
 the multiplier is a guess, and losing the first because the second failed would be the
 worse outcome.
 
-`tab` reaches the **activity** view, where the day's rows are listed with their
-factors, `enter` edits one and `x` deletes it. A row whose estimate never landed shows
-a `—`.
+`tab` reaches the **activity** view, where the window's rows are listed with their
+factors — zoom to `1d` for a single day — `enter` edits one and `x` deletes it. A row
+whose estimate never landed shows a `—`.
 
 **BMI** shows as a bare number beside your weight. No band, no colour and no chart:
 "overweight" is a judgement daylogs doesn't make, and a BMI chart would be the
