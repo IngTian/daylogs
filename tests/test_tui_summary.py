@@ -722,3 +722,53 @@ async def test_an_unchanged_weight_gets_a_neutral_arrow_on_the_day_panel(make_ap
         line = _line(_panel(app, "body"), "weight")
     assert "→" in line, f"an unchanged weight is not flagged as unchanged: {line!r}"
     assert "▲" not in line, f"zero rendered as a rise: {line!r}"
+
+
+# ── the read scrolls ─────────────────────────────────────────────────────
+def _long_read() -> str:
+    """A report taller than the panel at any size this suite renders.
+
+    Thirty paragraphs is 64 rows at 100 columns against a 16-row panel, which is the
+    measurement the test below is built on — shrink it and the test can start passing
+    because the report happens to fit.
+    """
+    return "\n\n".join(
+        ["## Body", *[f"Paragraph {i} of the read, long enough to overflow." for i in range(30)]]
+    )
+
+
+async def test_a_long_read_can_be_scrolled_to_its_end(make_app, db):
+    """`#summary-body` was `height: 1fr` — the sole child of `#summary-scroll`, pinned to
+    the container's own height, so the virtual size equalled the size, `max_scroll_y` was
+    0 and no scrollbar ever appeared. Measured at 100x30 on this report: 16 reachable rows
+    of a 64-row document, with `down`, `pagedown` and `end` all no-ops, so the tail of
+    every real read was unreachable by keyboard and by wheel. Nothing in the suite touched
+    scrolling — zero hits for `max_scroll_y`/`scroll_down`/`scroll_end` — which is how four
+    releases shipped it while the README promised the read "scrolling underneath".
+
+    Asserted through the keys as well as through `max_scroll_y`, because the paging keys
+    are `ScrollableContainer`'s own bindings and are deliberately *not* in `KEYMAP`: what
+    is worth pinning is that they arrive at all. `scroll.focus()` explicitly rather than
+    leaning on `focus_default`, because this test is about the geometry and the one in
+    tests/test_tui_nav.py is about who holds focus. The `pause()` after it is load-bearing
+    — press the key in the same tick and the offset is still 0.
+    """
+    upsert_report(db, date="2026-08-26", content=_long_read())
+    app = make_app()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await go_summary(pilot, app)
+        scroll = app.query_one("#summary-scroll")
+        assert scroll.max_scroll_y > 0, (
+            f"the read is pinned to its window: {scroll.virtual_size} inside {scroll.size}"
+        )
+        scroll.focus()
+        await pilot.pause()
+        assert app.focused is scroll, f"focus is on {app.focused!r}"
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert scroll.scroll_y > 0, "pagedown did not move the read"
+        await pilot.press("end")
+        await pilot.pause()
+        assert scroll.scroll_y == scroll.max_scroll_y, (
+            f"end stopped at {scroll.scroll_y} of {scroll.max_scroll_y}"
+        )

@@ -62,7 +62,29 @@ class SummaryTab(PanelTab):
         yield Static(id="summary-empty", classes="muted")
 
     def focus_default(self) -> None:
-        return None
+        """The scroller — so the read pages, and so the arrows keep going through
+        `show_scope`.
+
+        With nothing focused on Day, `AUTO_FOCUS = "*"` landed on TabbedContent's own
+        `ContentTabs`, whose `left`/`right` bindings are not priority either and so beat
+        the App's. Measured: `→` moved `active_tab_id` to `tab-body` while `focused`
+        stayed on `ContentTabs`, so `show_scope` never ran — the footer went on
+        describing Day (`Wed Aug 26 · r regenerate`) with Body on screen, and Body's
+        table was never focused, leaving row navigation and `enter` dead. Pressing `1`
+        did not clear it, because this method did nothing; only a `2`/`3` did, which is
+        why every test in tests/test_tui_nav.py — each of which presses a digit first —
+        missed it entirely.
+
+        `up`/`down`/`pageup`/`pagedown`/`home`/`end` come from ScrollableContainer's own
+        bindings, so no keymap entry is needed or wanted: declaring them in `KEYMAP`
+        would have the keymap describe keys `app_bindings()` does not bind, which is the
+        drift the keymap exists to prevent. `left`/`right` still walk the tabs, because
+        `VerticalScroll` sets `overflow-x: hidden` itself — `allow_horizontal_scroll` is
+        therefore always false and `action_scroll_left`/`_right` raise `SkipAction`
+        unconditionally, which is the same fall-through the `DataTable` rule in app.tcss
+        buys by hand, here for free.
+        """
+        self.query_one("#summary-scroll", VerticalScroll).focus()
 
     def _body_panel(self, conn, cfg, *, date: str) -> str:
         """Today's body figures. Every value comes from body.py — this only lays out.

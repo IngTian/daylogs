@@ -82,6 +82,15 @@ appended prose where it was convenient rather than editing the map.
   Input keeps its cursor movement. Making them priority breaks arrow keys inside a
   line you are typing *and* lets tabs switch behind the `?` overlay — two tests
   fail on it, which is the intended tripwire.
+  **A plain binding only wins if something on the active tab is holding focus, so every
+  tab's `focus_default` has to focus something.** Day's returned `None` and nothing on it
+  was focusable, so `AUTO_FOCUS = "*"` gave focus to TabbedContent's own `ContentTabs`,
+  whose `left`/`right` bindings are *also* not priority and therefore beat the App's: the
+  arrow moved `active_tab_id` without `show_scope` running, leaving the footer describing
+  Day with Body on screen and the arriving table unfocused, so row keys and `enter` did
+  nothing. Pressing `1` did not clear it — that calls `focus_default` — so it healed only
+  after a `2`/`3`, which is why every test in `test_tui_nav.py` missed it: they all press a
+  digit first. Day now focuses `#summary-scroll`, which is also what pages the read.
 - **`MoneyView` is the only Money tab state.** Horizon, pane, sort, filters and
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand

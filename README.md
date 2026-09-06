@@ -320,7 +320,9 @@ quarter; the bar says so when it's hidden.
 
 **Day** shows BODY beside MONEY — today's weight, BMI and trend, intake against
 what the day cost, this month's spend against its budget and how far through the
-month you are — with the generated daily read scrolling underneath. The figures are
+month you are — with the generated daily read scrolling underneath, paged by the arrow
+keys, `pgup`/`pgdn` and `home`/`end`. Those come from the scroll pane itself rather than
+from the keymap, which is why they aren't in the footer or under `?`. The figures are
 always today's; the read is dated by the day it describes, which is why each half
 carries its own date.
 
