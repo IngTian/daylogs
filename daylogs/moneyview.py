@@ -75,6 +75,24 @@ class MoneyView:
             self.sort_desc = True
 
     # ── jumping ──────────────────────────────────────────────────────────
+    def reveal(self, date: str) -> None:
+        """Move the span's right edge just far enough that `date` is inside it.
+
+        The write path calls this so the row it just booked is actually on screen. It used
+        to be `anchor = max(anchor, date)` in the tab, which only pulls the edge
+        *forward*: a backdated expense under the default MTD horizon left the anchor in
+        September, so the table never listed the row and the toast quoted a category total
+        that excluded the amount just written — while the comment on that line claimed the
+        move put the row "inside whatever horizon is active". Setting `anchor = date`
+        always works, because every horizon resolves to a span ending on the anchor.
+
+        Only when the date is really outside, in either direction: a row that already falls
+        inside a wide window must not drag the view back off today.
+        """
+        span = self.span()
+        if date > span.end or (span.start is not None and date < span.start):
+            self.anchor = date
+
     def jump_to(self, today: str) -> None:
         self.anchor = today
         self.filter_text = ""
