@@ -498,3 +498,122 @@ async def test_escape_on_body_and_day_is_a_no_op(make_app, seeded):
         await pilot.press("escape")
         await pilot.pause()
         assert app.is_running
+
+
+# ── what the numbers on screen say they cover ───────────────────────────────
+async def test_a_one_month_span_names_the_month_instead_of_summing_it(make_app, seeded):
+    """"budget summed over 1 months" is wrong twice in five words.
+
+    Nothing was summed, and that is not a plural. It is reachable with keys alone: the
+    `else` branch takes every horizon except MTD-on-the-current-month, so a one-week window
+    and a past MTD month both land there. Naming the month is also the truer word below a
+    month-wide horizon — `summarize_span` filters spend by date and sums budgets by
+    calendar month, so at `1w` the 35.00 is the week's while the 300.00 cap is all of
+    August.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.horizon = "1w"
+        m.view.anchor = "2026-08-15"
+        m.reload()
+        await pilot.pause()
+        assert m.view.months() == ["2026-08"], "the window is not inside one month"
+        bar = str(app.query_one("#money-bar").content)
+    assert "1 months" not in bar, bar
+    assert "budget for 2026-08" in bar, bar
+
+
+async def test_budget_toast_says_which_window_its_figures_cover(make_app, seeded, type_into):
+    """The month is the one on screen; the figures are the whole span's.
+
+    `_budget_month` writes to the right-hand edge of the span — deliberately, so `[` and a
+    budget key agree — and the toast states it. `spent` and `left` come from
+    `summarize_span` over the *whole* span, so on a three-month horizon this read "for
+    2026-08 · 125.00 spent" while August's grocery spend is 25.00: the other 100.00 is
+    June's. Both halves are true and the sentence joining them was not.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        await pilot.press("minus")  # MTD -> 3m, which reaches back into June
+        await pilot.pause()
+        assert len(m.view.months()) > 1, "the horizon did not widen past one month"
+        said = []
+        app.notify = lambda msg, **kw: said.append(str(msg))
+        await pilot.press("b")
+        await type_into(pilot, "500 !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert said, "no toast"
+    assert "for 2026-08" in said[0], said[0]
+    assert "125.00 spent this range" in said[0], said[0]
+
+
+# ── esc out of the filter prompt ────────────────────────────────────────────
+async def test_one_esc_cancels_the_filter_prompt_and_a_second_clears_the_filter(
+    make_app, seeded, type_into
+):
+    """The two presses the hint has to describe.
+
+    `escape` is claimed by `InlinePrompt.on_key`, which closes the prompt and touches no
+    view state, so the filter is still on and the table still short. Clearing it is the
+    tab's `esc` — `key_back` -> `MoneyView.back` — on the press after. The hint said "esc
+    clears it", which reads as one.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.horizon = "all"
+        m.reload()
+        await pilot.press("slash")
+        await type_into(pilot, "shop")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert m.view.filter_text == "shop", "the filter never went on"
+        filtered = app.query_one("#money-table").row_count
+
+        await pilot.press("slash")  # re-opens prefilled with the live filter
+        await pilot.pause()
+        assert app.prompt.value == "shop"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.prompt.is_open is False
+        assert m.view.filter_text == "shop", "one esc cleared it — then the hint may say so"
+        assert app.query_one("#money-table").row_count == filtered
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert m.view.filter_text == ""
+        assert app.query_one("#money-table").row_count > filtered
+
+
+async def test_submitting_an_emptied_filter_line_leaves_the_filter_alone(
+    make_app, seeded, type_into
+):
+    """The other way a user reaches for "clear this".
+
+    `on_input_submitted` treats an empty value as a cancel — closes, focuses the table, and
+    never calls `handle_prompt` — so backspacing the line out and pressing enter changes
+    nothing. That is app-wide policy, not a Money decision, which is why the hint stopped
+    implying otherwise instead of the path being rerouted.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 40)) as pilot:
+        m = await go_money(pilot, app)
+        m.view.horizon = "all"
+        m.reload()
+        await pilot.press("slash")
+        await type_into(pilot, "shop")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert m.view.filter_text == "shop"
+
+        await pilot.press("slash")
+        await pilot.pause()
+        for _ in range(len("shop")):
+            await pilot.press("backspace")
+        assert app.prompt.value == ""
+        await pilot.press("enter")
+        await pilot.pause()
+        assert m.view.filter_text == "shop"

@@ -461,6 +461,16 @@ appended prose where it was convenient rather than editing the map.
   to these values" — covering a delete (row gone → insert) and an edit (row present
   → update) without the stack needing to know which. A plain INSERT raised on an
   edit's pre-image.
+  That covers the only conflict the stack itself causes; it does **not** cover another
+  unique index refusing the row. `recurring.name` is one — rename an item, let a new item
+  take the freed name, and the pre-image collides — and resolving *that* would mean
+  deleting the new item to make room. So **a failed undo is a no-op, not a consumed one**:
+  the `except` pushes the pre-image back before it notifies. It used to pop and drop, which
+  left the rename un-undone *and* sent the next `u` one entry deeper — measured: depth 2 → 1
+  across a `u` that changed nothing, then a deleted expense resurrected under "restored
+  expense row" while the rename became permanently unreachable. `u` now stays parked on an
+  entry it cannot apply until the collision is resolved, and that is the trade: a stuck key
+  beats a silent write to the wrong row.
 - **A comma is a thousands separator, never a decimal point.** `parse.to_amount`
   rejects a decimal comma before stripping thousands commas, so `12,40` is
   rejected with a suggestion rather than silently becoming 1240. A $12.40 lunch

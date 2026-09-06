@@ -162,8 +162,14 @@ class MoneyTab(PanelTab):
                 # Burn-against-elapsed is meaningless across a quarter, so the
                 # marker is withheld rather than drawn somewhere arbitrary.
                 frac = None
-                n = len(months) or "all"
-                tail = f"{pct}% · budget summed over {n} months"
+                # One month is not a sum, and "1 months" is not a sentence. Naming it is
+                # also the more useful word below a month-wide horizon: the spend is the
+                # window's, while the cap is the whole month's.
+                if len(months) == 1:
+                    tail = f"{pct}% · budget for {months[0]}"
+                else:
+                    n = len(months) or "all"
+                    tail = f"{pct}% · budget summed over {n} months"
             bar = burn_bar(s.total_spent, s.total_budget, width=40, marker_frac=frac)
             # Colour the burn, not the tail: the bar is the thing read at a glance.
             bar_widget.display = True
@@ -681,9 +687,11 @@ class MoneyTab(PanelTab):
         cat = next((c for c in s.by_category if c.category == r.category), None)
         spent = cat.spent if cat else 0.0
         left = (cat.delta if cat else r.amount)
+        # `spent`/`left` are the span on screen, which can be wider than the month the line
+        # was written to — so say which, the way the expense toast already does.
         self.app.notify(
-            f"budget {r.category} {fmt(r.amount)} for {month} · {fmt(spent)} spent,"
-            f" {fmt(left)} left",
+            f"budget {r.category} {fmt(r.amount)} for {month} · {fmt(spent)} spent"
+            f" this range, {fmt(left)} left",
             timeout=5,
         )
 

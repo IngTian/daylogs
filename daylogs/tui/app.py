@@ -386,6 +386,17 @@ class DaylogsApp(App):
                 tuple(row.values()),
             )
         except Exception as e:  # noqa: BLE001 - a failed undo must not kill the app
+            # ...and must not consume the entry either. `ON CONFLICT(id)` resolves the one
+            # conflict the stack itself causes — the row being present rather than gone. It
+            # does not resolve a conflict on another unique index, and `recurring.name` is
+            # one: rename an item, let a new item take the freed name, and the pre-image is
+            # refused. Resolving that too (INSERT OR REPLACE) would delete the new item to
+            # make room, so this undo genuinely cannot be applied — and popping it anyway
+            # sent the next `u` straight past it, restoring something older under a toast
+            # that named the older row. Measured: depth 2 -> 1 across a `u` that changed
+            # nothing, then the second `u` resurrected a deleted expense while the rename
+            # the user actually asked to undo became unreachable.
+            self.undo_stack.push(table, row)
             self.notify_error(f"undo failed: {e}")
             return
         self.notify(f"restored {table} row", timeout=3)
