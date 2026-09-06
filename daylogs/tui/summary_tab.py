@@ -124,7 +124,7 @@ class SummaryTab(PanelTab):
         past month rather than shown misleadingly.
         """
         month = date[:7]
-        s = money.summarize_month(conn, month=month, today=date, cfg=cfg)
+        s = money.summarize_month(conn, month=month, today=date)
         lines: list[str] = [f"  spent   {s.total_spent:>10,.2f}"]
 
         pending, _ = money.pending_roll(conn, month=month)

@@ -336,7 +336,6 @@ async def test_a_three_day_axis_is_labelled_by_the_clock(make_app, db):
 DAY = "2026-09-03"
 _PROFILE = dict(height_cm=180, sex="male", birthday="1996-01-01", activity="desk")
 # 80 kg at 180 cm, male, 30: Mifflin-St Jeor gives 1,780, and a desk day 2,136.
-_DESK_BURN = 2136
 
 
 def _strip(app):

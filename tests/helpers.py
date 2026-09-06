@@ -38,3 +38,20 @@ async def go_day(pilot, app):
     await pilot.press("1")
     await pilot.pause()
     return app.query_one("#summary")
+
+
+def assert_armed(app, scope: str) -> None:
+    """Fail unless an edit is really armed on `scope`'s tab.
+
+    Every test that escapes out of an edit needs this first, and `prompt.is_open` is not
+    enough: `key_activate` opens the prompt whether or not it armed the row, so a broken
+    arming path sails past it and the test that follows passes by doing nothing.
+    `_editing` is the state those tests are about, and what `cancel_editing` clears.
+
+    Ten copies of that reasoning were pasted across the two tab suites, identical but for
+    `#body`/`#money`. Once it is one function the *next* tab that grows an edit path gets
+    the guard by calling it, rather than by someone remembering the paragraph.
+    """
+    assert app.query_one(f"#{scope}")._editing is not None, (
+        f"no edit was armed on the {scope} tab, so this test proves nothing"
+    )

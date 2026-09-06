@@ -83,8 +83,10 @@ class DaylogsApp(App):
         now=None,
     ) -> None:
         super().__init__()
-        # Measured: TabbedContent's underline animation cost ~277 ms of every tab
-        # switch (383 ms -> 127 ms with it off). Nothing here is worth animating.
+        # TabbedContent's underline animation buys nothing here and off is never
+        # slower. The size of the saving is deliberately not quoted: this comment used
+        # to state two figures that disagreed with each other in the same sentence, and
+        # tests/test_tui_perf.py records what is actually measurable.
         # This is an *instance* attribute in textual 8.2, set from
         # constants.TEXTUAL_ANIMATIONS in App.__init__, so a class attribute
         # named ANIMATION_LEVEL would be a silent no-op.

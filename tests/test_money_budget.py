@@ -281,7 +281,7 @@ def test_renaming_a_recurring_item_then_re_rolling_does_not_double_the_budget(db
 
     names = sorted(b["name"] for b in list_budget(db, month="2026-09"))
     assert names == ["Streaming Plus"], f"the orphaned line survived: {names}"
-    total = summarize_month(db, month="2026-09", today="2026-09-04", cfg=cfg).total_budget
+    total = summarize_month(db, month="2026-09", today="2026-09-04").total_budget
     assert total == 24.99, f"one subscription, {total} of budget"
 
 

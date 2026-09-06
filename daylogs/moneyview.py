@@ -12,17 +12,12 @@ Pure: no Textual, no database.
 
 from __future__ import annotations
 
-import datetime as dt
-import re
 from dataclasses import dataclass, field
 
 from daylogs import horizon as hz
 
 SORT_FIELDS = ("date", "amount", "category")
 PANES = ("categories", "expenses", "recurring")
-
-_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class ViewError(ValueError):
@@ -92,13 +87,6 @@ class MoneyView:
             self.anchor = hz.resolve_goto(text)
         except hz.HorizonError as e:
             raise ViewError(str(e)) from e
-
-    @staticmethod
-    def _check(iso: str) -> None:
-        try:
-            dt.date.fromisoformat(iso)
-        except ValueError as e:
-            raise ViewError(f"{iso} is not a real date") from e
 
     # ── the escape stack ─────────────────────────────────────────────────
     def back(self) -> bool:

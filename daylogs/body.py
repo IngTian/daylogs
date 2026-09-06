@@ -1,4 +1,8 @@
-"""Weight and food: reads, writes, trend windows, and BMR.
+"""Weight, food and activity: reads, writes, trend windows, and the calorie arithmetic.
+
+Activity and the burn it scales arrived after this line first read "weight and food",
+and BMR is only the first half of that arithmetic — resting expenditure, an activity
+factor, the day's TDEE, and the per-day net series built from them all live here.
 
 Every write validates before it touches SQLite, so a bad prompt never
 produces a half-valid row. Deletes return the removed row so the caller can
@@ -523,8 +527,11 @@ def resolved_factor(conn, cfg, *, date: str) -> tuple[float | None, str | None]:
 def day_factor(conn, cfg, *, date: str) -> float | None:
     """The multiplier to apply to BMR for `date`, or None if there is nothing to say.
 
-    One resolution, two callers: only the ENERGY panel wants the origin. Resolving it
-    twice is how a header and a panel start disagreeing about the same day.
+    One resolution, and this is the half of it that drops the origin — for the two
+    callers, `day_tdee` and `day_baseline`, that only need the number. The surfaces that
+    *do* want the origin call `resolved_factor` directly: the ENERGY panel, which shows
+    it, and `summary.build_payload`, which files it as `activity_source`. Resolving the
+    factor twice is how a header and a panel start disagreeing about the same day.
     """
     return resolved_factor(conn, cfg, date=date)[0]
 
@@ -544,10 +551,11 @@ def compute_tdee(bmr: int | None, factor: float | None) -> int | None:
 def day_tdee(conn, cfg, *, date: str) -> int | None:
     """What `date` cost: that day's resting BMR, scaled by that day's factor.
 
-    The one place that composition lives. Four surfaces read it — the ENERGY panel,
-    the FOOD header, the Day tab's BODY block and the digest payload — and four
-    separate compositions is four chances for one panel to measure against two
-    different baselines.
+    The one place that composition lives. Four surfaces read it — the ENERGY panel, the
+    Day tab's BODY block, the digest payload, and the activity write toast — and four
+    separate compositions is four chances for one panel to measure against two different
+    baselines. The FOOD header was on that list and is not any more: it describes the
+    window of rows beneath it, and the day's own balance is stated once, in the panel.
 
     The weight is the latest on or before `date`, the rule every other reader
     follows: a week-old weigh-in is the best available answer. A day before the first
@@ -561,7 +569,8 @@ def day_tdee(conn, cfg, *, date: str) -> int | None:
 def day_baseline(conn, cfg, *, date: str) -> int | None:
     """What `date` is measured against: its burn if there is a factor, else resting BMR.
 
-    Six surfaces ask this question and two of them had drifted. The food toast asked
+    Anything that states a calorie figure has to ask this, and two of them had drifted
+    — a count is not given here because the last one went stale. The food toast asked
     `compute_bmr` while the FOOD header one line above it asked `day_tdee`, so the
     header said net against `burn` and the toast said "+X vs BMR" in the same instant.
     And `net_series_between` keyed on the *factor*, so `c` -> net drew an empty chart for

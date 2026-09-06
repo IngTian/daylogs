@@ -129,9 +129,7 @@ class MoneyTab(PanelTab):
         v = self.view
         span = v.span()
         months = span.months()
-        s = money.summarize_span(
-            self.app.conn, span=span, today=self.app.today(), cfg=self.app.cfg
-        )
+        s = money.summarize_span(self.app.conn, span=span, today=self.app.today())
 
         bar_widget = self.query_one("#money-bar", Static)
         if s.total_budget <= 0:
@@ -598,7 +596,7 @@ class MoneyTab(PanelTab):
             self.reload()
 
             s = money.summarize_span(
-                self.app.conn, span=self.view.span(), today=self.app.today(), cfg=cfg
+                self.app.conn, span=self.view.span(), today=self.app.today()
             )
             cat = next((c for c in s.by_category if c.category == r.category), None)
             # Always name the category: confirming *where it was filed* is the most
@@ -668,9 +666,7 @@ class MoneyTab(PanelTab):
             cfg=cfg,
         )
         self.reload()
-        s = money.summarize_span(
-            self.app.conn, span=self.view.span(), today=self.app.today(), cfg=cfg
-        )
+        s = money.summarize_span(self.app.conn, span=self.view.span(), today=self.app.today())
         cat = next((c for c in s.by_category if c.category == r.category), None)
         spent = cat.spent if cat else 0.0
         left = (cat.delta if cat else r.amount)
