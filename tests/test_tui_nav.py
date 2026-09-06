@@ -670,3 +670,28 @@ async def test_day_focuses_the_read_and_still_gives_the_arrows_up(make_app, db):
     assert scope == "summary" and back is not None and back.id == "summary-scroll", (
         f"walking back to Day left focus on {back!r} in {scope!r}"
     )
+
+
+async def test_g_with_a_bare_month_on_day_answers_about_the_date_it_resolved_to(
+    make_app, db, type_into
+):
+    """Day has no window, so a bare month is one date: the month's last day.
+
+    Which is why the shared `go to date` hint cannot say "2026-06 for the whole month" —
+    the prompt invited a month and the answer is about 2026-06-30, with a June report
+    sitting there unmentioned. The behaviour is deliberate (one `resolve_goto` for all
+    three tabs, pinned by `test_all_three_tabs_resolve_g_the_same_way`); the sentence
+    above the prompt was what had to change.
+    """
+    upsert_report(db, date="2026-06-15", content="june")
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 30)) as pilot:
+        day = await go_day(pilot, app)
+        said = []
+        app.notify = lambda msg, **kw: said.append(str(msg))
+        await pilot.press("g")
+        await type_into(pilot, "2026-06")
+        await pilot.press("enter")
+        await pilot.pause()
+    assert said == ["no summary for 2026-06-30"], said
+    assert day.viewing_date == "2026-06-15", "the tab moved after declining"

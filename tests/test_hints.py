@@ -244,3 +244,36 @@ def test_no_hint_declares_a_vocabulary_it_cannot_resolve():
         vocab = hints.vocab_for(h)
         for sig in h.sigils:
             assert vocab.get(sig), f"{h.label} declares {sig!r} and gets nothing back"
+
+
+# ── sentences that have to be true where they are read ──────────────────────
+def test_the_filter_hint_does_not_promise_a_one_press_clear():
+    """It said "esc clears it", and one press does not.
+
+    `escape` inside a prompt is claimed by `InlinePrompt.on_key`, which stops the event,
+    closes the prompt and touches nothing else — so the filter is still on after the press
+    the sentence is displayed above. Clearing it is the *tab's* `esc` (`key_back` ->
+    `MoneyView.back`), one press later. Emptying the line and submitting does not clear it
+    either: `on_input_submitted` reads an empty value as a cancel before any tab sees it.
+    A hint read inside the prompt has to describe the key as it behaves there.
+    """
+    grammar = hints.for_label("filter").grammar
+    assert "esc again" in grammar, f"the hint still promises one press: {grammar!r}"
+
+
+def test_the_goto_hint_states_the_rule_resolve_goto_actually_applies():
+    """It said "2026-06 for the whole month", which is true on neither tab as written.
+
+    There is one `Hint` per label and `g` is app-scope, so this one sentence is read on all
+    three tabs. A bare month resolves to its **last day** and nothing more; "the whole
+    month" is what a horizon at least a month wide then makes of that anchor. The Day tab
+    has no window at all, so `g 2026-06` answers "no summary for 2026-06-30" — a date the
+    user never typed. The sentence therefore states the rule, and the rule is asserted
+    against the function that implements it.
+    """
+    from daylogs.horizon import resolve_goto
+
+    grammar = hints.for_label("go to date").grammar
+    assert resolve_goto("2026-06") == "2026-06-30"
+    assert "last day" in grammar, grammar
+    assert "whole month" not in grammar, f"still promising a window it does not set: {grammar!r}"

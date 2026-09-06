@@ -4,6 +4,7 @@ from helpers import all_expenses, assert_armed, go_money
 
 from daylogs.money import (
     add_expense,
+    delete_recurring,
     list_budget,
     list_recurring,
     upsert_budget,
@@ -688,6 +689,101 @@ async def test_a_colliding_recurring_rename_is_rejected_cleanly(make_app, db, ty
         still_open = app.prompt.is_open
     assert still_open is True, "the prompt keeps the text so the name can be fixed"
     assert len(list_recurring(db)) == 2
+async def test_a_failed_undo_does_not_let_the_next_u_reach_past_it(make_app, db, type_into):
+    """A failed undo is a no-op, not a consumed one.
+
+    `app_undo` popped before the `try`, so an exception dropped the pre-image on the floor:
+    the row it described stayed unrestored *and* the entry was gone, so the next `u`
+    silently undid something older — here, a deleted lunch coming back to life under a
+    toast saying "restored expense row", with nothing connecting it to the rename the user
+    had actually asked to undo.
+
+    The upsert is `ON CONFLICT(id)`, which resolves the only conflict the stack itself can
+    cause: the row being present rather than gone. It does not resolve a conflict on
+    another unique index, and `recurring.name` is one — rename an item, let a new item take
+    the freed name. Resolving that one too (`INSERT OR REPLACE`) would delete the new
+    subscription to make room, so the honest answer is that this undo cannot be applied,
+    which is only honest if the entry beneath it is still there afterwards.
+
+    Asserted by pressing `u` twice and watching the older row, not by reading the stack's
+    depth — the same reason test_undo.py drains instead of measuring `len`.
+    """
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    upsert_recurring(db, name="streaming", category="subscriptions", cost=20, cycle="monthly")
+    add_expense(db, amount=12.0, description="lunch", category="restaurant", date="2026-08-04")
+    said = []
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")             # -> expenses pane
+        await pilot.pause()
+        await pilot.press("x")               # delete the lunch: the older undo entry
+        await pilot.press("y")
+        await pilot.pause()
+        assert all_expenses(db) == [], "precondition: the lunch is deleted and on the stack"
+        await pilot.press("tab")             # -> recurring pane
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "20 streaming plus !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("s")               # a new item takes the freed name
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "9.99 streaming !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(list_recurring(db)) == 2, "precondition: the freed name is taken again"
+
+        app.notify = lambda msg, **kw: said.append(str(msg))
+        await pilot.press("u")               # cannot be applied
+        await pilot.pause()
+        await pilot.press("u")               # must hit the same wall, not the lunch
+        await pilot.pause()
+    assert len(said) == 2, f"expected two toasts, one per u: {said}"
+    assert all("undo failed" in m for m in said), f"the second u undid something else: {said}"
+    assert all_expenses(db) == [], "the second u reached past the failed entry and restored"
+
+
+async def test_the_pre_image_a_failed_undo_kept_still_applies(make_app, db, type_into):
+    """Keeping the entry has to mean keeping it *usable*: once the name is free again, the
+    same `u` restores the row it was always about. Pushing back something that no longer
+    round-trips would satisfy the test above and still lose the row."""
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    upsert_recurring(db, name="streaming", category="subscriptions", cost=20, cycle="monthly")
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")             # -> recurring pane
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "20 streaming plus !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "9.99 streaming !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("u")               # fails: the name is taken
+        await pilot.pause()
+        intruder = next(r["id"] for r in list_recurring(db) if r["cost"] == 9.99)
+        delete_recurring(db, intruder)       # the collision is the user's to resolve
+        await pilot.press("u")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert len(rows) == 1
+    assert (rows[0]["name"], rows[0]["cost"]) == ("streaming", 20.0), (
+        f"the kept pre-image no longer restores the row: {[dict(r) for r in rows]}"
+    )
+
+
 async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db, type_into):
     """If user arms an expense edit, presses escape, then submits a fresh entry,
     that fresh entry must INSERT, not UPDATE the abandoned row.

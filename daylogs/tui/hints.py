@@ -109,9 +109,17 @@ HINTS: tuple[Hint, ...] = (
         "it went to other — the same line, now with a !category",
         sigils=("!",),
     ),
-    Hint("filter", "coffee", "text to match in a description · esc clears it"),
+    # `esc` inside a prompt is claimed by `InlinePrompt.on_key`: it closes the prompt and
+    # touches nothing else. Clearing the filter is the *tab's* `esc` (`MoneyView.back`), so
+    # from in here it is two presses. Submitting an emptied line does not clear it either —
+    # the app reads an empty value as a cancel.
+    Hint("filter", "coffee", "text to match in a description · esc cancels · esc again clears"),
     # ── app ──────────────────────────────────────────────────────────────
-    Hint("go to date", "2026-06-15", "a date, or 2026-06 for the whole month"),
+    # A bare month resolves to its **last day** (`horizon.resolve_goto`, one rule for all
+    # three tabs). "The whole month" is only what that means where a horizon then widens it
+    # back out, and only at a horizon at least a month wide: on Day it is one date, so
+    # `g 2026-06` answered "no summary for 2026-06-30" — a date nobody typed.
+    Hint("go to date", "2026-06-15", "a date · a bare month lands on its last day"),
 )
 
 _BY_LABEL = {h.label: h for h in HINTS}
