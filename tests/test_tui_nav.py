@@ -611,6 +611,67 @@ async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db
     assert back == "money", f"a wide table swallowed the arrow going back: {back}"
 
 
+async def test_the_first_arrow_of_a_session_goes_through_show_scope(make_app, db):
+    """No digit press, deliberately — and that is the whole test.
+
+    Day is where the app opens and nothing on it used to be focusable, so `AUTO_FOCUS`
+    landed on TabbedContent's own `ContentTabs`, whose `left`/`right` bindings are not
+    priority either and therefore beat the App's. Measured before the fix: `→` set
+    `active_tab_id` to `tab-body` while `focused` stayed on `ContentTabs`, so `show_scope`
+    never ran — the footer went on reading `Wed Aug 26 · r regenerate` with Body on screen,
+    advertising a key that does nothing there, and Body's table was never focused, leaving
+    row navigation and `enter` dead until a digit press.
+
+    It was never only the *first* arrow either: pressing `1` to come back did not clear it,
+    because Day's `focus_default` did nothing and `ContentTabs` kept focus. Only a `2`/`3`
+    healed it. Every other test in this file presses a digit before the arrow, which is
+    exactly why all of them passed over it.
+    """
+    upsert_report(db, date="2026-08-26", content="steady.")
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.scope == "summary", "this test reads the tab the app opens on"
+        await pilot.press("right")
+        await pilot.pause()
+        scope = app.scope
+        footer = str(app.query_one("#keyfooter").content)
+        focused = app.focused.id if app.focused else None
+    assert scope == "body", f"the first arrow did not walk: {scope}"
+    assert "weigh" in footer and "regenerate" not in footer, (
+        f"the pane switched behind show_scope; the footer still reads: {footer!r}"
+    )
+    assert focused == "body-table", f"arrowing into Body left focus on {focused!r}"
+
+
+async def test_day_focuses_the_read_and_still_gives_the_arrows_up(make_app, db):
+    """The mechanism behind the test above, pinned on its own.
+
+    Focus has to land *somewhere* on Day or `ContentTabs` takes it and claims the arrows.
+    The scroller is the natural holder — it is what `up`/`down`/`pagedown` page — and it
+    does not take `left`/`right` back, because `VerticalScroll` sets `overflow-x: hidden`
+    itself, so `allow_horizontal_scroll` is always false and `action_scroll_left`/`_right`
+    raise `SkipAction`. That is the same fall-through the `DataTable` rule in app.tcss buys
+    by hand, and unlike the table's it cannot flip with content width — which is why no
+    over-wide fixture is needed here.
+    """
+    upsert_report(db, date="2026-08-26", content="steady.")
+    app = make_app(now=lambda: NOW)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        opened_on = app.focused
+        assert opened_on is not None and opened_on.id == "summary-scroll", (
+            f"Day opened with focus on {opened_on!r}"
+        )
+        await pilot.press("right")
+        await pilot.press("left")
+        await pilot.pause()
+        back, scope = app.focused, app.scope
+    assert scope == "summary" and back is not None and back.id == "summary-scroll", (
+        f"walking back to Day left focus on {back!r} in {scope!r}"
+    )
+
+
 async def test_g_with_a_bare_month_on_day_answers_about_the_date_it_resolved_to(
     make_app, db, type_into
 ):

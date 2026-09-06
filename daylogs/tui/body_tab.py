@@ -691,7 +691,7 @@ class BodyTab(PanelTab):
         self._offer(est)
 
     @work(exclusive=True)
-    async def _run_text_estimate(self, description: str) -> None:
+    async def _run_text_estimate(self, r) -> None:
         # A typed estimate supersedes any photo waiting to be confirmed — it shares
         # the exclusive group, so starting this cancels the image worker, and a
         # cancelled worker never reaches the `except` that would have released the
@@ -700,7 +700,7 @@ class BodyTab(PanelTab):
         self._set_estimating(True)
         try:
             est = await estimate.from_text(
-                description=description,
+                description=r.description,
                 runner=self.app.runner_json,
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
@@ -710,18 +710,31 @@ class BodyTab(PanelTab):
             self.app.notify_error(f"estimate failed: {e}")
             return
         self._set_estimating(False)
-        self._offer(est)
+        self._offer(est, when=parse.When(date=r.date, at=r.at))
 
-    def _offer(self, est: estimate.Estimate) -> None:
+    def _offer(self, est: estimate.Estimate, *, when: parse.When | None = None) -> None:
         """Show the estimate as an editable line. Correcting it goes through the
-        same grammar as typing it, so there is one code path, not two."""
+        same grammar as typing it, so there is one code path, not two.
+
+        Which is exactly why the `@` has to be *on* the line. The confirm line is
+        re-parsed, and the grammar resolves an absent `@` to now — so `f pizza and salad
+        @09-04/19:30` asked for yesterday's dinner and wrote today's, at whatever the clock
+        said when Claude answered, with nothing on screen saying so. Two days' net figures
+        were then wrong. The failure path never had this bug, because it writes the parsed
+        row directly: the same keypress was right when Claude was down and wrong when it
+        answered.
+
+        `when` is optional because `_run_image_estimate` has no typed line to preserve — a
+        photo is being estimated now, and today is the right answer there.
+        """
         self._pending = est
+        line = f"{sigil.escape(est.description)} ={est.kcal}"
+        if when is not None:
+            line += f" @{when.date}/{hhmm(when.at, self.app.cfg.timezone)}"
         # `owner=self.id`, unlike every other prompt here: this one is opened by a worker
         # up to a minute after the keypress, so the active tab is whatever the user wandered
         # to while waiting — and the answer belongs to Body regardless.
-        self.app.prompt.open(
-            "confirm food", f"{sigil.escape(est.description)} ={est.kcal}", owner=self.id
-        )
+        self.app.prompt.open("confirm food", line, owner=self.id)
 
     # ── prompt handling ──────────────────────────────────────────────────
     def handle_prompt(self, label: str, value: str) -> None:
@@ -753,6 +766,10 @@ class BodyTab(PanelTab):
 
         Cleared on read so a stale id cannot be reused by the next submission — the
         row may have been deleted in between.
+
+        A *rejected* submission does not lose it, though: `App.on_input_submitted` puts the
+        id back before re-opening the prompt, because the read is not the end of the edit.
+        `_submit_food` and `update_recurring` both raise after it, and the retry INSERTed.
         """
         if self._editing is None or self._editing[0] != which:
             return None
@@ -873,7 +890,7 @@ class BodyTab(PanelTab):
         row_id = self._take_editing("food")
         if row_id is None:
             if r.kcal is None:
-                self._run_text_estimate(r.description)
+                self._run_text_estimate(r)
                 return
             self._write_food(r, source="labeled")
             return
@@ -1035,10 +1052,12 @@ class BodyTab(PanelTab):
             return
         self._set_inferring(False)
         self._pending_activity = effort
-        # Worker-opened, like `confirm food` — see the note there.
+        # Worker-opened, like `confirm food` — see the note there, including why the `@` is
+        # on the line: the confirm is re-parsed, and an absent `@` means now.
         self.app.prompt.open(
             "confirm activity",
-            f"{sigil.escape(r.description)} ={effort.factor:g}",
+            f"{sigil.escape(r.description)} ={effort.factor:g}"
+            f" @{r.date}/{hhmm(r.at, self.app.cfg.timezone)}",
             owner=self.id,
         )
 

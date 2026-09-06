@@ -439,12 +439,25 @@ class DaylogsApp(App):
             self._active_tab().focus_default()
             return
         before = (self.prompt.is_open, self.prompt.label)
+        # The row an armed edit is about, snapshotted before the handler consumes it.
+        # `_take_editing` clears the slot on READ, and a submitter can still be rejected
+        # after that read: `_submit_food` raises "kcal is required" itself, and
+        # `update_recurring` raises on a name clash. The retry then found nothing armed and
+        # INSERTed — a second food row, or a second active recurring item through
+        # `upsert_recurring`, which is precisely what the by-id edit path exists to prevent.
+        # A retry is the same submission, so it has to still be the same edit.
+        armed = getattr(tab, "_editing", None)
         try:
             # Every prompt belongs to a tab now. `theme` was the exception — the one that
             # meant the same thing everywhere, answered here rather than in three
             # identical branches — and it is a picker rather than a prompt.
             tab.handle_prompt(label, value)
         except RETRYABLE as e:
+            # Only when something was armed to begin with: the Day tab has no edit slot at
+            # all, and `_submit_expense` arms one mid-flight for the `fix category` chain —
+            # writing None over that would disarm a row the handler just armed.
+            if armed is not None:
+                tab._editing = armed
             self.prompt.show_error(str(e))
             self.prompt.focus()
             return
