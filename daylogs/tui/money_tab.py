@@ -583,7 +583,7 @@ class MoneyTab(PanelTab):
         r = parse_expense(value, now=self.app.now(), known_slugs=money.slugs(cfg))
         row_id = self._take_editing("expense")
         if row_id is None:
-            money.add_expense(
+            new_id = money.add_expense(
                 self.app.conn,
                 amount=r.amount,
                 description=r.description,
@@ -615,6 +615,17 @@ class MoneyTab(PanelTab):
                 # Written, but flagged: an uncategorised row is more likely a typo
                 # than an intent. Re-open prefilled so the fix is one edit, not a hunt
                 # through the table later.
+                #
+                # Arm the row the prompt is about, or the "fix" is not an edit at all.
+                # `_submit_expense(refiling=True)` re-enters here and asks
+                # `_take_editing("expense")` for a row id; `_editing` was only ever set by
+                # the `enter`-on-a-row path, so it came back None and the fix INSERTed a
+                # second expense. 12.40 spent, 24.80 booked, and the stale `other` row
+                # sits on a pane the app does not open on. Escaping still leaves the row
+                # filed under `other` — `cancel_editing` clears this slot — so
+                # record-now-classify-later survives, and the refile now pushes a
+                # pre-image like every other edit, which is what makes `u` reach it.
+                self._editing = ("expense", new_id)
                 self.app.prompt.open("fix category", value)
             return
         before = self.app.conn.execute(

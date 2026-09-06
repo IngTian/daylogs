@@ -29,9 +29,9 @@ SRC = Path(__file__).resolve().parents[1] / "daylogs"
 # Fixed, because a parser result must never depend on when the suite runs.
 NOW = dt.datetime(2026, 8, 28, 9, 0, tzinfo=ZoneInfo("America/Toronto"))
 
-# Which parser is behind each prompt. Prompts whose input is free text (filter),
-# a filesystem path (photo path), a bare category (fix category) or a date
-# (go to date) have no grammar parser and are checked separately.
+# Which parser is behind each prompt. Prompts whose input is free text (filter), a
+# filesystem path (photo path) or a date (go to date) have no grammar parser and are
+# checked separately.
 PARSERS = {
     "weigh": parse_weigh,
     "food": parse_food,
@@ -39,6 +39,13 @@ PARSERS = {
     "activity": parse_activity,
     "confirm activity": parse_activity,
     "expense": parse_expense,
+    # `fix category` re-enters `_submit_expense`, so its grammar is the expense grammar —
+    # the whole line, amount first. It sat in NO_PARSER described as "a bare category",
+    # which is the same lie the note below records about `profile`, and it hid a
+    # placeholder the parser rejects outright: the example was `restaurant`, and
+    # `parse_expense` answers that with "start with an amount". Following the completion
+    # instead gave `12.40 lunch restaurant`, which parses and falls back to `other` again.
+    "fix category": parse_expense,
     "budget": parse_budget,
     "recurring": parse_recurring,
 }
@@ -49,10 +56,10 @@ PARSERS = {
 # have a grammar, and left its example unchecked by the parametrized case.
 PLAIN_PARSERS = {"profile": parse_profile, "new category": parse_category}
 
-# Prompts with no grammar behind them: free text, a filesystem path, a bare category, a
-# date. `theme` used to be here too, described as "validated by `themes.check`" — both the
-# prompt and that function are gone, replaced by a picker, and the entry outlived them.
-NO_PARSER = {"filter", "photo path", "fix category", "go to date"}
+# Prompts with no grammar behind them: free text, a filesystem path, a date. `theme` used
+# to be here too, described as "validated by `themes.check`" — both the prompt and that
+# function are gone, replaced by a picker, and the entry outlived them.
+NO_PARSER = {"filter", "photo path", "go to date"}
 
 
 def test_every_prompt_opened_in_the_app_has_a_hint():
@@ -173,10 +180,14 @@ def test_weigh_offers_no_vocabulary():
     assert hints.vocab_for(hints.for_label("weigh")) == {}
 
 
-def test_fix_category_completes_without_a_sigil():
-    """Its whole input is a slug, so the implicit sigil is the empty string."""
+def test_fix_category_completes_the_sigil_the_parser_actually_needs():
+    """It used to complete on the empty sigil, on the grounds that "its whole input is a
+    slug". Its whole input is an *expense line* — the prompt re-enters `_submit_expense` —
+    so the bare word the completion offered landed in the description and fell back to
+    `other` a second time, silently. `!` is the token that changes the category."""
     v = hints.vocab_for(hints.for_label("fix category"))
-    assert "grocery" in v[""]
+    assert "grocery" in v["!"]
+    assert "" not in v, "a bare completion here writes the slug into the description"
 
 
 def test_categories_come_from_config_at_runtime(make_cfg):
