@@ -142,9 +142,19 @@ DataTable {
     overflow-x: hidden;
 }
 
+/* `auto`, not `1fr` — this one declaration is the whole of what makes the read
+   scrollable. It is the sole child of #summary-scroll, so `1fr` pinned the content to
+   the container's own height: virtual size equalled size, `max_scroll_y` was 0, and a
+   long read simply stopped at the bottom of the panel with no scrollbar and no way
+   down. Measured at 100x30 on a thirty-paragraph report: 16 visible rows of a 64-row
+   document, with `down`, `pagedown` and `end` all no-ops, while the README has always
+   said the read scrolls underneath the panels.
+
+   The container keeps ScrollableContainer's own `height: 1fr`, so it still absorbs the
+   leftover height under the panels; only the content may be taller than the window. */
 #summary-body {
     padding: 0 2;
-    height: 1fr;
+    height: auto;
 }
 
 /* ── help overlay ───────────────────────────────────────────────────── */
