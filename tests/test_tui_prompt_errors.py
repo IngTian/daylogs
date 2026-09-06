@@ -1,6 +1,9 @@
-from helpers import all_expenses, go_body
+import datetime as dt
 
-from daylogs.body import list_weight
+from helpers import all_expenses, assert_armed, go_body, go_money
+
+from daylogs.body import add_food, list_food, list_weight
+from daylogs.money import list_recurring, upsert_recurring
 
 
 async def test_bad_weight_keeps_the_prompt_open_with_the_text(make_app, db, type_into):
@@ -166,6 +169,134 @@ async def test_a_handler_that_chains_to_another_prompt_is_not_stomped(make_app, 
         await pilot.pause()
         assert app.prompt.is_open is True
         assert app.prompt.label == "fix category"
+
+
+# ── a rejected submission is still the same submission ──────────────────────
+async def test_a_rejected_edit_retries_as_the_same_edit_not_a_new_row(
+    make_app, db, type_into
+):
+    """A retry keeps the text; it has to keep the row too.
+
+    `_take_editing` consumes the armed id on READ, and `_submit_food` raises "kcal is
+    required" *after* that read — so the retry found nothing armed, fell into the entry
+    branch and INSERTed. One breakfast became two rows and 1,050 kcal, and the ENERGY
+    panel's balance for the day was wrong with nothing on screen to explain it.
+
+    `test_a_parse_error_during_edit_keeps_editing_armed` already asserted this property and
+    passed throughout, because a bad weight fails inside `parse_weigh` — before the read.
+    The bug lives entirely in the errors raised after it.
+    """
+    at = int(dt.datetime(2026, 8, 28, 7, 5, 43).timestamp())
+    add_food(db, description="oatmeal", kcal=350, date="2026-08-28", at=at, source="labeled")
+    # Pinned: the food table is span-filtered, so on an unpinned clock the row leaves the
+    # window, `enter` arms nothing, and every assertion below passes with the fix out.
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert_armed(app, "body")
+        # Drop the `=350` the prefill carried: rejected, with the text kept.
+        app.prompt.value = ""
+        await type_into(pilot, "oatmeal @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open is True, "precondition: rejected, not written"
+        assert_armed(app, "body")
+        app.prompt.value = ""
+        await type_into(pilot, "oatmeal =700 @2026-08-28")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_food(db, date="2026-08-28")
+    assert len(rows) == 1, (
+        f"the retry inserted a second row: {[(r['description'], r['kcal']) for r in rows]}"
+    )
+    assert rows[0]["kcal"] == 700, "the retry did not reach the row"
+    assert rows[0]["ate_at"] == at, "a line naming no time must not restamp"
+
+
+async def test_a_rejected_rename_retries_through_the_by_id_edit_path(
+    make_app, db, type_into
+):
+    """The worse half of the same defect: the retry went through `upsert_recurring`.
+
+    That resolves conflicts on `name`, so the retry's new name matched nothing and INSERTed
+    a second active row — both then look active and the next `r` writes two budget lines for
+    one subscription, which is the whole reason `update_recurring` is keyed by id.
+    `_take_editing` had already been spent on the attempt `update_recurring` rejected for
+    clashing with `Rent`, so the by-id path was unreachable exactly when the user was
+    mid-rename.
+    """
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    upsert_recurring(db, name="Rent", category="housing", cost=750, cycle="monthly")
+    upsert_recurring(db, name="Gym", category="other", cost=40, cycle="monthly")
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")            # -> recurring pane
+        await pilot.pause()
+        # The pane sorts by cost, so Rent (750) is row 0 — step onto Gym, whose rename
+        # genuinely collides.
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "Gym" in app.prompt.value, "precondition: editing Gym, not Rent"
+        assert_armed(app, "money")
+        app.prompt.value = ""
+        await type_into(pilot, "40 Rent !other #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open is True, "precondition: the clash was rejected"
+        app.prompt.value = ""
+        await type_into(pilot, "40 Gym Membership !other #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+    names = sorted(r["name"] for r in list_recurring(db))
+    assert names == ["Gym Membership", "Rent"], f"the retry INSERTed instead of renaming: {names}"
+    assert sum(r["monthly_cost"] for r in list_recurring(db)) == 790.00, (
+        "a roll would double-charge"
+    )
+
+
+async def test_escaping_a_rejected_edit_still_disarms_it(make_app, db, type_into):
+    """The other half of putting the row back: it must not survive an abandonment.
+
+    An id left armed makes the NEXT plain `s` an update of a row you walked away from — the
+    failure `cancel_editing` exists to prevent, already covered for a freshly armed edit.
+    This covers the one new way an id can outlive the attempt that read it: the app re-armed
+    it after a rejection. The rejected line is a zero cost, which `update_recurring` refuses
+    *after* the read, so the slot really is the restored one.
+    """
+    now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
+    upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert_armed(app, "money")
+        app.prompt.value = ""
+        await type_into(pilot, "0 Original !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open is True, "precondition: rejected after the read"
+        assert_armed(app, "money")
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "9.99 Second !subscriptions #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = list_recurring(db)
+    assert sorted(r["name"] for r in rows) == ["Original", "Second"], (
+        f"the abandoned edit swallowed the next entry: {[(r['name'], r['cost']) for r in rows]}"
+    )
 
 
 # ── the three slots: label above, example inside, grammar below ─────────────

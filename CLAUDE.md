@@ -95,6 +95,16 @@ appended prose where it was convenient rather than editing the map.
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand
   edge of the span), not a month.
+  **A write reveals the row it wrote, in both directions** — `view.reveal(date)`, not
+  `anchor = max(anchor, date)`. `max` only ever moved the edge forward, so a backdated
+  expense under the default MTD horizon was written and then never shown: the pane omitted
+  it, the header total omitted it, and the toast quoted a category total that excluded the
+  amount just booked, all three agreeing on the wrong thing while the comment on that line
+  claimed the row was now "inside whatever horizon is active". `anchor = date` is enough
+  because every horizon resolves to a span *ending* on the anchor — pinned across
+  `HORIZONS`, so a future horizon that broke that property would fail rather than strand
+  rows. It moves only when the date is genuinely outside the span, or an August row would
+  drag a YTD view off September for no reason; `t` is the one keypress home.
 - **Two named weight concepts, and they are not interchangeable.** `latest_weight` is
   "what do I weigh now" — the WEIGHT header's headline, which states the reading's clock
   time so it reads as a reading rather than as *the* number, and the BMI beside it.
@@ -412,7 +422,17 @@ appended prose where it was convenient rather than editing the map.
   note, minus four read-only columns named below.** What you can see is what you can
   edit. Columns with no visible representation stay out of reach entirely — `created_at`
   must survive an edit, so it is in neither the table nor the
-  line. `measured_at` used to be on that list — the weight table showed only a date, so
+  line.
+  **A *confirm* line carries the `@` it will write to, for the same reason an edit line
+  does: it is re-parsed, and the grammar resolves an absent `@` to now.** `f pizza and
+  salad @09-04/19:30` was offered back as `pizza and salad =850`, so accepting it wrote
+  today at whatever the clock said when Claude answered — two days' net figures wrong at
+  once, the meal added to one and missing from the other, with nothing on screen
+  contradicting either. The *failure* paths never had this, because they write the parsed
+  row directly, so the same keypress was right when Claude was down and wrong when it
+  answered. `_offer`'s `when` is optional rather than always-on because
+  `_run_image_estimate` has no typed line: a photo really is being estimated now, and a
+  fabricated stamp on a confirm line reads as a claim about when you ate. `measured_at` used to be on that list — the weight table showed only a date, so
   a day weighed twice was two identical-looking rows while the invisible column decided
   which one the trend used and which the headline showed. It is a `time` column now, and
   `render_weigh` emits `@date/HH:MM` so it can be edited. The recorded objection was that
@@ -477,7 +497,16 @@ appended prose where it was convenient rather than editing the map.
   because 782 kg trips a plausibility check expenses have no equivalent of.
 - **The app owns prompt-error policy.** Tabs let `ParseError`/`MoneyError`/
   `BodyError`/`PhotoError`/`ViewError` propagate; the app re-opens the prompt
-  with the text intact. A tab that catches them discards what the user typed.
+  with the text intact — **and with the row it was editing.** `_take_editing` consumes the
+  armed id on read, so a rejection raised *after* that read (food's "kcal is required", a
+  recurring name clash) left the retry to INSERT: a duplicate food row, and a second active
+  recurring item through `upsert_recurring`, which is precisely what the by-id edit path
+  exists to stop. `on_input_submitted` snapshots `tab._editing` before dispatching and
+  restores it in the `except`, but only when something *was* armed — `_submit_expense` arms
+  the `fix category` slot mid-flight, and writing None over that would disarm a row the
+  handler had just armed. A retry is the same submission, so it has to still be the same
+  edit. Abandonment is unaffected: escape and an empty submit both still clear through
+  `cancel_editing`. A tab that catches these errors discards what the user typed.
 - **`claude -p` runners are always injected.** `DaylogsApp` takes
   `runner_text` / `runner_json` / `runner_image`; services take `runner=`. No
   test may spawn a subprocess.

@@ -590,9 +590,11 @@ class MoneyTab(PanelTab):
                 note=r.note,
                 cfg=cfg,
             )
-            # The anchor is a date, not a month: move the span's right edge to the day
-            # just logged so the new row is inside whatever horizon is active.
-            self.view.anchor = max(self.view.anchor, r.date)
+            # The anchor is a date, not a month: move the span's right edge so the day
+            # just logged is inside whatever horizon is active. `reveal`, not `max` —
+            # `max` only ever moved the edge forward, so a backdated row was written and
+            # then never shown.
+            self.view.reveal(r.date)
             self.reload()
 
             s = money.summarize_span(
@@ -692,6 +694,10 @@ class MoneyTab(PanelTab):
 
         Cleared on read so a stale id cannot be reused by the next submission — the
         row may have been deleted in between.
+
+        A *rejected* submission does not lose it, though: `App.on_input_submitted` puts the
+        id back before re-opening the prompt, because the read is not the end of the edit.
+        `_submit_food` and `update_recurring` both raise after it, and the retry INSERTed.
         """
         if self._editing is None or self._editing[0] != which:
             return None

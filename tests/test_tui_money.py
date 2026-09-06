@@ -876,3 +876,41 @@ async def test_month_to_date_header_holds_on_the_first_of_the_month(make_app, db
         head = str(app.query_one("#money-head").content)
     assert "412.00" in head, f"spend on the 1st vanished from the header: {head!r}"
     assert "500.00" in head
+
+
+async def test_a_backdated_expense_lands_inside_the_visible_range(make_app, db, type_into):
+    """Logging into a past day brings the window to the row, rather than only forward.
+
+    `max(anchor, r.date)` left the anchor on Sept 5 for an Aug 30 expense, and all three
+    surfaces then agreed on the wrong thing: the expenses pane listed only the September
+    row, the header still read "spent 10.00" for the month, and the toast said
+    "grocery 10.00 this range" about a category that had just been charged 40.00 more. The
+    write had succeeded — the row was in the database with nothing on screen saying so,
+    which is the one question this tab exists to answer, answered wrong.
+
+    The clock is pinned because the whole test is about which month the anchor sits in. `t`
+    is asserted last: the view moving to August is the point, so the one keypress home has
+    to keep working, or the fix trades one lost row for a lost month.
+    """
+    now = lambda: dt.datetime(2026, 9, 5, 10, 0)  # noqa: E731
+    add_expense(db, amount=10.0, description="milk", category="grocery", date="2026-09-02")
+    said = []
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        tab = await go_money(pilot, app)
+        app.notify = lambda msg, **kw: said.append(str(msg))
+        await pilot.press("tab")            # -> expenses pane
+        await pilot.pause()
+        await pilot.press("e")
+        await type_into(pilot, "40.00 groceries !grocery @2026-08-30")
+        await pilot.press("enter")
+        await pilot.pause()
+        table = app.query_one("#money-table")
+        shown = [str(c) for key in table.rows for c in table.get_row(key)]
+        assert "groceries" in shown, f"the row just written is not on screen: {shown}"
+        head = str(app.query_one("#money-head").content)
+        assert "spent 40.00" in head, f"the range total excludes the new row: {head}"
+        assert "grocery 40.00" in said[-1], f"the toast quotes a stale total: {said[-1]}"
+        await pilot.press("t")
+        await pilot.pause()
+        assert tab.view.anchor == "2026-09-05", "`t` must still come home to today"

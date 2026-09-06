@@ -76,7 +76,10 @@ async def test_f_without_calories_estimates_then_logs_as_estimated(
         return Estimate(description="chicken caesar salad", kcal=610)
 
     monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", fake_from_text)
-    app = make_app()
+    # Pinned, because the confirm line now carries the `@` the row will be written to — it
+    # has to, or a typed date is dropped between the two prompts — so the expected line
+    # names a clock, and a clock read off the wall is not a fixture.
+    app = make_app(now=lambda: dt.datetime(2026, 9, 5, 12, 0))
     async with app.run_test() as pilot:
         await go_body(pilot, app)
         await pilot.press("f")
@@ -85,7 +88,7 @@ async def test_f_without_calories_estimates_then_logs_as_estimated(
         await pilot.pause()
         await pilot.pause()
         assert app.prompt.label == "confirm food"
-        assert app.prompt.value == "chicken caesar salad =610"
+        assert app.prompt.value == "chicken caesar salad =610 @2026-09-05/12:00"
         await pilot.press("enter")
         await pilot.pause()
         today = app.today()
@@ -119,6 +122,99 @@ async def test_an_estimate_can_be_corrected_before_accepting(
         780,
         "estimated",
     )
+
+
+@pytest.mark.parametrize(
+    "key,typed,table,stamp",
+    [
+        ("f", "pizza and salad @09-04/19:30", "food", "ate_at"),
+        ("a", "gym 1h @09-04/19:30", "activity", "logged_at"),
+    ],
+)
+async def test_a_backdated_line_keeps_its_date_through_the_estimate(
+    make_app, db, type_into, monkeypatch, key, typed, table, stamp
+):
+    """A meal or a session you type with an `@` must land on the day you named.
+
+    The confirm prompt is re-parsed through the same grammar that produced it — that is the
+    whole point of offering a line rather than a yes/no — and the grammar resolves an absent
+    `@` to *now*. So a prefill of `description =kcal` threw the typed date away between the
+    two prompts: `f pizza and salad @09-04/19:30` was written to today at the current clock,
+    and the toast then quoted a burn figure for the wrong day. Two days' net figures were
+    wrong at once, since the meal was added to one and missing from the other, and nothing
+    on screen contradicted either.
+
+    The failure paths never had this: `_write_activity` writes the parsed row directly, so
+    the same keypress dated the row correctly when Claude was down and silently moved it
+    when Claude answered. That is what kept it hidden, and it is why both surfaces are
+    parametrized here rather than one being trusted to stay in step with the other.
+    """
+    from daylogs.estimate import Effort
+
+    async def fake_from_text(**kw):
+        return Estimate(description="pizza and salad", kcal=800)
+
+    async def fake_factor(**kw):
+        return Effort(factor=1.45)
+
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", fake_from_text)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.factor_from_text", fake_factor)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 5, 12, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press(key)
+        await type_into(pilot, typed)
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label.startswith("confirm "), app.prompt.label
+        offered = app.prompt.value
+        await pilot.press("enter")
+        await pilot.pause()
+        tz = app.cfg.timezone
+    rows = list(db.execute(f"SELECT * FROM {table}"))
+    assert len(rows) == 1
+    assert rows[0]["date"] == "2026-09-04", (
+        f"the row landed on {rows[0]['date']}, not the day that was typed"
+    )
+    assert hhmm(rows[0][stamp], tz) == "19:30", (
+        f"the typed clock time was replaced by now's: {hhmm(rows[0][stamp], tz)}"
+    )
+    assert "@2026-09-04/19:30" in offered, (
+        f"the confirm line does not say which day it will write to: {offered!r}"
+    )
+
+
+async def test_a_photo_estimate_still_lands_on_today(make_app, db, tmp_path, monkeypatch):
+    """`_offer`'s `when` is optional for exactly this path.
+
+    A photo carries no typed line, so there is nothing to preserve and the grammar's "an
+    absent `@` means now" is the right answer. Pinned because the obvious fix for the typed
+    path — have `_offer` always emit a date — would put a fabricated timestamp on a row
+    nobody dated, and on a confirm line it reads as a claim about when you ate.
+    """
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
+    monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
+
+    async def fake_from_image(**kw):
+        return Estimate(description="ribeye + eggs", kcal=910)
+
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", fake_from_image)
+    app = make_app(now=lambda: dt.datetime(2026, 9, 5, 12, 0))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await go_body(pilot, app)
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.pause()
+        offered = app.prompt.value
+        await pilot.press("enter")
+        await pilot.pause()
+        today = app.today()
+    assert "@" not in offered, f"the photo confirm line invented a date: {offered!r}"
+    rows = list_food(db, date=today)
+    assert len(rows) == 1 and rows[0]["kcal"] == 910
 
 
 async def test_estimate_failure_surfaces_and_logs_nothing(

@@ -116,6 +116,63 @@ def test_sort_fields_are_the_declared_three():
     assert SORT_FIELDS == ("date", "amount", "category")
 
 
+# ── reveal: a write brings the window to the row ─────────────────────────
+def test_reveal_pulls_the_span_back_for_a_backdated_row():
+    """A backdated write has to pull the span's right edge *back*, not just forward.
+
+    The Money tab did `anchor = max(anchor, r.date)` under a comment claiming the move put
+    the new row "inside whatever horizon is active". Under the default MTD horizon, logging
+    `40.00 groceries !grocery @2026-08-30` on Sept 5 left the anchor on Sept 5, so the span
+    stayed 2026-09-01..2026-09-05: `query_expenses` never listed the row, the header total
+    omitted it, and the toast quoted the category's spend "this range" without the amount
+    just written. Half a transition is worse than none — it looked deliberate.
+    """
+    v = V(anchor="2026-09-05")
+    v.reveal("2026-08-30")
+    assert v.anchor == "2026-08-30"
+    assert (v.span().start, v.span().end) == ("2026-08-01", "2026-08-30")
+
+
+def test_reveal_still_pulls_the_edge_forward_for_a_future_dated_row():
+    """The half that already worked, kept: `reveal` generalises `max`, it does not replace
+    it with the opposite mistake."""
+    v = V(anchor="2026-09-05")
+    v.reveal("2026-09-20")
+    assert v.anchor == "2026-09-20"
+
+
+@pytest.mark.parametrize("horizon", HORIZONS)
+def test_reveal_puts_the_date_inside_the_span_for_every_horizon(horizon):
+    """`anchor = date` is sufficient because every horizon resolves to a span *ending* on
+    the anchor, with `start <= end` or no start at all. That is the property the whole fix
+    rests on, so it is pinned across HORIZONS rather than spot-checked on MTD: a new
+    horizon whose span did not end on its anchor would strand rows again, silently.
+    """
+    for date in ("2026-08-30", "2026-09-05", "2026-09-20"):
+        v = V(anchor="2026-09-05", horizon=horizon)
+        v.reveal(date)
+        span = v.span()
+        assert (span.start is None or span.start <= date) and date <= span.end, span
+
+
+def test_reveal_leaves_a_window_that_already_holds_the_row_alone():
+    """Only move when the row is really outside. On YTD an August row is already on screen,
+    and `anchor = date` unconditionally — what Body does with `viewing_date` — would narrow
+    the view to August and hide September for no reason.
+    """
+    v = V(anchor="2026-09-05", horizon="YTD")
+    v.reveal("2026-08-30")
+    assert v.anchor == "2026-09-05"
+
+
+def test_reveal_is_a_no_op_below_an_unbounded_span():
+    """`all` has no left edge, so nothing before the anchor is ever outside it — and the
+    `span.start is not None` guard is why this does not compare a date to None."""
+    v = V(anchor="2026-09-05", horizon="all")
+    v.reveal("2024-01-02")
+    assert v.anchor == "2026-09-05"
+
+
 # ── jump / goto ──────────────────────────────────────────────────────────
 def test_jump_to_resets_the_anchor_and_clears_narrowing():
     v = V(anchor="2026-03-02", filter_text="coffee", filter_category="grocery",
