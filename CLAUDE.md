@@ -379,6 +379,26 @@ appended prose where it was convenient rather than editing the map.
   widget only decides when to call it.
 - **A prompt's sigils are data on its `Hint`.** Vocabularies resolve at call time
   because `config.toml` can add categories, so a frozen literal would go stale.
+- **A prompt that exists to correct a row must arm that row before it opens.** `fix
+  category` is the only one, and it did not: it re-enters `_submit_expense`, which asks
+  `_take_editing("expense")` for a row id, and `_editing` was only ever set by the
+  `enter`-on-a-row path — so the id came back None and the "fix" **INSERTed a second
+  expense**. One 12.40 lunch became 24.80 booked, and the duplicate `other` row sits on a
+  pane the app does not open on, so the month total, the budget delta, the burn bar and the
+  Day tab's MONEY panel were all wrong with nothing on screen disagreeing. `u` could not
+  reach it either, because an add pushes no pre-image. `money_tab.py` now arms
+  `("expense", new_id)` before `prompt.open`, which makes the refile an edit like any
+  other. Escaping still leaves the row filed under `other`, because `cancel_editing`
+  clears the slot — record-now-classify-later is the point of the fallback and survives.
+  It shipped for four versions because
+  `test_fixing_the_category_does_not_loop_forever` asserted `["other", "restaurant"]`: a
+  test named for the re-prompt loop, freezing the duplicate as expected behaviour. Its
+  hint was wrong in the same direction — example `restaurant`, which `parse_expense`
+  rejects outright, and `sigils=("",)`, so the completion offered a bare word that lands
+  in the *description* and falls back to `other` a second time. `fix category` was in
+  `test_hints.py`'s `NO_PARSER` as "a bare category", which is exactly the lie that file
+  already records about `profile`, and it is what left an impossible example unchecked.
+  A correcting prompt's grammar is the grammar of the thing it corrects.
 - **An edit line carries the columns its table displays, plus expense's write-only
   note, minus four read-only columns named below.** What you can see is what you can
   edit. Columns with no visible representation stay out of reach entirely — `created_at`

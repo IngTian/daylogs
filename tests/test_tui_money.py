@@ -44,7 +44,19 @@ async def test_e_without_a_category_writes_other_and_reopens_for_correction(
     assert all_expenses(db)[0]["category"] == "other"
 
 
-async def test_fixing_the_category_does_not_loop_forever(make_app, db, type_into):
+async def test_fixing_the_category_refiles_the_row_instead_of_booking_a_second_one(
+    make_app, db, type_into
+):
+    """One lunch is one row. This asserted `["other", "restaurant"]` for four versions —
+    the duplicate, frozen as expected behaviour by a test named for the re-prompt loop.
+
+    `fix category` routes to `_submit_expense(refiling=True)`, which calls
+    `_take_editing("expense")`; nothing armed `_editing`, because the only assignment was
+    the `enter`-on-a-row path, so `row_id` was None and the "fix" INSERTed. 12.40 spent
+    became 24.80 booked, across a stale `other` row that the default categories pane does
+    not even show, and `u` could not help because an add pushes no pre-image. That is the
+    one question the Money tab exists to answer, answered wrong.
+    """
     app = make_app()
     async with app.run_test() as pilot:
         await go_money(pilot, app)
@@ -55,9 +67,60 @@ async def test_fixing_the_category_does_not_loop_forever(make_app, db, type_into
         app.prompt.value = "12.40 lunch !restaurant"
         await pilot.press("enter")
         await pilot.pause()
-        assert app.prompt.is_open is False
-    cats = sorted(r["category"] for r in all_expenses(db))
-    assert cats == ["other", "restaurant"]
+        assert app.prompt.is_open is False, "the re-prompt looped"
+    rows = all_expenses(db)
+    assert [r["category"] for r in rows] == ["restaurant"], (
+        f"the refile booked a second expense: {[(r['amount'], r['category']) for r in rows]}"
+    )
+    assert sum(r["amount"] for r in rows) == 12.40, "the month total double-counts the lunch"
+
+
+async def test_a_refiled_expense_is_undoable(make_app, db, type_into):
+    """The refile is an edit now, so it rides the undo stack like every other edit — which
+    an INSERT never did, leaving the duplicate unreachable by `u`."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = "12.40 lunch !restaurant"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert [r["category"] for r in all_expenses(db)] == ["restaurant"]
+        await pilot.press("u")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert [r["category"] for r in rows] == ["other"], "undo did not put the row back"
+    assert len(rows) == 1, "undo left a duplicate behind"
+
+
+async def test_escaping_the_fix_category_prompt_leaves_the_row_filed_under_other(
+    make_app, db, type_into
+):
+    """Record now, classify later is the point of the fallback: escaping must keep the row,
+    not roll the write back. `cancel_editing` clears the armed slot, so the next `e` is a
+    fresh entry rather than an edit of this row."""
+    app = make_app()
+    async with app.run_test() as pilot:
+        await go_money(pilot, app)
+        await pilot.press("e")
+        await type_into(pilot, "12.40 lunch")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert [r["category"] for r in all_expenses(db)] == ["other"]
+        await pilot.press("e")
+        await type_into(pilot, "5.00 coffee !restaurant")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert sorted(r["category"] for r in rows) == ["other", "restaurant"], (
+        f"the abandoned refile swallowed the next entry: "
+        f"{[(r['amount'], r['category']) for r in rows]}"
+    )
 
 
 async def test_e_rejects_a_missing_amount_without_writing(make_app, db, type_into):

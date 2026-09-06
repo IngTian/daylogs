@@ -105,9 +105,9 @@ HINTS: tuple[Hint, ...] = (
     ),
     Hint(
         "fix category",
-        "restaurant",
-        "a category — it went to other until you name one",
-        sigils=("",),
+        "12.40 lunch !restaurant",
+        "it went to other — the same line, now with a !category",
+        sigils=("!",),
     ),
     Hint("filter", "coffee", "text to match in a description · esc clears it"),
     # ── app ──────────────────────────────────────────────────────────────
