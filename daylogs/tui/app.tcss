@@ -152,8 +152,14 @@ HelpScreen {
     align: center middle;
 }
 
+/* `1fr` with a cap, not a fixed 92. A fixed width is still laid out at 92 on a
+   60-column terminal, so the right-hand column sat at x=46..89 and everything past
+   column 60 was clipped away with nothing on screen to say so — half the keys, on the
+   one screen the README promises cannot be out of date. `?` is in the footer at every
+   width, so the overlay has to survive every width. */
 #help-body {
-    width: 92;
+    width: 1fr;
+    max-width: 92;
     max-height: 85%;
     background: $surface;
     border: round $accent;
@@ -162,6 +168,18 @@ HelpScreen {
 
 #help-columns {
     height: auto;
+}
+
+/* Same rule as .panel-row above, for the same reason. The widest line in a key list is
+   ~32 cells and the box spends 6 on its border and padding, so two side by side need
+   ~72; under 100 they stack and the VerticalScroll takes over. A truncated label cannot
+   be read at all, while a scrolled one is only further down. */
+.-narrow #help-columns {
+    layout: vertical;
+}
+
+.-narrow .help-col {
+    width: 100%;
 }
 
 .help-col {

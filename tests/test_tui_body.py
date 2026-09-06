@@ -2,7 +2,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pytest
-from helpers import go_body, go_day
+from helpers import assert_armed, go_body, go_day
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
 from daylogs.estimate import Estimate
@@ -801,14 +801,7 @@ async def test_escaping_a_weight_edit_does_not_corrupt_next_entry(make_app, db, 
         await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#body")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "body")
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("w")
@@ -839,14 +832,7 @@ async def test_escaping_a_food_edit_does_not_corrupt_next_entry(make_app, db, ty
         await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#body")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "body")
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("f")
@@ -873,14 +859,7 @@ async def test_empty_submit_on_weight_edit_does_not_corrupt_next_entry(make_app,
         await pilot.press("shift+tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#body")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "body")
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -906,14 +885,7 @@ async def test_empty_submit_on_food_edit_does_not_corrupt_next_entry(make_app, d
         await go_body(pilot, app)
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#body")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "body")
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -1055,24 +1027,13 @@ def _popup(app) -> str:
 
     Deliberately the rendered widget and not the job dict behind it: the popup owns a
     timer and repaints itself, so asserting on the registry passes while the screen
-    stays silent — the same trap `_footer` documents one function down.
+    stays silent. Asserting on the method rather than the paint is how the first version
+    of this shipped half-dead.
     """
     from daylogs.tui.progress import WorkPopup
 
     w = app.query_one(WorkPopup)
     return str(w.render()) if w.display else ""
-
-
-def _footer(app) -> str:
-    """The footer's PAINTED text.
-
-    Deliberately not `status_hint()`: the footer is a sibling widget rewritten only
-    by App.refresh_footer(), so asserting on the method passes while the screen
-    stays silent. That is exactly how the first version of this shipped half-dead.
-    """
-    from daylogs.tui.footer import KeyFooter
-
-    return str(app.query_one(KeyFooter).render())
 
 
 async def test_the_popup_shows_estimating_while_the_call_is_in_flight(
@@ -1144,16 +1105,9 @@ async def test_the_popup_is_hidden_again_and_not_merely_blank(
     that call is gone; what has to be checked instead is that it goes *away* rather than
     staying as an empty bordered box taking two rows off the screen forever.
     """
-    import asyncio
 
-    started, release = asyncio.Event(), asyncio.Event()
-
-    async def gated(**kw):
-        started.set()
-        await release.wait()
-        return Estimate(description="gated", kcal=500)
-
-    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", gated)
+    runner, started, release = _gate()
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", runner)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
         await go_body(pilot, app)
@@ -1193,7 +1147,6 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
     fixes the `f` path, which had the same defect through the prompt and was recorded here
     as pre-existing; see the test below.
     """
-    import asyncio
     import datetime as dt
 
     from textual.widgets import DataTable
@@ -1207,14 +1160,8 @@ async def test_a_photo_estimate_does_not_move_the_selected_food_row(
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
     monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
-    started, release = asyncio.Event(), asyncio.Event()
-
-    async def gated(**kw):
-        started.set()
-        await release.wait()
-        return Estimate(description="ribeye", kcal=910)
-
-    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
+    runner, started, release = _gate()
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", runner)
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
@@ -1524,21 +1471,14 @@ async def test_a_second_estimate_cancels_the_first_without_clearing_the_indicato
 async def test_the_photo_estimate_shows_the_same_indicator(
     make_app, db, tmp_path, monkeypatch
 ):
-    import asyncio
 
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
     monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
-    started, release = asyncio.Event(), asyncio.Event()
-
-    async def gated(**kw):
-        started.set()
-        await release.wait()
-        return Estimate(description="ribeye", kcal=910)
-
-    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
+    runner, started, release = _gate()
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", runner)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1559,17 +1499,11 @@ async def test_no_three_second_toast_is_fired_for_an_estimate(
 ):
     """The defect itself: a toast whose lifetime is unrelated to the work. The
     indicator replaces it, so firing both would be redundant noise."""
-    import asyncio
 
-    started, release = asyncio.Event(), asyncio.Event()
+    runner, started, release = _gate()
     toasts = []
 
-    async def gated(**kw):
-        started.set()
-        await release.wait()
-        return Estimate(description="x", kcal=1)
-
-    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", runner)
     app = make_app()
     async with app.run_test() as pilot:
         await go_body(pilot, app)
@@ -1592,22 +1526,16 @@ async def test_no_three_second_toast_is_fired_for_a_photo_estimate(
     """The photo path had its own copy of the defect ("estimating from photo…",
     also timeout=3). Pinned separately because intercepting only the text path
     leaves this one free to come back."""
-    import asyncio
 
     inbox = tmp_path / "inbox"
     inbox.mkdir()
     (inbox / "meal.jpg").write_bytes(b"\xff\xd8\xff")
     monkeypatch.setattr("daylogs.tui.body_tab.photo.clipboard_image", lambda d: None)
 
-    started, release = asyncio.Event(), asyncio.Event()
+    runner, started, release = _gate()
     toasts = []
 
-    async def gated(**kw):
-        started.set()
-        await release.wait()
-        return Estimate(description="ribeye", kcal=910)
-
-    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", gated)
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_image", runner)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
         await go_body(pilot, app)

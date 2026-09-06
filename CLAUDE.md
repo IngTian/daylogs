@@ -238,6 +238,17 @@ appended prose where it was convenient rather than editing the map.
   "0.00 budget / 1,234.00 over" is true, useless, and reads as stale data. It says
   what `r` would do instead. `money.pending_roll` must agree with
   `roll_month_budgets` or the header promises what the key won't deliver.
+- **No widget carries a width the terminal has to be wide enough for.** The `?` overlay
+  was `width: 92`, and a fixed width is still *laid out* at 92 on a narrower screen rather
+  than shrinking: at 60 columns its right-hand column sat at x=46..89, so half the keys
+  were clipped off the edge with nothing on screen to say so — on the one screen the
+  README promises cannot be out of date, while the footer advertises `?` at every width.
+  It is `width: 1fr; max-width: 92` now, and under `-narrow` the two key lists stack
+  exactly as `.panel-row` does and for the same reason: a 32-cell line does not fit in
+  half of a 60-column box, and a truncated label cannot be read at all while a scrolled
+  one is only further down. Geometry is what the tests assert, because a clipped widget
+  still reports its full content — which is why the tests reading `.content` sat beside
+  this defect for a release.
 - **Panel content sizes itself from the panel**, via `content_size.width`. A
   hardcoded width wider than the panel wraps every row and doubles its height.
   `content_size` is 0 during `on_mount`, so the app re-renders once via
@@ -310,9 +321,13 @@ appended prose where it was convenient rather than editing the map.
   when hidden. `summary.generate` takes `on_attempt` because each retry gets the *whole*
   timeout, so the clock has to restart per attempt or the second attempt reads "200s / 120s"
   — larger than the budget it is shown against.
-- **Animations stay off** (`self.animation_level = "none"`). Measured: 383 ms →
-  127 ms per tab switch. It is an *instance* attribute in textual 8.2; a class
-  attribute named `ANIMATION_LEVEL` is a silent no-op.
+- **Animations stay off** (`self.animation_level = "none"`), because off is never
+  slower and nothing here is worth animating. This used to cite "383 ms → 127 ms per tab
+  switch" as measured fact while `test_tui_perf.py` said 106 and `app.py` said both in one
+  sentence; the figure is now stated only in `test_tui_perf.py`, next to what that harness
+  can actually re-derive. Don't restore a number here that no test can check. It is an
+  *instance* attribute in textual 8.2; a class attribute named `ANIMATION_LEVEL` is a
+  silent no-op.
 - **The data layer is fast; don't "optimise" it.** `summarize_month` over a
   few hundred expenses is 0.15 ms and a full tab reload is under 0.6 ms. If
   something feels slow, measure before touching queries — last time the entire
@@ -365,9 +380,10 @@ appended prose where it was convenient rather than editing the map.
 - **A prompt's sigils are data on its `Hint`.** Vocabularies resolve at call time
   because `config.toml` can add categories, so a frozen literal would go stale.
 - **An edit line carries the columns its table displays, plus expense's write-only
-  note.** What you can see is what you can edit. Columns with no visible representation
-  stay out of reach: food's `source` is provenance the digest reads, and `created_at` must
-  survive. `measured_at` used to be on that list — the weight table showed only a date, so
+  note, minus four read-only columns named below.** What you can see is what you can
+  edit. Columns with no visible representation stay out of reach entirely — `created_at`
+  must survive an edit, so it is in neither the table nor the
+  line. `measured_at` used to be on that list — the weight table showed only a date, so
   a day weighed twice was two identical-looking rows while the invisible column decided
   which one the trend used and which the headline showed. It is a `time` column now, and
   `render_weigh` emits `@date/HH:MM` so it can be edited. The recorded objection was that
@@ -391,12 +407,20 @@ appended prose where it was convenient rather than editing the map.
   round-tripped through the edit prefill, displayed nowhere). An edit writes only
   the fields it parsed. The submitted line is authoritative: drop the note words
   and the note is cleared; submit unchanged and the note survives.
-  The one displayed column deliberately **not** in an edit line is recurring's `on`,
-  which `o` toggles instead: a boolean's entire edit is a toggle, and as a field every
-  recurring line would carry a token that reads "on" almost always. It stayed
-  unreachable for four versions — the column rendered `yes` for every row forever while
-  `roll_month_budgets` filtered on a flag nothing could set — so the exception is
-  written down here rather than left to be rediscovered as a bug.
+  **Four** displayed columns are deliberately not in an edit line, each for its own
+  reason, and they are the whole list — this said "the one displayed column" while naming
+  recurring's `on`, which is how a reader was left to rediscover the other three.
+  Recurring's `on` is toggled by `o` instead: a boolean's entire edit is a toggle, and as
+  a field every recurring line would carry a token that reads "on" almost always. It
+  stayed unreachable for four versions — the column rendered `yes` for every row forever
+  while `roll_month_budgets` filtered on a flag nothing could set — so the exception is
+  written down here rather than left to be rediscovered as a bug. Recurring's `monthly` is
+  derived from cost and cycle and recomputed whenever either moves, so a field for it
+  would be a second, editable answer to a question already answered. And food's and
+  activity's `src` (`lab`/`est`) is provenance: it says whether the number was typed or
+  came out of a `claude -p` estimate, which is a fact about how the row came to exist
+  rather than a property of the day, and the digest reads it. An edit may fix the
+  description or the number; it may not restate where they came from.
 - **`update_recurring` is keyed by id, and nothing may edit through
   `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
   nothing and INSERTs a second row; both then look active and the next

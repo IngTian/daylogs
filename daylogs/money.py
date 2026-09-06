@@ -428,14 +428,14 @@ def month_span(month: str) -> Span:
     return Span(horizon="MTD", start=f"{month}-01", end=f"{month}-{last:02d}")
 
 
-def summarize_month(conn, *, month: str, today: str | None = None, cfg=None) -> MonthSummary:
+def summarize_month(conn, *, month: str, today: str | None = None) -> MonthSummary:
     """One whole calendar month. A thin wrapper over summarize_span, so the tests
     written against this signature keep guarding the arithmetic unchanged."""
-    return summarize_span(conn, span=month_span(month), today=today, cfg=cfg)
+    return summarize_span(conn, span=month_span(month), today=today)
 
 
 def summarize_span(
-    conn, *, span: Span | None, today: str | None = None, cfg=None
+    conn, *, span: Span | None, today: str | None = None
 ) -> MonthSummary:
     """Per-category budget vs spent over an arbitrary date span, plus totals, the
     top five spends, and a six-month per-category history.

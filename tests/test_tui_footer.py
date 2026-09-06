@@ -211,6 +211,61 @@ async def test_the_help_overlay_shows_both_horizon_keys(make_app):
         assert row in text
 
 
+async def test_the_help_overlay_fits_the_terminal_it_is_opened_in(make_app):
+    """`?` is in the footer at every width, so the overlay has to be readable at every
+    width. `#help-body` was a hardcoded `width: 92`, and a fixed width is still laid out
+    at 92 on a narrower screen: at 60 columns the right-hand column sat at x=46..89, so
+    everything past column 60 — half the keys — was clipped away with nothing on screen to
+    say so, and at 80 it lost ten cells, which truncates labels mid-word.
+
+    Asserted on geometry, and on the column being wide enough for its own longest line.
+    A clipped widget still reports its full content, which is exactly why the tests that
+    read `.content` sat next to this for a release without seeing it.
+    """
+    for width in (40, 60, 80, 120, 200):
+        app = make_app()
+        async with app.run_test(size=(width, 44)) as pilot:
+            await pilot.press("question_mark")
+            await pilot.pause()
+            body = app.screen.query_one("#help-body")
+            assert body.outer_size.width <= width, (
+                f"the overlay is {body.outer_size.width} cells wide in a {width}-column "
+                f"terminal, so {body.outer_size.width - width} cells of keys are clipped"
+            )
+            for col in app.screen.query(".help-col"):
+                assert col.region.right <= width, (
+                    f"a key column runs off a {width}-column screen: {col.region}"
+                )
+                longest = max(
+                    (len(ln) for ln in plain(str(col.content)).splitlines()), default=0
+                )
+                assert col.region.width >= longest, (
+                    f"labels are truncated at {width} columns: the column is "
+                    f"{col.region.width} cells for a {longest}-cell line"
+                )
+
+
+async def test_the_help_overlay_stacks_its_columns_when_two_will_not_fit(make_app):
+    """The other half of the same fix, and the reason capping the width is not enough on
+    its own: at 60 columns two key lists cannot both hold a 32-cell line, so they stack
+    and the overlay scrolls. Above the breakpoint the two-column layout stands, which is
+    what keeps the write keys off the fold on a 40-row terminal.
+
+    Read off the x offsets: stacked means both columns share one, side by side means two.
+    """
+    offsets = {}
+    for width in (60, 120):
+        app = make_app()
+        async with app.run_test(size=(width, 44)) as pilot:
+            await pilot.press("question_mark")
+            await pilot.pause()
+            offsets[width] = sorted({c.region.x for c in app.screen.query(".help-col")})
+    assert len(offsets[60]) == 1, f"the columns did not stack at 60 cells: {offsets[60]}"
+    assert len(offsets[120]) == 2, (
+        f"the columns stopped sitting side by side at 120 cells: {offsets[120]}"
+    )
+
+
 async def test_help_groups_keys_under_headings(make_app):
     app = make_app()
     async with app.run_test() as pilot:

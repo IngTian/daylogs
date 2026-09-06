@@ -189,15 +189,6 @@ class BodyTab(PanelTab):
         head += f"   ·  {span.label}"
         self.query_one("#weight-head", Static).update(head)
 
-        # Plot against real time, not point index. Two readings a day apart were
-        # being spread across a month-wide panel as a smooth climb; at their true
-        # positions they sit together at the right edge with the unweighed weeks
-        # visibly empty, which is the honest picture.
-        #
-        # How many points depends on how wide the window is. Over a month the
-        # per-day collapse keeps the trend readable, because weight swings a kilo
-        # inside a day. Over one to three days that collapse hides exactly what you
-        # zoomed in for, so every reading is plotted.
         self.query_one("#trend-title", Static).update(
             "TREND   " + view_row(_CHARTS, self.chart_mode)
         )
@@ -214,14 +205,14 @@ class BodyTab(PanelTab):
         burn = body.day_tdee(conn, cfg, date=date)
         self.query_one("#energy-body", Static).update(
             self._energy_panel(
-                conn, cfg, date=date, kcal=kcal, bmr=bmr,
+                conn, cfg, kcal=kcal, bmr=bmr,
                 burn=burn, factor=factor, origin=origin, span=span,
             )
         )
 
         # Filled before the header is composed, so the weight header can state the
         # count the query actually returned rather than a number it hopes is right.
-        self._fill_table(date, span)
+        self._fill_table(span)
 
         # The header describes the table directly beneath it, so it follows table_mode —
         # it used to read "FOOD … kcal in / BMR → net" even while the table listed
@@ -358,7 +349,7 @@ class BodyTab(PanelTab):
         return head
 
     def _energy_panel(
-        self, conn, cfg, *, date, kcal, bmr, burn, factor, origin, span
+        self, conn, cfg, *, kcal, bmr, burn, factor, origin, span
     ) -> str:
         """Intake against maintenance for the day, then the same over the horizon.
 
@@ -435,13 +426,14 @@ class BodyTab(PanelTab):
             )
         return "\n".join(lines)
 
-    def _fill_table(self, date: str, span) -> None:
+    def _fill_table(self, span) -> None:
         """All three tables over the tab's one window.
 
-        `date` is no longer what any of them filter by. `+`/`-` used to move the chart and
-        the weight table and do nothing at all to the other two — one row at `1d` and the
-        same one row at `all` — while the chart above the food table went on plotting
-        weight. `1d` reproduces the old per-day view exactly, because `horizon.resolve`
+        The window is the only thing they filter by — the viewed date reaches them solely as
+        the span's right-hand edge, which is why this takes no date. `+`/`-` used to move
+        the chart and the weight table and do nothing at all to the other two — one row at
+        `1d` and the same one row at `all` — while the chart above the food table went on
+        plotting weight. `1d` reproduces the old per-day view exactly, because `horizon.resolve`
         gives it `start == end == the anchor`.
 
         Every row carries its date as well as its clock time: over a window, two `08:00`

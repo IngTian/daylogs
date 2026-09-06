@@ -1,6 +1,6 @@
 import datetime as dt
 
-from helpers import all_expenses, go_money
+from helpers import all_expenses, assert_armed, go_money
 
 from daylogs.money import (
     add_expense,
@@ -643,14 +643,7 @@ async def test_escaping_an_expense_edit_does_not_corrupt_next_entry(make_app, db
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("e")
@@ -674,14 +667,7 @@ async def test_escaping_a_recurring_edit_does_not_corrupt_next_entry(make_app, d
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         await pilot.press("escape")
         await pilot.pause()
         await pilot.press("s")
@@ -710,14 +696,7 @@ async def test_empty_submit_on_expense_edit_does_not_corrupt_next_entry(make_app
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -742,14 +721,7 @@ async def test_empty_submit_on_recurring_edit_does_not_corrupt_next_entry(make_a
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         app.prompt.value = ""
         await pilot.press("enter")
         await pilot.pause()
@@ -780,14 +752,7 @@ async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         app.prompt.value = ""
         await type_into(pilot, "12.00 lunch !restaurant @2026-08-28")
         await pilot.press("enter")
@@ -815,14 +780,7 @@ async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app
         await pilot.press("tab")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.query_one("#money")._editing is not None, (
-            # `prompt.is_open` is not enough: `key_activate` opens the prompt
-            # whether or not it armed the row, so a broken arming path would sail
-            # past it and this test would pass by doing nothing. `_editing` is the
-            # state whose lifecycle the test is about, and what `cancel_editing`
-            # clears.
-            "no edit was armed, so this test proves nothing"
-        )
+        assert_armed(app, "money")
         # The prefill is "12.00 lunch !restaurant @2026-08-28 ~receipt in wallet". Submit unchanged.
         await pilot.press("enter")
         await pilot.pause()

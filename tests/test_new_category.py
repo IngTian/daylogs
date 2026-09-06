@@ -172,7 +172,7 @@ import datetime as dt  # noqa: E402
 
 from helpers import all_expenses, go_money  # noqa: E402
 
-from daylogs.money import add_expense, list_budget, upsert_budget  # noqa: E402
+from daylogs.money import add_expense, list_budget, list_recurring, upsert_budget  # noqa: E402
 
 NOW = dt.datetime(2026, 8, 28, 9, 0)
 
@@ -199,6 +199,51 @@ async def test_n_adds_a_category_and_it_is_usable_on_the_next_keystroke(
     assert tomllib.loads((tmp_path / "config.toml").read_text())["category"] == [
         {"slug": "gym", "display": "Gym & Pool"}
     ]
+
+
+async def test_the_new_category_is_budgetable_with_b_right_away(make_app, db, type_into):
+    """The other half of the flow this file's header describes — `n` adds it, `b` budgets
+    it — and the half that had no test.
+
+    All three write paths validate through `check_category`, which recognises a
+    config-added slug only when it is handed `cfg`. Only the expense path held that
+    forward in place, so removing `cfg=cfg` from the `upsert_budget` call left the whole
+    suite green while `b` rejected every category `n` had just finished creating, and
+    `n`'s own toast points at `b`.
+    """
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("n")
+        await type_into(pilot, "gym Gym & Pool")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("b")
+        await type_into(pilot, "80 Gym !gym")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open is False, "the budget line was rejected and reopened"
+    rows = list_budget(db, month="2026-08")
+    assert [(r["name"], r["category"], r["amount"]) for r in rows] == [("Gym", "gym", 80.0)]
+
+
+async def test_the_new_category_takes_a_subscription_too(make_app, db, type_into):
+    """The third write path, for the same reason. `s` is the one that would have been
+    caught last, because a subscription in a brand-new category is a rarer keystroke than
+    an expense in one — which is exactly why it needs the test rather than the habit."""
+    app = make_app(now=lambda: NOW)
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("n")
+        await type_into(pilot, "gym Gym & Pool")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("s")
+        await type_into(pilot, "50 Climbing !gym #monthly")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open is False, "the subscription line was rejected and reopened"
+    assert [(r["name"], r["category"]) for r in list_recurring(db)] == [("Climbing", "gym")]
 
 
 async def test_the_new_category_toast_names_the_key_and_the_month(make_app, type_into):

@@ -134,7 +134,7 @@ def build_payload(conn, cfg, *, date: str) -> dict:
     # cannot report different maintenance for the same day.
     factor, factor_source = body.resolved_factor(conn, cfg, date=date)
     tdee = body.day_tdee(conn, cfg, date=date)
-    summary = money.summarize_month(conn, month=month, today=date, cfg=cfg)
+    summary = money.summarize_month(conn, month=month, today=date)
 
     payload: dict = {
         "target_date": date,
