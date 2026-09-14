@@ -1167,9 +1167,13 @@ async def test_the_popup_shows_estimating_while_the_call_is_in_flight(
 async def test_the_footer_state_row_stays_the_tab_state_during_an_estimate(
     make_app, db, type_into, monkeypatch
 ):
-    """Row 1 of the footer answers "what am I looking at" — which day, which horizon. It
-    carried "estimating…" too, and that was one signal in two places, both of them on the
-    tab that started the work. The popup is the signal; this stays the state."""
+    """Row 1 of the footer answers "what am I looking at" — which day, which horizon, which
+    sort. It carried "estimating…" too, and that was one signal in two places, both of them
+    on the tab that started the work. The popup is the signal; this stays the state.
+
+    Asserted as the whole string rather than "estimating" being absent, because the absence
+    alone would pass on a row that had stopped saying anything at all.
+    """
     runner, started, release = _gate()
     monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", runner)
     app = make_app()
@@ -1186,7 +1190,10 @@ async def test_the_footer_state_row_stays_the_tab_state_during_an_estimate(
         await pilot.pause()
         after = app.query_one("#body").status_hint()
     assert "estimating" not in mid.lower(), f"the state row duplicates the popup: {mid!r}"
-    assert mid == after == "1m", f"the horizon should be all it says: {mid!r} / {after!r}"
+    expected = "1m    [dim]sort[/] [bold]↓date[/] [dim]kcal[/]"
+    assert mid == after == expected, (
+        f"the row should be the tab's state and nothing else: {mid!r} / {after!r}"
+    )
 
 
 async def test_the_popup_is_hidden_again_and_not_merely_blank(
@@ -3279,3 +3286,66 @@ async def test_an_edit_settles_a_row_whose_date_and_stamp_disagree(make_app, db)
     assert wall(settled, tz).strftime("%H:%M") == "07:05", "the clock time should survive"
     assert again == settled, "a second identical edit moved it again — it is creeping"
     assert second == first, f"the rendered line is not stable: {first!r} -> {second!r}"
+
+
+# ── sorting from the keys ────────────────────────────────────────────────
+async def test_k_sorts_the_food_table_by_kcal_and_again_flips_it(make_app, db):
+    """The idiom Money's `d`/`c`/`k` already use: a different field switches and resets to
+    descending, the same field again flips direction. Asserted through the rendered table,
+    not the attribute, because what the user sees is the row order."""
+    now = lambda: dt.datetime(2026, 9, 4, 20, 0)  # noqa: E731
+    for kc, hh in ((500, 8), (900, 12), (200, 19)):
+        add_food(db, description=f"meal {kc}", kcal=kc, date="2026-09-04",
+                 at=int(dt.datetime(2026, 9, 4, hh, 0).timestamp()), source="labeled")
+    app = make_app(now=now)
+    async with app.run_test(size=(120, 34)) as pilot:
+        body_tab = await go_body(pilot, app)
+        assert body_tab.table_mode == "food"
+
+        def kcals():
+            t = app.query_one("#body-table")
+            return [str(t.get_row(k)[3]) for k in t.rows]
+
+        assert kcals() == ["200", "900", "500"], "the default is newest first"
+        await pilot.press("k")
+        await pilot.pause()
+        assert kcals() == ["900", "500", "200"], "k should sort by kcal, biggest first"
+        await pilot.press("k")
+        await pilot.pause()
+        assert kcals() == ["200", "500", "900"], "the same key again should flip direction"
+        await pilot.press("d")
+        await pilot.pause()
+        assert kcals() == ["200", "900", "500"], "d should go back to date, newest first"
+
+
+async def test_the_state_row_names_the_number_the_table_actually_shows(make_app, db):
+    """`k`'s keymap label has to stay generic — KEYMAP is static and the sub-view is not —
+    so the state row is where the specific word lives: kcal on food, kg on weight, factor
+    on activity. A single label reading "kcal" would be wrong on two tables out of three."""
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        body_tab = await go_body(pilot, app)
+        seen = {}
+        for _ in range(3):
+            seen[body_tab.table_mode] = body_tab.status_hint()
+            await pilot.press("tab")
+            await pilot.pause()
+    assert "kcal" in seen["food"], seen["food"]
+    assert "kg" in seen["weight"], seen["weight"]
+    assert "factor" in seen["activity"], seen["activity"]
+    assert "↓date" in seen["food"], "the active field should be marked with its direction"
+
+
+async def test_the_sort_survives_switching_sub_view(make_app, db):
+    """`tab` keeps the sort, the way Money keeps it across panes — otherwise looking at
+    another table and coming back silently resets what you asked for."""
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        body_tab = await go_body(pilot, app)
+        await pilot.press("k")
+        await pilot.press("k")
+        await pilot.pause()
+        assert (body_tab.sort_field, body_tab.sort_desc) == ("value", False)
+        await pilot.press("tab")
+        await pilot.pause()
+        assert (body_tab.sort_field, body_tab.sort_desc) == ("value", False)

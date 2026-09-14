@@ -138,6 +138,7 @@ figures above them are always today's.
 | `p` | log food from a photo |
 | `a` | log an activity — only for a day that departs from your ordinary one |
 | `c` | cycle the chart: weight → intake → net |
+| `d` `k` | sort by date / by the table's own number — kg, kcal, factor — press again to flip direction |
 | `h` | set height, sex, birthday, ordinary-day level and timezone |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |
@@ -254,8 +255,9 @@ one day, so zooming all the way in is how you ask "what did I eat today":
   2026-09-03  12:30  lunch day 8  656   lab
 ```
 
-Newest day first, and each day reads in the order it happened — so `1d` is exactly the
-day, forwards, the way the digest reads it.
+Newest first all the way down — within a day as well as across days, so the last thing you
+ate is always the top row. The daily read is the other way round, because prose wants
+chronology and a log wants recency.
 
 Each header says the same three things — what you're looking at, the window, and how much
 is in it. The day's own calorie balance is in the ENERGY panel, stated once.

@@ -468,45 +468,115 @@ def test_a_date_only_activity_edit_moves_the_days_factor_with_it(db, tmp_path):
     )
 
 
-def test_a_windowed_day_reads_in_the_order_it_happened(db):
-    """`1d` has to *be* the old per-day view, order included — the claim appears in
-    `_fill_table`, in CLAUDE.md, in the README and in a test name, and only row counts were
-    ever asserted. Measured before the fix: `list_food(date=…)` gave breakfast/lunch/dinner
-    while the window with `start == end` gave dinner/lunch/breakfast, so the screen read a
-    day backwards while the digest read it forwards."""
+def test_the_two_modes_select_the_same_rows_in_opposite_orders(db):
+    """`1d` selects exactly what the per-day view did — and lists it newest-first, because
+    the window is a log and `date=` is prose.
+
+    The window was `stamp ASC` for a while so that a `1d` window matched the digest's order
+    exactly. That equivalence cost more than it bought: the table changed direction halfway
+    down, which reads as a bug when you scroll it. The rows are what have to agree; the
+    order is allowed to differ, and does.
+    """
     for hh, mm, name in ((8, 5, "breakfast"), (12, 40, "lunch"), (19, 20, "dinner")):
         add_food(db, description=name, kcal=500, source="labeled", date="2026-09-04",
                  at=_stamp(2026, 9, 4, hh, mm))
     by_date = [r["description"] for r in list_food(db, date="2026-09-04")]
     windowed = [r["description"] for r in list_food(db, since="2026-09-04", until="2026-09-04")]
-    assert by_date == ["breakfast", "lunch", "dinner"]
-    assert windowed == by_date, "a single-day window reads the day backwards"
+    assert by_date == ["breakfast", "lunch", "dinner"], "the digest reads a day forwards"
+    assert windowed == ["dinner", "lunch", "breakfast"], "the table reads newest first"
+    assert set(windowed) == set(by_date), "the two modes must select the same rows"
 
 
-def test_a_multi_day_window_puts_the_newest_day_first_and_reads_each_forwards(db):
-    """Most recent day at the top, each day in the order it happened. Reverse-chronological
-    all the way down would make every day read backwards; chronological all the way down
-    would bury today under a month of history."""
+def test_a_multi_day_window_is_newest_first_all_the_way_down(db):
+    """One direction for the whole table. Chronological within a day made the list change
+    direction halfway down — today's dinner above today's breakfast is what you expect from
+    a log, and reading a day forwards *underneath* a descending date column does not."""
     for d in ("2026-09-03", "2026-09-04"):
         for hh, name in ((8, "breakfast"), (19, "dinner")):
             add_food(db, description=f"{name} {d[-2:]}", kcal=500, source="labeled", date=d,
                      at=_stamp(2026, int(d[5:7]), int(d[8:]), hh, 0))
     got = [r["description"] for r in list_food(db, since="2026-09-01", until="2026-09-04")]
-    assert got == ["breakfast 04", "dinner 04", "breakfast 03", "dinner 03"], got
+    assert got == ["dinner 04", "breakfast 04", "dinner 03", "breakfast 03"], got
 
 
-def test_a_days_weigh_ins_are_listed_first_reading_first(db):
+def test_a_days_weigh_ins_are_listed_latest_reading_first(db):
     """Same order the food and activity windows use, so the three Body tables agree — and
-    within a day it puts `morning_weight`'s reading on top, which is the one the trend, the
-    7d/30d deltas and the digest all take. `latest_weight` is the headline's and sits below.
-    """
+    within a day it puts `latest_weight`'s reading on top, which is the one the WEIGHT
+    header states. `morning_weight`'s sits below it and is what the trend, the 7d/30d
+    deltas and the digest take."""
     add_weight(db, kg=80.5, date="2026-09-04", at=_stamp(2026, 9, 4, 10, 40))
     add_weight(db, kg=80.0, date="2026-09-04", at=_stamp(2026, 9, 4, 7, 5))
     add_weight(db, kg=81.0, date="2026-09-03", at=_stamp(2026, 9, 3, 7, 30))
     rows = list_weight(db, since="2026-09-01", until="2026-09-04")
     assert [(r["date"], r["kg"]) for r in rows] == [
-        ("2026-09-04", 80.0), ("2026-09-04", 80.5), ("2026-09-03", 81.0),
-    ], "newest day first, each day forwards"
-    assert rows[0]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
-        "the top row of a day should be the reading the trend uses"
+        ("2026-09-04", 80.5), ("2026-09-04", 80.0), ("2026-09-03", 81.0),
+    ], "newest first, within a day as well as across days"
+    assert rows[0]["kg"] == latest_weight(db, on_or_before="2026-09-04")["kg"], (
+        "the top row of a day should be the reading the header states"
     )
+    assert rows[1]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
+        "the trend's reading is still there, one row down"
+    )
+
+
+# ── sorting a window ─────────────────────────────────────────────────────
+def test_value_sort_orders_by_the_tables_own_number(db):
+    """`k` on Body sorts by the one number each table has — kcal here. The date and clock
+    stay as the tiebreak, so rows sharing a number keep a stable order rather than
+    shuffling between reloads."""
+    for kc, hh in ((500, 8), (900, 12), (200, 19)):
+        add_food(db, description=f"meal {kc}", kcal=kc, source="labeled", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, hh, 0))
+    win = dict(since="2026-09-01", until="2026-09-04")
+    assert [r["kcal"] for r in list_food(db, **win, sort="value")] == [900, 500, 200]
+    assert [r["kcal"] for r in list_food(db, **win, sort="value", desc=False)] == [200, 500, 900]
+    # The default is unchanged: date sort, newest first.
+    assert [r["kcal"] for r in list_food(db, **win)] == [200, 900, 500]
+
+
+def test_date_sort_ascending_reads_the_window_forwards(db):
+    """The other direction of the default field — pressing `d` twice. Oldest day first and
+    each day forwards, which is the order the digest reads and the only way to get it in
+    the table."""
+    for d, hh in (("2026-09-03", 8), ("2026-09-04", 8), ("2026-09-04", 19)):
+        add_food(db, description=f"{d} {hh}", kcal=500, source="labeled", date=d,
+                 at=_stamp(2026, 9, int(d[8:]), hh, 0))
+    got = [r["description"] for r in list_food(
+        db, since="2026-09-01", until="2026-09-04", sort="date", desc=False
+    )]
+    assert got == ["2026-09-03 8", "2026-09-04 8", "2026-09-04 19"], got
+
+
+def test_value_sort_applies_to_weight_and_activity_too(db):
+    """One key, three tables: the number is kg on weight and factor on activity. They go
+    through the same `_order_by`, so the sub-views cannot drift apart."""
+    add_weight(db, kg=80.0, date="2026-09-04", at=_stamp(2026, 9, 4, 7, 0))
+    add_weight(db, kg=81.5, date="2026-09-03", at=_stamp(2026, 9, 3, 7, 0))
+    add_activity(db, description="gym", factor=1.6, source="labeled", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 18, 0))
+    add_activity(db, description="walk", factor=1.2, source="labeled", date="2026-09-03",
+                 at=_stamp(2026, 9, 3, 18, 0))
+    win = dict(since="2026-09-01", until="2026-09-04")
+    assert [r["kg"] for r in list_weight(db, **win, sort="value")] == [81.5, 80.0]
+    assert [r["factor"] for r in list_activity(db, **win, sort="value")] == [1.6, 1.2]
+
+
+def test_a_null_factor_sorts_to_the_top_ascending(db):
+    """An inference that never landed has no number, and SQLite puts NULLs first ascending.
+    That is the useful direction rather than a wart: those are the rows worth fixing, and
+    `resolved_factor` silently falls back to the baseline for them."""
+    add_activity(db, description="landed", factor=1.6, source="estimated", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 8, 0))
+    add_activity(db, description="failed", factor=None, source="estimated", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 9, 0))
+    got = [r["description"] for r in list_activity(
+        db, since="2026-09-01", until="2026-09-04", sort="value", desc=False
+    )]
+    assert got[0] == "failed", got
+
+
+def test_an_unknown_sort_is_rejected(db):
+    """The sort name arrives from a keypress, so it is checked; the column names it maps to
+    are literals in `body.py` and never reach SQL from outside."""
+    with pytest.raises(BodyError, match="sort must be one of"):
+        list_food(db, since="2026-09-01", sort="kcal; DROP TABLE food")

@@ -102,6 +102,12 @@ KEYMAP: tuple[Key, ...] = (
     # you are looking at over the window `+`/`-` already control, and the two are
     # independent. Body-scoped, so it does not collide with Money's `c` (by cost).
     Key("c", "chart", "next_chart", "body", "view"),
+    # Same idiom as Money's `d`/`c`/`k`: the same key again flips direction. Two fields,
+    # not three, because each Body table has exactly one number — `by value` is kg on
+    # weight, kcal on food, factor on activity. The label stays generic because KEYMAP is
+    # static and the sub-view is not; the footer's state row names the actual column.
+    Key("d", "by date", "sort_date", "body", "view"),
+    Key("k", "by value", "sort_value", "body", "view"),
     # ── money ────────────────────────────────────────────────────────────
     Key("e", "expense", "expense", "money", "write"),
     Key("b", "budget", "budget", "money", "write"),

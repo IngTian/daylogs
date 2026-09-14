@@ -51,7 +51,8 @@ def add_weight(conn, *, kg: float, date: str, at: int, note: str | None = None) 
 
 
 def list_weight(
-    conn, *, since: str | None = None, until: str | None = None, limit: int = 200
+    conn, *, since: str | None = None, until: str | None = None, limit: int = 200,
+    sort: str = "date", desc: bool = True,
 ) -> list[sqlite3.Row]:
     """Whole rows, newest first, optionally bounded at either end.
 
@@ -68,11 +69,12 @@ def list_weight(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    # Most recent day first, each day read forwards — the same order `_day_or_window`
-    # returns, so the three tables on the Body tab agree. Within a day that puts the
-    # *first* reading on top, which is the one `morning_weight` picks for the trend, the
-    # deltas and the digest; `latest_weight` is the headline's and sits below it.
-    sql += " ORDER BY date DESC, measured_at ASC LIMIT ?"
+    # Newest first throughout — the same order `_day_or_window` returns, so the three
+    # tables on the Body tab agree. Within a day that puts the *latest* reading on top,
+    # which is the one the WEIGHT header states as the headline; `morning_weight`'s reading
+    # sits below it and is what the trend, the deltas and the digest take. `value` sorts
+    # by kg, through the same helper the other two tables use.
+    sql += f" {_order_by(stamp='measured_at', value='kg', sort=sort, desc=desc)} LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
@@ -236,21 +238,47 @@ def add_food(conn, *, description: str, kcal: int, source: str, date: str, at: i
     return int(cur.lastrowid)
 
 
+SORTS = ("date", "value")
+
+
+def _order_by(*, stamp: str, value: str, sort: str, desc: bool) -> str:
+    """A window's ORDER BY. One rule for all three Body tables, so the sub-views agree.
+
+    `date` is day then clock. `value` is the table's own number — kg, kcal, factor — with
+    date and clock kept as the tiebreak, so rows sharing a number stay in a stable and
+    readable order instead of shuffling. Column names are literals from this module and
+    never user input; the sort *name* is checked because it arrives from a keypress.
+
+    On `value` ascending, activity's NULL factors sort to the top — SQLite puts NULLs
+    first — which is the useful direction anyway: those are the inferences that never
+    landed, and they are the rows worth fixing.
+    """
+    if sort not in SORTS:
+        raise BodyError(f"sort must be one of {SORTS}")
+    d = "DESC" if desc else "ASC"
+    if sort == "value":
+        return f"ORDER BY {value} {d}, date DESC, {stamp} DESC"
+    return f"ORDER BY date {d}, {stamp} {d}, id {d}"
+
+
 def _day_or_window(
-    conn, table: str, *, stamp: str, date, since, until, limit
+    conn, table: str, *, stamp: str, value: str, date, since, until, limit,
+    sort: str = "date", desc: bool = True,
 ) -> list[sqlite3.Row]:
-    """A single day in the order it happened, or a window newest-first.
+    """A single day in the order it happened, or a window newest-first throughout.
 
-    One function, two questions, one order: **most recent day first, each day read
-    forwards.** `date=` serves the digest and the Day tab, which read a day out loud and
-    want breakfast before dinner; the window serves the Body table, which is a log you
-    scroll and wants today at the top.
+    One function, two questions, two orders. `date=` serves the digest and the Day tab,
+    which read a day out loud and want breakfast before dinner. The window serves the Body
+    tables, which are a log you scroll: **newest first all the way down**, within a day as
+    well as across days.
 
-    Those two agree at `1d`, which is the point — `_fill_table` claims a single-day window
-    reproduces the per-day view exactly. It did not: the window was reverse-chronological
-    throughout, so a day on screen read dinner-first while the digest read it breakfast
-    first, and only row counts were ever asserted. Descending by date and ascending within
-    it satisfies both, and makes each day's top row the one `morning_weight` picks.
+    The window used to be `date DESC, stamp ASC` — newest day on top, each day then read
+    forwards — so that a `1d` window matched the digest's order exactly. That equivalence
+    was the stated reason, and it turned out to be worth less than it cost: the same table
+    changed direction halfway down, which reads as a bug when you scroll it. Nobody
+    compares the table against the digest row by row; prose wants chronology and a log
+    wants recency, and they are allowed to differ. `1d` still selects exactly the rows the
+    per-day view did, just newest-first like every other horizon.
 
     Both bounds for the window, for the reason `list_weight` documents: with a lower
     bound alone, viewing an older day listed rows that had not happened yet.
@@ -276,7 +304,7 @@ def _day_or_window(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    sql += f" ORDER BY date DESC, {stamp} ASC, id ASC LIMIT ?"
+    sql += f" {_order_by(stamp=stamp, value=value, sort=sort, desc=desc)} LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
@@ -284,10 +312,12 @@ def _day_or_window(
 def list_food(
     conn, *, date: str | None = None, since: str | None = None,
     until: str | None = None, limit: int = 2000,
+    sort: str = "date", desc: bool = True,
 ) -> list[sqlite3.Row]:
-    """A day's meals, or a window's. See `_day_or_window`."""
+    """A day's meals, or a window's. See `_day_or_window`. `value` sorts by kcal."""
     return _day_or_window(
-        conn, "food", stamp="ate_at", date=date, since=since, until=until, limit=limit
+        conn, "food", stamp="ate_at", value="kcal", date=date, since=since, until=until,
+        limit=limit, sort=sort, desc=desc,
     )
 
 
@@ -485,10 +515,14 @@ def delete_activity(conn, id: int) -> dict | None:
 def list_activity(
     conn, *, date: str | None = None, since: str | None = None,
     until: str | None = None, limit: int = 2000,
+    sort: str = "date", desc: bool = True,
 ) -> list[sqlite3.Row]:
-    """A day's activities oldest first, or a window's newest first. See `_day_or_window`."""
+    """A day's activities oldest first, or a window's newest first. See `_day_or_window`.
+
+    `value` sorts by factor."""
     return _day_or_window(
-        conn, "activity", stamp="logged_at", date=date, since=since, until=until, limit=limit
+        conn, "activity", stamp="logged_at", value="factor", date=date, since=since,
+        until=until, limit=limit, sort=sort, desc=desc,
     )
 
 

@@ -182,13 +182,27 @@ appended prose where it was convenient rather than editing the map.
 - **On Body the window governs all three tables, not just the chart.** `+`/`-` moved the
   chart and the weight table and did nothing at all to the food and activity tables — one
   row at `1d` and the same one row at `all` — while the chart above the food table went on
-  plotting weight. Every table now takes `since`/`until` from `span`, and `1d` reproduces
-  the old per-day view exactly, because `horizon.resolve("1d")` gives `start == end == the
-  anchor` and labels it with the day. `body.list_food`/`list_activity` keep a `date=` mode
+  plotting weight. Every table now takes `since`/`until` from `span`, and `1d` selects
+  exactly the rows the old per-day view did, because `horizon.resolve("1d")` gives
+  `start == end == the anchor` and labels it with the day. `body.list_food`/`list_activity` keep a `date=` mode
   for `summary.build_payload` and the Day tab, which read a day out loud and want it
-  chronological; the window is newest-first, like `list_weight`. Asking for both raises
+  chronological; the window is newest-first *throughout*, within a day as well as across
+  days, because it is a log you scroll and the last thing you ate belongs on top. It was
+  `stamp ASC` within a day for a while so `1d` matched the digest's order — an equivalence
+  nobody checks row by row, against a table that visibly changed direction halfway down. Asking for both raises
   rather than resolving — two questions with two orders, and picking one silently would
   make a call site's intent unreadable.
+- **`d`/`k` sort the Body tables, and `k` is one key because each table has one number.**
+  Same idiom as Money's `d`/`c`/`k`: a different field switches and resets to descending,
+  the same key again flips direction. `k` sorts by kg on weight, kcal on food and factor on
+  activity — so its `KEYMAP` label has to stay generic ("by value"), because the table is
+  static data and the sub-view is not, and the footer's state row names the actual column
+  instead. `body._order_by` builds every window's ORDER BY, so the three sub-views cannot
+  drift apart, and it keeps date and clock as the tiebreak so equal numbers hold a stable
+  order. The sort name is validated because it arrives from a keypress; the column names it
+  maps to are literals in `body.py` and never reach SQL from outside. The `date=` mode takes
+  no sort at all — the digest reads a day forwards, full stop. `tab` keeps the sort, the way
+  Money keeps it across panes.
 - **Three tables over one window means three headers of one shape**: what you are looking
   at, the window, how many rows are in it, and — for food — the intake those rows sum to.
   The day's own energy balance is stated **once**, in the ENERGY panel, which already
