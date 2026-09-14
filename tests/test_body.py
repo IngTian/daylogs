@@ -468,45 +468,52 @@ def test_a_date_only_activity_edit_moves_the_days_factor_with_it(db, tmp_path):
     )
 
 
-def test_a_windowed_day_reads_in_the_order_it_happened(db):
-    """`1d` has to *be* the old per-day view, order included — the claim appears in
-    `_fill_table`, in CLAUDE.md, in the README and in a test name, and only row counts were
-    ever asserted. Measured before the fix: `list_food(date=…)` gave breakfast/lunch/dinner
-    while the window with `start == end` gave dinner/lunch/breakfast, so the screen read a
-    day backwards while the digest read it forwards."""
+def test_the_two_modes_select_the_same_rows_in_opposite_orders(db):
+    """`1d` selects exactly what the per-day view did — and lists it newest-first, because
+    the window is a log and `date=` is prose.
+
+    The window was `stamp ASC` for a while so that a `1d` window matched the digest's order
+    exactly. That equivalence cost more than it bought: the table changed direction halfway
+    down, which reads as a bug when you scroll it. The rows are what have to agree; the
+    order is allowed to differ, and does.
+    """
     for hh, mm, name in ((8, 5, "breakfast"), (12, 40, "lunch"), (19, 20, "dinner")):
         add_food(db, description=name, kcal=500, source="labeled", date="2026-09-04",
                  at=_stamp(2026, 9, 4, hh, mm))
     by_date = [r["description"] for r in list_food(db, date="2026-09-04")]
     windowed = [r["description"] for r in list_food(db, since="2026-09-04", until="2026-09-04")]
-    assert by_date == ["breakfast", "lunch", "dinner"]
-    assert windowed == by_date, "a single-day window reads the day backwards"
+    assert by_date == ["breakfast", "lunch", "dinner"], "the digest reads a day forwards"
+    assert windowed == ["dinner", "lunch", "breakfast"], "the table reads newest first"
+    assert set(windowed) == set(by_date), "the two modes must select the same rows"
 
 
-def test_a_multi_day_window_puts_the_newest_day_first_and_reads_each_forwards(db):
-    """Most recent day at the top, each day in the order it happened. Reverse-chronological
-    all the way down would make every day read backwards; chronological all the way down
-    would bury today under a month of history."""
+def test_a_multi_day_window_is_newest_first_all_the_way_down(db):
+    """One direction for the whole table. Chronological within a day made the list change
+    direction halfway down — today's dinner above today's breakfast is what you expect from
+    a log, and reading a day forwards *underneath* a descending date column does not."""
     for d in ("2026-09-03", "2026-09-04"):
         for hh, name in ((8, "breakfast"), (19, "dinner")):
             add_food(db, description=f"{name} {d[-2:]}", kcal=500, source="labeled", date=d,
                      at=_stamp(2026, int(d[5:7]), int(d[8:]), hh, 0))
     got = [r["description"] for r in list_food(db, since="2026-09-01", until="2026-09-04")]
-    assert got == ["breakfast 04", "dinner 04", "breakfast 03", "dinner 03"], got
+    assert got == ["dinner 04", "breakfast 04", "dinner 03", "breakfast 03"], got
 
 
-def test_a_days_weigh_ins_are_listed_first_reading_first(db):
+def test_a_days_weigh_ins_are_listed_latest_reading_first(db):
     """Same order the food and activity windows use, so the three Body tables agree — and
-    within a day it puts `morning_weight`'s reading on top, which is the one the trend, the
-    7d/30d deltas and the digest all take. `latest_weight` is the headline's and sits below.
-    """
+    within a day it puts `latest_weight`'s reading on top, which is the one the WEIGHT
+    header states. `morning_weight`'s sits below it and is what the trend, the 7d/30d
+    deltas and the digest take."""
     add_weight(db, kg=80.5, date="2026-09-04", at=_stamp(2026, 9, 4, 10, 40))
     add_weight(db, kg=80.0, date="2026-09-04", at=_stamp(2026, 9, 4, 7, 5))
     add_weight(db, kg=81.0, date="2026-09-03", at=_stamp(2026, 9, 3, 7, 30))
     rows = list_weight(db, since="2026-09-01", until="2026-09-04")
     assert [(r["date"], r["kg"]) for r in rows] == [
-        ("2026-09-04", 80.0), ("2026-09-04", 80.5), ("2026-09-03", 81.0),
-    ], "newest day first, each day forwards"
-    assert rows[0]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
-        "the top row of a day should be the reading the trend uses"
+        ("2026-09-04", 80.5), ("2026-09-04", 80.0), ("2026-09-03", 81.0),
+    ], "newest first, within a day as well as across days"
+    assert rows[0]["kg"] == latest_weight(db, on_or_before="2026-09-04")["kg"], (
+        "the top row of a day should be the reading the header states"
+    )
+    assert rows[1]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
+        "the trend's reading is still there, one row down"
     )

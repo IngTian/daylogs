@@ -182,11 +182,14 @@ appended prose where it was convenient rather than editing the map.
 - **On Body the window governs all three tables, not just the chart.** `+`/`-` moved the
   chart and the weight table and did nothing at all to the food and activity tables — one
   row at `1d` and the same one row at `all` — while the chart above the food table went on
-  plotting weight. Every table now takes `since`/`until` from `span`, and `1d` reproduces
-  the old per-day view exactly, because `horizon.resolve("1d")` gives `start == end == the
-  anchor` and labels it with the day. `body.list_food`/`list_activity` keep a `date=` mode
+  plotting weight. Every table now takes `since`/`until` from `span`, and `1d` selects
+  exactly the rows the old per-day view did, because `horizon.resolve("1d")` gives
+  `start == end == the anchor` and labels it with the day. `body.list_food`/`list_activity` keep a `date=` mode
   for `summary.build_payload` and the Day tab, which read a day out loud and want it
-  chronological; the window is newest-first, like `list_weight`. Asking for both raises
+  chronological; the window is newest-first *throughout*, within a day as well as across
+  days, because it is a log you scroll and the last thing you ate belongs on top. It was
+  `stamp ASC` within a day for a while so `1d` matched the digest's order — an equivalence
+  nobody checks row by row, against a table that visibly changed direction halfway down. Asking for both raises
   rather than resolving — two questions with two orders, and picking one silently would
   make a call site's intent unreadable.
 - **Three tables over one window means three headers of one shape**: what you are looking

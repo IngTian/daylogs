@@ -433,8 +433,9 @@ class BodyTab(PanelTab):
         the span's right-hand edge, which is why this takes no date. `+`/`-` used to move
         the chart and the weight table and do nothing at all to the other two — one row at
         `1d` and the same one row at `all` — while the chart above the food table went on
-        plotting weight. `1d` reproduces the old per-day view exactly, because `horizon.resolve`
-        gives it `start == end == the anchor`.
+        plotting weight. `1d` selects exactly the rows the old per-day view did, because
+        `horizon.resolve` gives it `start == end == the anchor` — newest-first, like every
+        other horizon.
 
         Every row carries its date as well as its clock time: over a window, two `08:00`
         rows five days apart are otherwise the same morning. `span.start` is None for "all

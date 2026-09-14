@@ -68,11 +68,11 @@ def list_weight(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    # Most recent day first, each day read forwards — the same order `_day_or_window`
-    # returns, so the three tables on the Body tab agree. Within a day that puts the
-    # *first* reading on top, which is the one `morning_weight` picks for the trend, the
-    # deltas and the digest; `latest_weight` is the headline's and sits below it.
-    sql += " ORDER BY date DESC, measured_at ASC LIMIT ?"
+    # Newest first throughout — the same order `_day_or_window` returns, so the three
+    # tables on the Body tab agree. Within a day that puts the *latest* reading on top,
+    # which is the one the WEIGHT header states as the headline; `morning_weight`'s reading
+    # sits below it and is what the trend, the deltas and the digest take.
+    sql += " ORDER BY date DESC, measured_at DESC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
@@ -239,18 +239,20 @@ def add_food(conn, *, description: str, kcal: int, source: str, date: str, at: i
 def _day_or_window(
     conn, table: str, *, stamp: str, date, since, until, limit
 ) -> list[sqlite3.Row]:
-    """A single day in the order it happened, or a window newest-first.
+    """A single day in the order it happened, or a window newest-first throughout.
 
-    One function, two questions, one order: **most recent day first, each day read
-    forwards.** `date=` serves the digest and the Day tab, which read a day out loud and
-    want breakfast before dinner; the window serves the Body table, which is a log you
-    scroll and wants today at the top.
+    One function, two questions, two orders. `date=` serves the digest and the Day tab,
+    which read a day out loud and want breakfast before dinner. The window serves the Body
+    tables, which are a log you scroll: **newest first all the way down**, within a day as
+    well as across days.
 
-    Those two agree at `1d`, which is the point — `_fill_table` claims a single-day window
-    reproduces the per-day view exactly. It did not: the window was reverse-chronological
-    throughout, so a day on screen read dinner-first while the digest read it breakfast
-    first, and only row counts were ever asserted. Descending by date and ascending within
-    it satisfies both, and makes each day's top row the one `morning_weight` picks.
+    The window used to be `date DESC, stamp ASC` — newest day on top, each day then read
+    forwards — so that a `1d` window matched the digest's order exactly. That equivalence
+    was the stated reason, and it turned out to be worth less than it cost: the same table
+    changed direction halfway down, which reads as a bug when you scroll it. Nobody
+    compares the table against the digest row by row; prose wants chronology and a log
+    wants recency, and they are allowed to differ. `1d` still selects exactly the rows the
+    per-day view did, just newest-first like every other horizon.
 
     Both bounds for the window, for the reason `list_weight` documents: with a lower
     bound alone, viewing an older day listed rows that had not happened yet.
@@ -276,7 +278,7 @@ def _day_or_window(
     if until:
         sql += " AND date <= ?"
         args.append(_check_date(until))
-    sql += f" ORDER BY date DESC, {stamp} ASC, id ASC LIMIT ?"
+    sql += f" ORDER BY date DESC, {stamp} DESC, id DESC LIMIT ?"
     args.append(int(limit))
     return list(conn.execute(sql, args))
 
