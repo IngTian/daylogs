@@ -138,6 +138,7 @@ figures above them are always today's.
 | `p` | log food from a photo |
 | `a` | log an activity — only for a day that departs from your ordinary one |
 | `c` | cycle the chart: weight → intake → net |
+| `d` `k` | sort by date / by the table's own number — kg, kcal, factor — press again to flip direction |
 | `h` | set height, sex, birthday, ordinary-day level and timezone |
 | `enter` | edit the selected row |
 | `x` | delete the selected row (confirm with `y`) |

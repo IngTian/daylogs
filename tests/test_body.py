@@ -517,3 +517,66 @@ def test_a_days_weigh_ins_are_listed_latest_reading_first(db):
     assert rows[1]["kg"] == morning_weight(db, on_or_before="2026-09-04")["kg"], (
         "the trend's reading is still there, one row down"
     )
+
+
+# ── sorting a window ─────────────────────────────────────────────────────
+def test_value_sort_orders_by_the_tables_own_number(db):
+    """`k` on Body sorts by the one number each table has — kcal here. The date and clock
+    stay as the tiebreak, so rows sharing a number keep a stable order rather than
+    shuffling between reloads."""
+    for kc, hh in ((500, 8), (900, 12), (200, 19)):
+        add_food(db, description=f"meal {kc}", kcal=kc, source="labeled", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, hh, 0))
+    win = dict(since="2026-09-01", until="2026-09-04")
+    assert [r["kcal"] for r in list_food(db, **win, sort="value")] == [900, 500, 200]
+    assert [r["kcal"] for r in list_food(db, **win, sort="value", desc=False)] == [200, 500, 900]
+    # The default is unchanged: date sort, newest first.
+    assert [r["kcal"] for r in list_food(db, **win)] == [200, 900, 500]
+
+
+def test_date_sort_ascending_reads_the_window_forwards(db):
+    """The other direction of the default field — pressing `d` twice. Oldest day first and
+    each day forwards, which is the order the digest reads and the only way to get it in
+    the table."""
+    for d, hh in (("2026-09-03", 8), ("2026-09-04", 8), ("2026-09-04", 19)):
+        add_food(db, description=f"{d} {hh}", kcal=500, source="labeled", date=d,
+                 at=_stamp(2026, 9, int(d[8:]), hh, 0))
+    got = [r["description"] for r in list_food(
+        db, since="2026-09-01", until="2026-09-04", sort="date", desc=False
+    )]
+    assert got == ["2026-09-03 8", "2026-09-04 8", "2026-09-04 19"], got
+
+
+def test_value_sort_applies_to_weight_and_activity_too(db):
+    """One key, three tables: the number is kg on weight and factor on activity. They go
+    through the same `_order_by`, so the sub-views cannot drift apart."""
+    add_weight(db, kg=80.0, date="2026-09-04", at=_stamp(2026, 9, 4, 7, 0))
+    add_weight(db, kg=81.5, date="2026-09-03", at=_stamp(2026, 9, 3, 7, 0))
+    add_activity(db, description="gym", factor=1.6, source="labeled", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 18, 0))
+    add_activity(db, description="walk", factor=1.2, source="labeled", date="2026-09-03",
+                 at=_stamp(2026, 9, 3, 18, 0))
+    win = dict(since="2026-09-01", until="2026-09-04")
+    assert [r["kg"] for r in list_weight(db, **win, sort="value")] == [81.5, 80.0]
+    assert [r["factor"] for r in list_activity(db, **win, sort="value")] == [1.6, 1.2]
+
+
+def test_a_null_factor_sorts_to_the_top_ascending(db):
+    """An inference that never landed has no number, and SQLite puts NULLs first ascending.
+    That is the useful direction rather than a wart: those are the rows worth fixing, and
+    `resolved_factor` silently falls back to the baseline for them."""
+    add_activity(db, description="landed", factor=1.6, source="estimated", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 8, 0))
+    add_activity(db, description="failed", factor=None, source="estimated", date="2026-09-04",
+                 at=_stamp(2026, 9, 4, 9, 0))
+    got = [r["description"] for r in list_activity(
+        db, since="2026-09-01", until="2026-09-04", sort="value", desc=False
+    )]
+    assert got[0] == "failed", got
+
+
+def test_an_unknown_sort_is_rejected(db):
+    """The sort name arrives from a keypress, so it is checked; the column names it maps to
+    are literals in `body.py` and never reach SQL from outside."""
+    with pytest.raises(BodyError, match="sort must be one of"):
+        list_food(db, since="2026-09-01", sort="kcal; DROP TABLE food")

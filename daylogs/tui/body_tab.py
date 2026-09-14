@@ -29,6 +29,7 @@ from daylogs.parse import (
 from daylogs.tui import chart
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import (
+    FAINT,
     arrow,
     burn_bar,
     mark,
@@ -67,6 +68,10 @@ _CHARTS = ("weight", "intake", "net")
 # only bounds a pathological "all time". Matches money's `_LIMIT_CAP` in spirit — and if
 # it ever bites, the header says so rather than silently showing a prefix.
 _ROW_CAP = 2000
+# The number each sub-view sorts by under `k`, and the word the state row shows for it.
+# One per table, which is why `k` is a single key rather than three.
+_VALUE_LABEL = {"weight": "kg", "food": "kcal", "activity": "factor"}
+_ARROW = {True: "↓", False: "↑"}
 
 
 class BodyTab(PanelTab):
@@ -106,6 +111,10 @@ class BodyTab(PanelTab):
         # total is the sum of what is on screen rather than a second query that could
         # disagree with it — including when the row cap bites.
         self._kcal_shown: list[int] = []
+        # Sort state, deliberately not per sub-view: `tab` keeps the sort, the way Money
+        # keeps it across panes. The same two attributes `MoneyView` carries.
+        self.sort_field = "date"
+        self.sort_desc = True
 
     def compose(self) -> ComposeResult:
         yield Static(id="weight-head", classes="pane-title")
@@ -151,13 +160,26 @@ class BodyTab(PanelTab):
         return hz.resolve(self.horizon, anchor=self.viewing_date or self.app.today())
 
     def status_hint(self) -> str:
-        """The tab's state: which day, which horizon. Not what is running — the popup
-        says that, in one place, for whichever tab you are looking at."""
+        """The tab's state: which day, which horizon, which sort. Not what is running — the
+        popup says that, in one place, for whichever tab you are looking at.
+
+        The sort shows both fields with the active one marked, the same shape Money uses:
+        seeing the alternative beside the choice says what else `d`/`k` offer without
+        pressing `?`. The value field is named for the table on screen — `kcal` on food,
+        `kg` on weight, `factor` on activity — because that is the word the keymap's static
+        label cannot carry.
+        """
         date = self.viewing_date or self.app.today()
         parts = [self.horizon]
         if date != self.app.today():
             parts.insert(0, human_date(date))
-        return " · ".join(parts)
+        fields = " ".join(
+            mark(f"{_ARROW[self.sort_desc]}{label}", "bold")
+            if field == self.sort_field
+            else mark(label, FAINT)
+            for field, label in (("date", "date"), ("value", _VALUE_LABEL[self.table_mode]))
+        )
+        return f"{' · '.join(parts)}    {mark('sort', FAINT)} {fields}"
 
     # ── rendering ────────────────────────────────────────────────────────
     def reload(self) -> None:
@@ -446,7 +468,8 @@ class BodyTab(PanelTab):
         self._ids = []
         self._kcal_shown = []
         tz = self.app.cfg.timezone
-        bounds = dict(since=span.start, until=span.end, limit=_ROW_CAP)
+        bounds = dict(since=span.start, until=span.end, limit=_ROW_CAP,
+                      sort=self.sort_field, desc=self.sort_desc)
         if self.table_mode == "weight":
             table.add_columns("date", "time", "kg", "note")
             for r in body.list_weight(self.app.conn, **bounds):
@@ -584,6 +607,23 @@ class BodyTab(PanelTab):
     def key_jump_now(self) -> None:
         self.viewing_date = self.app.today()
         self.reload()
+
+    def _sort(self, field: str) -> None:
+        """Same field flips direction; a different field switches and resets to descending.
+        The rule `MoneyView.set_sort` already uses — four lines, kept beside the keys that
+        call it rather than shared, because the two tabs hold their state differently."""
+        if self.sort_field == field:
+            self.sort_desc = not self.sort_desc
+        else:
+            self.sort_field = field
+            self.sort_desc = True
+        self.reload()
+
+    def key_sort_date(self) -> None:
+        self._sort("date")
+
+    def key_sort_value(self) -> None:
+        self._sort("value")
 
     def key_next_chart(self) -> None:
         """Walk the TREND panel's series. One key rather than three, and cycling

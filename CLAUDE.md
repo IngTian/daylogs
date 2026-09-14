@@ -192,6 +192,17 @@ appended prose where it was convenient rather than editing the map.
   nobody checks row by row, against a table that visibly changed direction halfway down. Asking for both raises
   rather than resolving — two questions with two orders, and picking one silently would
   make a call site's intent unreadable.
+- **`d`/`k` sort the Body tables, and `k` is one key because each table has one number.**
+  Same idiom as Money's `d`/`c`/`k`: a different field switches and resets to descending,
+  the same key again flips direction. `k` sorts by kg on weight, kcal on food and factor on
+  activity — so its `KEYMAP` label has to stay generic ("by value"), because the table is
+  static data and the sub-view is not, and the footer's state row names the actual column
+  instead. `body._order_by` builds every window's ORDER BY, so the three sub-views cannot
+  drift apart, and it keeps date and clock as the tiebreak so equal numbers hold a stable
+  order. The sort name is validated because it arrives from a keypress; the column names it
+  maps to are literals in `body.py` and never reach SQL from outside. The `date=` mode takes
+  no sort at all — the digest reads a day forwards, full stop. `tab` keeps the sort, the way
+  Money keeps it across panes.
 - **Three tables over one window means three headers of one shape**: what you are looking
   at, the window, how many rows are in it, and — for food — the intake those rows sum to.
   The day's own energy balance is stated **once**, in the ENERGY panel, which already
