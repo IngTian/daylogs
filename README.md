@@ -175,6 +175,7 @@ figures above them are always today's.
 | `expense ›` | `12.40 lunch !restaurant` | amount, description, category |
 | `expense ›` | `127 Grocery Item X !grocery ~receipt in wallet` | with a note |
 | `expense ›` | `-24.99 returned shoes !grocery` | a refund |
+| `expense ›` | `240 Insurance !subscriptions #12` | one payment covering 12 months |
 | `budget ›` | `500 !grocery` | named after the category |
 | `recurring ›` | `20.99 Streaming !subscriptions #monthly` | monthly |
 | `new category ›` | `gym Gym & Pool` | slug, then an optional display name |

@@ -51,6 +51,19 @@ _WARN_FRAC = 0.9
 _SPARK_W = 24
 
 
+def _described(row) -> str:
+    """The description, with `#N` on it when the row is a prepayment.
+
+    The pane shows the amount actually paid — 240.00 is what left the account, and a list of
+    payments that quietly showed a twelfth of one would be lying about the row. The marker is
+    what stops that reading as a contradiction of the header, which counts the same payment
+    at 20.00 a month. It is also the token the edit prefill round-trips, so what is displayed
+    is what can be changed.
+    """
+    months = row["prepaid_months"] if "prepaid_months" in row.keys() else None
+    return f"{row['description']} #{months}" if months else row["description"]
+
+
 def _budget_style(spent: float, budget: float) -> str:
     """Over the cap is bad, near it is a warning, a refund is neither."""
     if budget <= 0 or spent < 0:
@@ -269,7 +282,7 @@ class MoneyTab(PanelTab):
             table.add_columns("date", "description", "category", "amount")
             for r in rows:
                 table.add_row(
-                    r["date"], Text(r["description"]), Text(r["category"]), fmt(r["amount"])
+                    r["date"], Text(_described(r)), Text(r["category"]), fmt(r["amount"])
                 )
                 self._ids.append(r["id"])
                 self._groups.append("")
@@ -594,6 +607,7 @@ class MoneyTab(PanelTab):
                 category=r.category,
                 date=r.date,
                 note=r.note,
+                prepaid_months=r.prepaid_months,
                 cfg=cfg,
             )
             # The anchor is a date, not a month: move the span's right edge so the day

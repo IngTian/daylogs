@@ -329,10 +329,23 @@ def test_an_escaped_sigil_stays_in_the_description():
 
 
 def test_expense_rejects_unsupported_sigils():
-    """Expense accepts !, @, and ~; anything else is an error."""
+    """Expense accepts `!`, `@`, `~` and `#`; anything else is an error."""
     with pytest.raises(ParseError, match="does not have.*kcal"):
         E("12.40 lunch !restaurant =610")
-    with pytest.raises(ParseError, match="does not have.*cycle"):
+
+
+def test_expense_takes_a_month_count_after_hash_not_a_cycle_keyword():
+    """`#` is a supported sigil on an expense now, so `#monthly` is no longer rejected as an
+    unknown sigil — it is rejected for its *value*, which is a different error and a more
+    useful one.
+
+    The keyword belongs to the recurring grammar, where `#` names the cycle an item renews
+    on. On an expense the same sigil answers "over what period does this cost apply", and a
+    prepayment is any run of months — a two-year domain, a six-month pass — so it takes a
+    count rather than a closed vocabulary. `vocab_for` therefore does not offer `#`
+    completion on the expense prompt, or it would suggest exactly this mistake.
+    """
+    with pytest.raises(ParseError, match="number of months"):
         E("12.40 lunch !restaurant #monthly")
 
 

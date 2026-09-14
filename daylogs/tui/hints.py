@@ -80,7 +80,7 @@ HINTS: tuple[Hint, ...] = (
     Hint(
         "expense",
         "12.40 lunch !restaurant",
-        f"amount · what · !category · {WHEN} · ~note — negative is a refund",
+        f"amount · what · !category · {WHEN} · ~note · #months — negative is a refund",
         sigils=("!",),
     ),
     Hint(

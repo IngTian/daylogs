@@ -86,6 +86,7 @@ def add_expense(
     category: str,
     date: str,
     note: str | None = None,
+    prepaid_months: int | None = None,
     cfg=None,
 ) -> int:
     if float(amount) == 0:
@@ -93,14 +94,16 @@ def add_expense(
     if not description.strip():
         raise MoneyError("description must be non-empty")
     cur = conn.execute(
-        "INSERT INTO expense (date, amount, description, category, note, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO expense"
+        " (date, amount, description, category, note, prepaid_months, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             check_date(date),
             float(amount),
             description.strip(),
             check_category(category, cfg),
             note or None,
+            _check_months(prepaid_months),
             _now(),
         ),
     )
@@ -109,7 +112,7 @@ def add_expense(
 
 def update_expense(conn, id: int, cfg=None, **fields) -> bool:
     fields = {k: v for k, v in fields.items() if v is not None}
-    allowed = {"amount", "description", "category", "date", "note"}
+    allowed = {"amount", "description", "category", "date", "note", "prepaid_months"}
     unknown = set(fields) - allowed
     if unknown:
         raise MoneyError(f"cannot update {sorted(unknown)} on expense")
@@ -121,6 +124,12 @@ def update_expense(conn, id: int, cfg=None, **fields) -> bool:
         check_category(fields["category"], cfg)
     if "amount" in fields and float(fields["amount"]) == 0:
         raise MoneyError("amount must be non-zero")
+    if "prepaid_months" in fields:
+        # 0 is the clearing value, for the same reason "" is the note's: this function
+        # drops None so it can tell "the line did not mention it" from "the line said
+        # nothing for it". The grammar cannot produce `#0` — `_months` demands at least 2 —
+        # so 0 can only ever come from a caller meaning "make this an ordinary expense".
+        fields["prepaid_months"] = _check_months(fields["prepaid_months"] or None)
     sets = ", ".join(f"{k} = ?" for k in fields)
     cur = conn.execute(f"UPDATE expense SET {sets} WHERE id = ?", (*fields.values(), int(id)))
     return cur.rowcount > 0
@@ -459,18 +468,27 @@ def summarize_span(
             """
             SELECT substr(date, 1, 7) AS ym, category, SUM(amount) AS total
             FROM expense
-            WHERE date >= ? AND date < ?
+            WHERE prepaid_months IS NULL AND date >= ? AND date < ?
             GROUP BY ym, category
             """,
             (f"{window[0]}-01", _month_after(window[-1])),
         ).fetchall()
         idx_of = {ym: i for i, ym in enumerate(window)}
+        raw: dict[str, list[float]] = {}
         for r in rows:
             i = idx_of.get(r["ym"])
             if i is None:
                 continue
-            hist = history.setdefault(r["category"], [0.0] * HISTORY_MONTHS)
-            hist[i] = round(float(r["total"]), 2)
+            raw.setdefault(r["category"], [0.0] * HISTORY_MONTHS)[i] = float(r["total"])
+        # The sparkline has to agree with the number beside it, so it prorates too — a
+        # single annual charge otherwise drew one spike in a flat six-month row and read as
+        # a spending event rather than as the year's subscription.
+        for ym, cat, share in _prepaid_shares(conn):
+            i = idx_of.get(ym)
+            if i is None:
+                continue
+            raw.setdefault(cat, [0.0] * HISTORY_MONTHS)[i] += share
+        history = {c: [round(v, 2) for v in vals] for c, vals in raw.items()}
 
     spent_by_cat = _spent_by_category(conn, span)
     budget_by_cat = _budget_by_category(conn, months)
@@ -535,12 +553,86 @@ def _span_where(span: Span | None) -> tuple[str, list]:
     return " AND date >= ? AND date <= ?", [span.start, span.end]
 
 
+def _check_months(n: int | None) -> int | None:
+    """Guard the column at the data layer, not only in the grammar.
+
+    `parse.py` already rejects `#1` and `#abc`, but `add_expense` is called by
+    `summary`/tests/`__main__` too, and a 1 here would mean "prepaid over one month",
+    which is an ordinary expense wearing a marker — a second representation of the plain
+    case that every reader would then have to know about.
+    """
+    if n is None:
+        return None
+    n = int(n)
+    if not 2 <= n <= 120:
+        raise MoneyError(f"prepaid_months must be between 2 and 120, got {n}")
+    return n
+
+
+def _covered_months(date: str, n: int) -> list[str]:
+    """The `n` calendar months a prepayment dated `date` covers, starting with its own."""
+    y, m = int(date[:4]), int(date[5:7])
+    return [f"{y + (m - 1 + i) // 12:04d}-{(m - 1 + i) % 12 + 1:02d}" for i in range(n)]
+
+
+def _prepaid_shares(conn) -> list[tuple[str, str, float]]:
+    """`(month, category, share)` for every month every prepaid expense covers.
+
+    One payment covering twelve months becomes twelve shares of a twelfth. Unrounded on
+    purpose: callers round their own totals, so twelve shares of 19.9958 still add back to
+    239.95 rather than drifting by a cent a month.
+
+    Spread in Python rather than SQL because it needs a row-per-month expansion, which in
+    SQLite means a recursive CTE for the sake of a handful of rows a year. A loop over
+    `WHERE prepaid_months IS NOT NULL` is the same answer and can be read.
+    """
+    out: list[tuple[str, str, float]] = []
+    rows = conn.execute(
+        "SELECT date, amount, category, prepaid_months FROM expense"
+        " WHERE prepaid_months IS NOT NULL"
+    )
+    for r in rows:
+        n = int(r["prepaid_months"])
+        share = float(r["amount"]) / n
+        out += [(ym, r["category"], share) for ym in _covered_months(r["date"], n)]
+    return out
+
+
+def _months_filter(span: Span | None) -> set[str] | None:
+    """The months a prepaid share must fall in to count, or None for no filter.
+
+    A covered month counts if the span touches that month at all, which is deliberately
+    the same rule `_budget_by_category` already uses — budgets are stored per calendar
+    month and summed over `span.months()` regardless of how much of each month the span
+    covers. Making prepaid spend agree with that is the whole point: a monthly figure
+    against a monthly cap. It does mean a one-week window shows a full month's share, and
+    that is the pre-existing mismatch CLAUDE.md already records for budgets at `1w`.
+
+    `Span.months()` returns `[]` for an unbounded span, which is why "no filter" is None
+    and not an empty set — an empty set would count nothing over all time.
+    """
+    if span is None:
+        return None
+    months = span.months()
+    return set(months) if months else None
+
+
 def _spent_by_category(conn, span: Span | None) -> dict[str, float]:
     where, args = _span_where(span)
-    sql = f"SELECT category, SUM(amount) AS total FROM expense WHERE 1=1{where} GROUP BY category"
-    return {
-        r["category"]: round(float(r["total"]), 2) for r in conn.execute(sql, args)
-    }
+    # Prepaid rows are excluded here and added back by the month they cover, not the day
+    # they were paid. The budget side has always prorated — `roll_month_budgets` writes
+    # `monthly_cost` — so summing the raw charge made the renewal month read 12x over its
+    # cap and the other eleven read a saving, and no single month was ever right.
+    sql = (
+        f"SELECT category, SUM(amount) AS total FROM expense"
+        f" WHERE prepaid_months IS NULL{where} GROUP BY category"
+    )
+    out = {r["category"]: float(r["total"]) for r in conn.execute(sql, args)}
+    keep = _months_filter(span)
+    for ym, cat, share in _prepaid_shares(conn):
+        if keep is None or ym in keep:
+            out[cat] = out.get(cat, 0.0) + share
+    return {k: round(v, 2) for k, v in out.items()}
 
 
 def _budget_by_category(conn, months: list[str]) -> dict[str, float]:

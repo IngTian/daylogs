@@ -131,6 +131,11 @@ class ExpenseInput:
     category: str
     date: str
     note: str | None = None
+    # How many months this one payment covers, or None for an ordinary expense. `#12` on an
+    # annual renewal. It exists because the budget side already prorates — `roll_month_budgets`
+    # writes `monthly_cost` — so without it the renewal month read 12x over its cap and the
+    # other eleven read a saving, and no single month was ever right.
+    prepaid_months: int | None = None
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,32 @@ def _single(g: sigil.Grouped, sigil_char: str, field: str) -> str | None:
     return values[0] if values else None
 
 
+def _months(value: str | None) -> int | None:
+    """`#N` on an expense: how many months this one payment covers.
+
+    A count, not the keyword `#annually` the recurring grammar takes. The sigil means the
+    same thing in both places — over what period does this cost apply — but a recurring
+    item has a closed vocabulary of cycles it renews on, while a prepayment is any run of
+    months: a two-year domain, a six-month pass. One number reads the same in every case
+    and needs no mapping table.
+
+    Rejects 1 rather than accepting it: a payment covering one month *is* an ordinary
+    expense, and storing the marker anyway would put a second representation of the plain
+    case into every reader.
+    """
+    if value is None:
+        return None
+    try:
+        n = int(value)
+    except ValueError:
+        raise ParseError(f"# wants a number of months, e.g. #12 — got {value!r}") from None
+    if n < 2:
+        raise ParseError("# is how many months the payment covers, so at least 2")
+    if n > 120:
+        raise ParseError("# over 120 months is not a prepayment, it is a mistake")
+    return n
+
+
 def _vocab(value: str, allowed, field: str) -> str:
     low = value.lower()
     if low not in allowed:
@@ -366,7 +397,7 @@ def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) ->
         raise ParseError("amount must be non-zero")
     if not g.text:
         raise ParseError("say what it was, e.g. 12.40 lunch !restaurant")
-    _reject_unsupported(g, frozenset(["!", "@", "~"]), "expense")
+    _reject_unsupported(g, frozenset(["!", "@", "~", "#"]), "expense")
     slug = _single(g, "!", "category")
     note = _single(g, "~", "note")
     return ExpenseInput(
@@ -375,14 +406,24 @@ def parse_expense(raw: str, *, now: dt.datetime, known_slugs: frozenset[str]) ->
         category=_vocab(slug, known_slugs, "category") if slug else FALLBACK_SLUG,
         date=resolve_when(g.by_sigil.get("@", []), now=now).date,
         note=note or None,
+        prepaid_months=_months(_single(g, "#", "months")),
     )
 
 
 def render_expense(row) -> str:
     """The inverse, for prefilling an edit. `~` renders last because it absorbs the
-    plain tokens after it."""
+    plain tokens after it.
+
+    `#N` rides the line for the reason every displayed column does: the pane marks a
+    prepaid row, so the edit has to be able to change or clear the thing being marked.
+    Submitting a line with the `#` dropped makes it an ordinary expense again, which is
+    the same "the submitted line is authoritative" rule the note already follows.
+    """
     parts = [f"{row['amount']:.2f}", sigil.escape(row["description"]),
              f"!{row['category']}", f"@{row['date']}"]
+    months = row["prepaid_months"] if "prepaid_months" in row.keys() else None
+    if months:
+        parts.append(f"#{months}")
     if row["note"]:
         parts.append(f"~{sigil.escape(row['note'])}")
     return " ".join(parts)
