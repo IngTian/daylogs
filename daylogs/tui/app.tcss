@@ -49,10 +49,16 @@ Screen {
     padding: 0 1;
 }
 
-/* Two rows: state on top, grouped keys below. One row meant nineteen hints in
-   a single 190-character line, where nothing stood out. */
+/* Four rows: state on top, then one row per key group — writes, view, navigation.
+   Two rows meant the three groups shared one line, and on Body that was 189 cells of
+   hints in a row, which is exactly what grouping them was supposed to prevent.
+
+   Fixed rather than `auto`, so the height does not change with the active tab: an `auto`
+   footer reflows the table above it on every tab switch, to save a scope with a short
+   group a couple of rows it does not need. A scope with fewer groups leaves the last row
+   blank, which is the cost of a frame that holds still. */
 #keyfooter {
-    height: 2;
+    height: 4;
     padding: 0 1;
     color: $text-muted;
 }

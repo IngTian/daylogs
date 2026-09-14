@@ -88,9 +88,11 @@ install unless you genuinely have no Python.
 Press `?` for the full map at any time — it's generated from the same table the
 bindings and the footer come from, so it can't be out of date.
 
-The footer is two rows: what you're looking at on top (range, sort, filters), and
-the keys below, grouped into actions, view controls and navigation and coloured by
-group. On a narrow terminal it sheds navigation keys first and never `?` or `q`.
+The footer is four rows: what you're looking at on top (range, sort, filters), then one
+row each for actions, view controls and navigation, coloured by group. A row of its own per
+group because Body has eighteen keys, and on one line that was a wall you had to read all
+of to find anything. On a narrow terminal each row sheds its own last hints to fit, and
+never `?` or `q`.
 
 Anything that calls Claude — a calorie estimate, an activity factor, the daily read —
 takes seconds to a minute, so a small popup appears above the prompt for exactly as long
