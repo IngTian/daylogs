@@ -1,3 +1,4 @@
+import pytest
 from helpers import go_day
 from textual.content import Content
 
@@ -48,10 +49,19 @@ def test_footer_includes_app_keys():
     assert "today" in text and "quit" in text
 
 
-def test_narrow_footer_truncates_rather_than_wrapping():
+def test_narrow_footer_sheds_per_line_rather_than_wrapping():
+    """Each group is its own line, so each one is measured and shed on its own.
+
+    This asserted `"\\n" not in narrow` when the whole footer was one line. The newline is
+    the layout now; what still must not happen is a *wrapped* line, i.e. any line wider
+    than the terminal, because Textual would fold it and silently double the footer's
+    height into the table above it.
+    """
     narrow = render_keys("money", width=40)
-    assert len(plain(narrow)) <= 40
-    assert "\n" not in narrow
+    lines = [plain(ln) for ln in narrow.split("\n")]
+    assert lines, "the footer went empty at a width that still fits hints"
+    assert all(len(ln) <= 40 for ln in lines), [len(ln) for ln in lines]
+    assert len(lines) == 3, f"the groups should still each have a row: {lines}"
 
 
 def test_narrow_footer_keeps_the_tabs_first_verb():
@@ -307,13 +317,19 @@ def test_droppable_keys_are_shed_before_pinned_ones():
 
 
 async def test_footer_adapts_when_the_terminal_resizes(make_app):
-    """The footer sheds keys to fit, so it must recompute on resize — otherwise
-    it keeps whatever it guessed before the first layout."""
+    """The footer sheds keys to fit, so it must recompute on resize — otherwise it keeps
+    whatever it guessed before the first layout.
+
+    Narrowed to 30 columns, not 56. Since the groups became separate lines, Day's longest
+    row is 50 cells rather than the ~84 the three groups made when they shared one, so at
+    56 there is now genuinely nothing to shed and this passed only by asserting that
+    nothing had happened. 30 forces the nav row to shed, which is what the handler is for.
+    """
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
         wide = str(app.query_one("#keyfooter").content)
-        await pilot.resize_terminal(56, 40)
+        await pilot.resize_terminal(30, 40)
         # Two frames, not one: the relayout happens first, and only then is `Resize`
         # delivered to the footer, which is what recomputes the line. One `pause()`
         # passed only because Textual's idle poll used to sleep 20 ms and covered both —
@@ -348,12 +364,16 @@ def test_the_bracket_key_is_escaped_not_swallowed_as_markup():
     assert "[[" not in text
 
 
-def test_groups_are_separated_more_widely_than_keys_within_a_group():
-    """Three groups means two wide breaks — that visual grouping is the whole
-    point of the change, so assert the structure rather than a specific key."""
+def test_each_group_gets_its_own_line():
+    """Three groups, three lines. They used to share one line separated by three spaces —
+    the grouping was there but you had to find it inside 189 cells of hints, which is the
+    complaint that produced this. Keys within a group still ride one line, separated by
+    the narrow `·`."""
     text = plain(render_keys("money", width=400))
-    assert " · " in text
-    assert text.count("   ") == 2
+    lines = text.split("\n")
+    assert len(lines) == 3, lines
+    assert " · " in lines[0]
+    assert "   " not in text, "groups are separated by the line break now, not by spaces"
 
 
 def test_actions_come_before_view_controls_before_navigation():
@@ -375,33 +395,45 @@ def test_keys_are_colour_coded_by_kind():
     assert _KIND_STYLE["view"] in text
 
 
-def test_plain_width_is_respected_at_every_width():
-    """The fit check measures plain text; measuring the styled string would be
-    wrong by the length of its colour codes."""
-    for width in (400, 200, 120, 80, 60, 40, 30):
-        assert len(plain(render_keys("money", width=width))) <= width
+@pytest.mark.parametrize("scope", ["body", "money", "summary"])
+@pytest.mark.parametrize("width", [400, 200, 120, 80, 60, 40, 30, 12])
+def test_no_line_is_ever_wider_than_the_terminal(scope, width):
+    """The fit check measures plain text; measuring the styled string would be wrong by
+    the length of its colour codes.
+
+    Per line, and over every scope. The flat version shed from the end of the whole key
+    list, which stopped working the moment the groups became separate lines: an over-wide
+    *first* group could not shrink until every later group was empty, so at 40 columns
+    Money's write row rendered 48 cells with an empty nav row under it. Body is in here
+    because it is the widest scope and the one that motivated stacking at all.
+    """
+    for line in render_keys(scope, width=width).split("\n"):
+        assert len(plain(line)) <= width, f"{scope} at {width}: {plain(line)!r}"
 
 
-async def test_footer_occupies_two_rows(make_app):
+async def test_footer_occupies_four_rows(make_app):
+    """State, then one row per group. Fixed at four rather than `auto`: a height that
+    follows the active scope reflows the table above it on every tab switch."""
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause()
         footer = app.query_one("#keyfooter")
         content = str(footer.content)
         height = footer.size.height
-    assert height == 2
-    assert content.count("\n") == 1
+    assert height == 4
+    assert content.count("\n") == 3, repr(content)
 
 
-async def test_state_row_and_key_row_are_separate_lines(make_app):
+async def test_the_state_row_is_separate_from_the_key_rows(make_app):
     app = make_app()
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("3")
         await pilot.pause()
-        state, keys = str(app.query_one("#keyfooter").content).split("\n")
+        state, *key_rows = str(app.query_one("#keyfooter").content).split("\n")
     assert "sort" in state
+    keys = "\n".join(key_rows)
     assert "expense" in keys
-    assert "sort" not in keys
+    assert "sort" not in keys, "the state row's words must not leak into the key rows"
 
 
 async def test_money_state_row_shows_all_sort_fields_with_the_active_one_marked(make_app):
@@ -445,7 +477,9 @@ async def test_the_footer_still_advertises_keys_the_tab_does_handle(make_app):
     app = make_app()
     async with app.run_test(size=(160, 30)) as pilot:
         await go_day(pilot, app)      # say which tab, don't lean on where it opens
-        keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
+        # Every key row, not row 1: the keys are three lines now, one per group, so
+        # indexing the first row would only ever see what writes.
+        keys = plain("\n".join(str(app.query_one("#keyfooter").content).split("\n")[1:]))
     for expected in ("prev", "next", "today", "quit", "keys"):
         assert expected in keys, f"{expected!r} missing from the Summary footer"
 
@@ -456,6 +490,6 @@ async def test_body_and_money_keep_their_sub_view_and_horizon_keys(make_app):
         for key in ("2", "3"):
             await pilot.press(key)
             await pilot.pause()
-            keys = plain(str(app.query_one("#keyfooter").content).split("\n")[1])
+            keys = plain("\n".join(str(app.query_one("#keyfooter").content).split("\n")[1:]))
             assert "next view" in keys
             assert "zoom in" in keys

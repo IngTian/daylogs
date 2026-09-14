@@ -4,10 +4,19 @@ Nothing here decides what the keys are — it reads KEYMAP. That is why the foot
 cannot name a key that isn't bound, which is the failure mode of a hand-written
 footer.
 
-Two rows, not one. Nineteen hints flattened into a single 190-character line is a
-wall: every key looks equally important and finding one means reading all of them.
-Row 1 carries state — what you are looking at, how it is sorted, what is filtered.
-Row 2 carries the keys, grouped by what they do and colour-coded by group.
+Four rows. Row 1 carries state — what you are looking at, how it is sorted, what is
+filtered — and then one row per group of keys: what writes, what changes the view, what
+gets you around.
+
+Nineteen hints on a single line is a wall: every key looks equally important and finding
+one means reading all of them. Grouping them on that one line and colour-coding the groups
+was the first attempt, and it was not enough — Body still rendered 189 cells of hints in a
+row, which is what the grouping was supposed to prevent.
+
+Same height on every tab, whether or not a scope's groups would have fitted on fewer
+lines. The alternative — collapse when it fits — makes the footer's height depend on which
+tab you are on, so every tab switch reflows the table above it for a couple of rows of
+screen. A predictable frame is worth more than those rows.
 """
 
 from __future__ import annotations
@@ -50,7 +59,6 @@ _KIND_STYLE = {
 _GROUPS: tuple[tuple[str, ...], ...] = (("write", "danger"), ("view",), ("nav",))
 
 _SEP = " · "
-_GROUP_SEP = "   "
 
 
 def glyph(key: str) -> str:
@@ -101,29 +109,38 @@ def render_keys(scope: str, width: int, live=None) -> str:
         if members:
             groups.append(members)
 
-    pinned = [k for k in keys if k.pin]
-    pinned_plain = _SEP.join(_hint(k)[0] for k in pinned)
+    def fit(members: list[km.Key]) -> list[km.Key]:
+        """Drop hints from the end of ONE group until that line fits.
 
-    def assemble(drop: int) -> tuple[str, int]:
-        """Render with the last `drop` unpinned hints removed."""
-        flat = [k for g in groups for k in g]
-        keep = {id(k) for k in flat[: len(flat) - drop]} | {id(k) for k in pinned}
-        out_styled: list[str] = []
-        out_plain: list[str] = []
-        for g in groups:
-            members = [k for k in g if id(k) in keep]
-            if not members:
-                continue
-            out_styled.append(_SEP.join(_hint(k)[1] for k in members))
-            out_plain.append(_SEP.join(_hint(k)[0] for k in members))
-        return _GROUP_SEP.join(out_styled), len(_GROUP_SEP.join(out_plain))
+        Per line, not across the footer: each group has its own row now, so they no
+        longer compete for room and a global order would be meaningless. It also fixes
+        what the flat version got wrong the moment the groups were split — it shed from
+        the end of the whole list, so an over-wide *first* group could not shrink at all
+        until every later group had been emptied, and the write row overflowed a narrow
+        terminal while the nav row sat empty beneath it.
 
-    total = sum(len(g) for g in groups)
-    for drop in range(total - len(pinned) + 1):
-        styled, plain_len = assemble(drop)
-        if plain_len <= width:
-            return styled
-    return pinned_plain if len(pinned_plain) <= width else ""
+        A pinned key is never dropped: `?` is how you find everything else and `q` is how
+        you leave.
+        """
+        keep = list(members)
+        while keep and len(_SEP.join(_hint(k)[0] for k in keep)) > width:
+            droppable = [i for i, k in enumerate(keep) if not k.pin]
+            if not droppable:
+                # Even the pinned keys do not fit. Drop the whole line rather than
+                # overflow it: at a width where `? keys` cannot be drawn there is nothing
+                # useful to show, and a line wider than the terminal corrupts the layout
+                # below it. `render_keys` then returns "" for an absurd width, which is
+                # what it has always done.
+                return []
+            keep.pop(droppable[-1])
+        return keep
+
+    lines = []
+    for g in groups:
+        members = fit(g)
+        if members:
+            lines.append(_SEP.join(_hint(k)[1] for k in members))
+    return "\n".join(lines)
 
 
 class KeyFooter(Static):

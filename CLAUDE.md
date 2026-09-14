@@ -243,11 +243,23 @@ appended prose where it was convenient rather than editing the map.
   min made six months of level rent land on the lowest glyph, so the
   second-largest spend category rendered as an empty floor. Weight, which only
   means anything relative to itself, keeps min–max.
-- **The footer is two rows and generated from `KINDS`.** Row 1 is the tab's state,
-  row 2 the keys grouped write+danger / view / nav. Every hint for a scope on one
-  line runs past 200 columns — a wall where nothing stands out. It also drops any
-  key the active scope has no handler for, asking the app's own resolver so the
-  footer and the dispatcher cannot disagree.
+- **The footer is four rows and generated from `KINDS`.** Row 1 is the tab's state, then
+  one row per group: write+danger / view / nav. It was two rows, with the three groups
+  sharing row 2 separated by three spaces — the grouping existed but you had to find it
+  inside the line, and on Body that line was **189 cells**, which is the wall the grouping
+  was meant to prevent. Fixed at four rather than `auto`: a height that follows the active
+  scope reflows the table above it on every tab switch, and a frame that holds still is
+  worth more than the row a short scope would save.
+  **Shedding is per line now.** Each group drops hints from its own tail until that line
+  fits, because separate lines no longer compete for width — and the old flat rule broke
+  the moment they were split, since it shed from the end of the whole key list, so an
+  over-wide *first* group could not shrink until every later group was empty. Measured:
+  Money at 40 columns rendered a 48-cell write row above an empty nav row. If even the
+  pinned keys do not fit, the line is dropped rather than overflowed, because a line wider
+  than the terminal folds and silently steals a row from the table. Stacking also *sheds
+  less*: at 120 columns Body used to drop six hints and now drops none.
+  It still drops any key the active scope has no handler for, asking the app's own resolver
+  so the footer and the dispatcher cannot disagree.
 - **`config.toml` is written by two functions that write to opposite ends, on
   purpose.** `update_config` inserts scalars **before the first table header**;
   `add_category` appends a `[[category]]` block **after everything**. TOML's scoping
