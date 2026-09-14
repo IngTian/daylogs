@@ -591,27 +591,34 @@ It is an export, not an import; loading it back in is not supported.
 ## Development
 
 Working on daylogs wants an editable install with the dev extras, which is a
-different thing from the isolated tool install above. Any environment manager
-does; this is conda because that's what I use:
+different thing from the isolated tool install above — and worth keeping separate.
+An editable install runs whatever branch happens to be checked out, so if it is
+also your daily `day` then a half-finished branch is what records your weight.
 
 ```bash
-conda create -n daylogs python=3.12
-conda activate daylogs
-pip install -e '.[dev]'
+uv venv --python 3.13
+uv pip install -e '.[dev]'
 ```
 
 ```bash
-pytest
-ruff check .
+.venv/bin/pytest
+.venv/bin/ruff check .
 ```
+
+Or `source .venv/bin/activate` first and drop the prefix. `uv run pytest` works too.
+CI installs the same extras from `pyproject.toml` with plain pip on 3.12, so both
+paths are checked and neither can drift into being the only one that works.
 
 Runtime dependency: `textual`. Everything else is the standard library.
 
 The README's three screenshots are generated, not drawn:
 
 ```bash
-python tools/screenshots.py       # rewrites assets/{day,body,money}.png
+.venv/bin/python tools/screenshots.py   # rewrites assets/{day,body,money}.png
 ```
+
+The venv's interpreter, not a bare `python` — the script drives a real app, so it needs
+`textual` and an importable `daylogs`.
 
 Run it after anything that moves the layout and commit the result. The seed data
 is synthetic and the clock is pinned, so two runs produce byte-identical files —

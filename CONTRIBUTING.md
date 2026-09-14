@@ -31,7 +31,10 @@ something.
 ## Setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
-pytest -q
+uv venv --python 3.13
+uv pip install -e '.[dev]'
+.venv/bin/pytest -q
 ```
+
+`python -m venv .venv && pip install -e '.[dev]'` works just as well if you'd rather not
+install uv — CI does exactly that on 3.12, which is the version `requires-python` promises.

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Render the README's three screenshots from a live app.
 
-    python tools/screenshots.py
+    .venv/bin/python tools/screenshots.py
+
+The venv's interpreter, not a bare `python`: this drives a real app, so it needs `textual`
+and an importable `daylogs`.
 
 Writes `assets/{day,body,money}.png`. Run it after any change that moves the
 layout, and commit what it produces.
