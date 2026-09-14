@@ -189,9 +189,13 @@ def build_payload(conn, cfg, *, date: str) -> dict:
                     "amount": r["amount"],
                     "category": r["category"],
                     "description": r["description"],
+                    # So the model does not read a prepayment as one day's spending. The
+                    # month totals beside this list are prorated, and without the marker a
+                    # 240.00 line next to a 20.00 monthly figure looks like a mistake.
+                    "prepaid_months": r["prepaid_months"],
                 }
                 for r in conn.execute(
-                    "SELECT amount, category, description FROM expense"
+                    "SELECT amount, category, description, prepaid_months FROM expense"
                     " WHERE date = ? ORDER BY id ASC",
                     (date,),
                 )

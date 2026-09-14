@@ -23,7 +23,7 @@ deliberately cut, and adding one back is a scope decision, not a detail:
 ```
 daylogs/
   config.py   tomllib config + update_config/add_category; DAYLOGS_HOME overrides the root
-  db.py       connect + seven-table schema (no schema-migration framework)
+  db.py       connect + seven-table schema; _ADD_COLUMNS for the one thing DDL cannot do
   categories.py  constant category tuple, extensible via config.toml
   sigil.py    tokeniser: `!` category, `@` time, `~` note, `=` kcal, `#` cycle
   complete.py tab completion for `!` and `#` vocabularies (no Textual import)
@@ -279,6 +279,38 @@ appended prose where it was convenient rather than editing the map.
   cost. `budget` is `UNIQUE(month, name)`, not `(month, category)`, so a category can
   hold several lines; `money.budget_line` offers the newest, and the pane keeps summing
   all of them.
+- **A payment can cover several months, and every *total* counts it by the months it
+  covers.** `#N` on an expense line sets `expense.prepaid_months`; the row is stored once, at
+  the real amount and date, and `_prepaid_shares` spreads `amount/N` across the N calendar
+  months from its own. This is not a new opinion about accounting — the budget side has
+  always prorated (`roll_month_budgets` writes `monthly_cost`), so summing the raw charge
+  made the renewal month read 240.00 against a 20.00 cap while the other eleven read a
+  saving. It netted out over a year and no single month was right, which is a problem for a
+  tab whose whole question is "am I inside the budget this month".
+  **Totals prorate; lists do not.** `_spent_by_category` and the six-month history exclude
+  `prepaid_months IS NOT NULL` from their SQL sum and add the shares back by covered month.
+  The expenses pane, `top_expenses` and the digest's day list keep the real charge, because
+  those answer a cash question — 240.00 is what left the account, and a list of payments
+  showing a twelfth of one would be lying about the row. The pane marks it `#N` so the two
+  readings do not look like a contradiction, and `render_expense` round-trips the token so a
+  displayed marker stays editable.
+  A covered month counts if the span touches it at all — deliberately the same rule
+  `_budget_by_category` already uses, since budgets are stored per calendar month and summed
+  over `span.months()` however much of each month the span covers. That is what makes a
+  monthly figure comparable to a monthly cap, and it inherits the `1w` mismatch already
+  recorded for budgets. Shares are summed unrounded and rounded once at the end, so twelve
+  months of a 240.01 charge add back to 240.01 rather than drifting a cent a month.
+  `parse` rejects `#1` and `money._check_months` rejects it again: a payment covering one
+  month *is* an ordinary expense, and a second representation of the plain case is a branch
+  in every reader. `0` is the clearing value on `update_expense`, for the same reason `""` is
+  the note's — it drops None to tell "not mentioned" from "set to nothing".
+- **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
+  `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by
+  `PRAGMA table_info` so it is idempotent. Still not a migration framework, and it must stay
+  a list rather than grow into one: the columns are nullable with no default, which is what
+  makes the ALTER cheap and leaves old rows meaningful (NULL = "an ordinary expense"). A
+  change that needs to *rewrite* rows is where this stops being enough, and that is a
+  decision to take deliberately rather than by appending here.
 - **An empty state names the fix.** A month nobody rolled has no budget rows, and
   "0.00 budget / 1,234.00 over" is true, useless, and reads as stale data. It says
   what `r` would do instead. `money.pending_roll` must agree with

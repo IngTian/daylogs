@@ -4,6 +4,14 @@ No migration framework: the DDL is CREATE TABLE IF NOT EXISTS throughout, so add
 a table is additive on an existing database. The version is stamped in
 PRAGMA user_version so a future change has somewhere to hook.
 
+Adding a *column* is the one thing that DDL cannot do, and `_ADD_COLUMNS` is where that
+is handled — a guarded `ALTER TABLE ... ADD COLUMN` per column, checked against
+`PRAGMA table_info` so it is idempotent and safe to run on every open. Still no
+framework: this is a list of columns, not a migration engine, and it stays that way. A
+change that needs to *rewrite* rows rather than add a nullable column is the point at
+which this stops being enough, and that decision should be made deliberately rather
+than by extending this list.
+
 journal_mode=DELETE is deliberate. WAL's -wal/-shm sidecars can sync
 independently of the main file under iCloud Drive and corrupt the database on
 the receiving device. daylogs is read-heavy; the write cost is noise.
@@ -14,7 +22,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2  # 2: the activity table
+SCHEMA_VERSION = 3  # 2: the activity table. 3: expense.prepaid_months
 
 TABLES: tuple[str, ...] = (
     "weight",
@@ -73,6 +81,12 @@ CREATE TABLE IF NOT EXISTS expense (
   description TEXT    NOT NULL,
   category    TEXT    NOT NULL,
   note        TEXT,
+  -- How many months this one payment covers; NULL for an ordinary expense. Declared here
+  -- *and* in _ADD_COLUMNS: this block is the description of the current schema, so a fresh
+  -- database gets the column from CREATE TABLE and the ALTER only ever upgrades an older
+  -- one. Leaving it out of here would make the DDL an incomplete picture and put every
+  -- fresh database on the migration path.
+  prepaid_months INTEGER,
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_expense_date ON expense(date);
@@ -125,8 +139,21 @@ def connect(path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+# Columns added to a table that already exists. `CREATE TABLE IF NOT EXISTS` is a no-op
+# on an existing database, so a new column has to be ALTERed in or every reader breaks on
+# a database created before it. Nullable and no default, which is what makes the ALTER
+# cheap and the old rows meaningful: NULL means "an ordinary expense", not "0 months".
+_ADD_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("expense", "prepaid_months", "INTEGER"),
+)
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_DDL)
+    for table, column, decl in _ADD_COLUMNS:
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
 
