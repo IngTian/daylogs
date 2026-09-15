@@ -602,9 +602,18 @@ appended prose where it was convenient rather than editing the map.
   published. No real weights, amounts, names, or `/Users/<name>/` paths in
   tracked files. Category slugs and `America/Toronto` are feature-domain
   values, not personal data. Fixtures use round, obviously-fake numbers.
-- Verify dependency changes in a clean env, not just the local conda one. A
+- Verify dependency changes in a clean env, not just the local `.venv`. A
   dependency that happens to be installed locally but is missing from
   `pyproject.toml` only fails once CI builds from scratch.
+- **Local setup is uv.** `uv venv --python 3.13` plus `uv pip install -e '.[dev]'`, so the
+  gate is `.venv/bin/pytest` and `.venv/bin/ruff check .` — there is no conda env any more,
+  and a hardcoded interpreter path is how a session ends up testing a Python that no longer
+  exists. CI stays on plain pip with 3.12, which is deliberate: the two paths check each
+  other, and 3.12 is what `requires-python` promises. The suite passes on both.
+  The daily `day` is a **separate** `uv tool install daylogs` — the published release, not
+  this checkout. An editable install doubling as the daily tool means whatever branch is
+  checked out is what records your weight, which during one session meant running a branch
+  with a broken `add_expense`.
 - Push back on scope creep. This project's whole value is that it stayed
   small.
 
