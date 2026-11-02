@@ -387,21 +387,29 @@ appended prose where it was convenient rather than editing the map.
   keeps in step so a rename cannot reclassify a cap, and neither filters on `active`: a line
   already rolled stays when you pause the item, so its share is still a commitment for that
   month. A `source='manual'` line has no item behind it and contributes nothing, by definition.
-  **Three surfaces, one visual language, and the third is not a third copy.** `COMMITTED_GLYPH`
-  (`░`) marks the committed share on the BUDGET vs SPENT bar and on the expenses pane; the
-  categories pane carries the amount with its percentage of the cap, because an amount alone
-  does not say whether a cap is mostly committed or barely touched. A *different* glyph from
-  `▒` on purpose: one mark for two questions is the thing this block keeps warning about.
-  On the bar the zones run spend, free, committed — committed at the far end because that is
-  where the allowance runs out, clamped to the *unfilled* region so spend eats the free room
-  first and the three can never sum past the bar. At a full cap the committed zone is gone,
-  which reads correctly: nothing is left either way.
-  The expenses pane row earns its place by **naming the item**, which neither panel does —
-  `22.50` is a number, `Tradingview of 270.00/yr` is an answer. That makes `░` a *second* kind
-  of non-cash row there, after `⇢`, on a pane whose own question is what left the account.
-  Both are marked and dimmed for exactly that reason, and both are inert. It also carries
-  `paused`, because a commitment you have stopped renewing reads very differently from one you
-  have not, and the line survives the pause either way.
+  **One mark for proration, and position carries the rest.** There were two glyphs, `▒` for a
+  share of *spend* and `░` for a share of the *cap*. The owner could not tell them apart —
+  "these two weird characters", and "what is a locked glyph" — and he was right that they are
+  the same arithmetic: a multi-month amount cut into monthly slices, differing only in whether
+  the money has moved. So there is one `PRORATED_GLYPH`, and a bar's existing left-to-right
+  meaning does the work: it fills from the left with what was spent and ends in dots for what
+  was not, so a mosaic run inside the fill is a slice of spend and a run past the dots is a
+  slice of the cap.
+  **The two runs must never merge, and that needs a guard.** With every expense in a category
+  `#N`-marked (no solid) and the reservation covering all the remaining cap (no dots), the bar
+  rendered fourteen identical cells and the amounts beside it did not disambiguate either —
+  reproduced. So when both runs exist and the reservation would eat the last free cell, it
+  gives one back. A bar one cell off still reads; a bar that asserts nothing does not.
+  Two shades did not have this failure, which is the honest cost of the simplification.
+  The **categories pane** carries the figure as `reserved` with its share of the cap, because
+  an amount alone does not say whether a cap is mostly spoken for or barely touched. The
+  **expenses pane** has two non-cash row types and both take `⇢`, with the second column
+  saying which — a date for a `#N` share, the word `reserved` for a commitment. Words where
+  the distinction has to be read, one glyph everywhere else: two shades of grey is not a
+  distinction a reader can make, and this block's own rule is that colour is never the only
+  signal. That pane row earns its place by **naming the item** — `22.50` is a number,
+  `Tradingview of 270.00/yr` is an answer — and it carries `paused` too, since a commitment
+  you have stopped renewing reads differently from one you have not.
 
 - **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
   `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by

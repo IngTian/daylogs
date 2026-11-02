@@ -16,13 +16,16 @@ _NO_SHARE = "—"
 # line, and a segment distinguished by hue alone would both fight that and break the rule
 # that colour is never the only signal. `shade` adds the colour on top, afterwards.
 PRORATED_GLYPH = "▒"
-# The share of a *cap* an annual recurring item has already committed — a different question
-# from PRORATED_GLYPH, which marks a share of *spend*. A month can carry either, both or
-# neither: this one needs an annual recurring item, that one a `#N` expense. Two glyphs
-# because one mark for two questions is how a figure and its own explanation drift apart.
-# Lighter than `▒` and solid where `·` is a single dot, so all three zones read apart with no
-# colour at all.
-COMMITTED_GLYPH = "░"
+# One mark for proration, not two. The budget side (an annual subscription's monthly slice of
+# a cap) and the spend side (a `#N` payment's slice of what you used this month) are the same
+# arithmetic — a multi-month amount cut into months — and the only difference is whether the
+# money has moved yet. That difference is already carried by *position*: a bar fills from the
+# left with what was spent and ends in dots for what was not, so a mosaic inside the fill is a
+# slice of spend and a mosaic past the dots is a slice of the cap.
+#
+# There were two shades, `▒` and `░`. The owner could not tell them apart — "these two weird
+# characters", and "what is a locked glyph" — which is the only test of a glyph that matters.
+# Where the distinction genuinely has to be read, the expenses pane says it in words.
 
 
 # Good/bad signalling. Named rather than inlined so one edit changes every
@@ -295,7 +298,7 @@ def budget_bars(
     label_width: int = 14,
     bar_width: int = 14,
     prorated: dict[str, float] | None = None,
-    committed: dict[str, float] | None = None,
+    reserved: dict[str, float] | None = None,
 ) -> list[str]:
     """`label ███████░░░ 412/500 ⚠` — spent against its own budget.
 
@@ -316,7 +319,7 @@ def budget_bars(
     """
     bar_width = _fit_bar(width, label_width, _BUDGET_TAIL, bar_width)
     prorated = prorated or {}
-    committed = committed or {}
+    reserved = reserved or {}
     out: list[str] = []
     for name, spent, budget in items:
         if budget > 0:
@@ -324,12 +327,21 @@ def budget_bars(
             filled = min(max(int(round(frac * bar_width)), 0), bar_width)
             pro = _prorated_cells(prorated.get(name, 0.0), budget, bar_width, filled)
             free = bar_width - filled
-            lock = _prorated_cells(committed.get(name, 0.0), budget, bar_width, free)
+            lock = _prorated_cells(reserved.get(name, 0.0), budget, bar_width, free)
+            # Keep at least one free cell between the two mosaic runs whenever both exist,
+            # because one glyph means *position* is the only thing telling them apart. With
+            # every expense `#N`-marked and the reservation covering all the remaining cap,
+            # the bar came out as fourteen identical cells — no solid, no dots, nothing
+            # saying where spend ended and cap began. Reproduced before fixing. One cell is
+            # a cheaper lie than a bar that asserts nothing, and it only costs that cell in
+            # this one case: `lock` is otherwise untouched.
+            if pro and lock and lock == free:
+                lock -= 1
             bar = (
                 PRORATED_GLYPH * pro
                 + _FULL * (filled - pro)
                 + _EMPTY * (free - lock)
-                + COMMITTED_GLYPH * lock
+                + PRORATED_GLYPH * lock
             )
             flag = " ⚠" if spent > budget else "  "
             tail = f"{money(spent):>9} /{money(budget):>9}{flag}"

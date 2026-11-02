@@ -24,7 +24,6 @@ from daylogs.parse import (
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import (
     BAD,
-    COMMITTED_GLYPH,
     FAINT,
     GOOD,
     PRORATED_GLYPH,
@@ -95,7 +94,7 @@ def _description_cell(row) -> Text:
 _PANEL_TITLES = {"budget-title": "BUDGET vs SPENT", "share-title": "WHERE IT WENT"}
 
 
-def _committed_cell(c) -> Text:
+def _reserved_cell(c) -> Text:
     """How much of this category's cap is an annual item's monthly share, and what share of
     the cap that is.
 
@@ -104,7 +103,7 @@ def _committed_cell(c) -> Text:
     question the column exists for. Dimmed, because it qualifies the budget beside it rather
     than competing with the Δ that carries the month's verdict.
 
-    A dash, not a blank or a zero, when nothing is committed: `—` is already this file's
+    A dash, not a blank or a zero, when nothing is reserved: `—` is already this file's
     "no meaningful value" mark on the budget bars, and `0.00  0%` on seven rows of nine would
     read as data rather than as absence.
     """
@@ -297,7 +296,7 @@ class MoneyTab(PanelTab):
             [(c.category, c.spent, c.budget) for c in budgeted],
             width=self.panel_width("#panel-budget", minimum=28),
             prorated={c.category: c.prorated_spent for c in budgeted},
-            committed={c.category: c.prorated_budget for c in budgeted},
+            reserved={c.category: c.prorated_budget for c in budgeted},
         )
         # Colour whole finished lines, never the pieces: the builders truncate on
         # character count, and markup would be counted as content. `shade` is the one
@@ -309,7 +308,7 @@ class MoneyTab(PanelTab):
         # bar, so the calls compose — and both nest inside the row's status colour.
         budget_lines = [
             mark(
-                shade(shade(line, PRORATED_GLYPH, FAINT), COMMITTED_GLYPH, FAINT),
+                shade(line, PRORATED_GLYPH, FAINT),
                 _budget_style(c.spent, c.budget),
             )
             for line, c in zip(budget_lines, budgeted, strict=True)
@@ -346,7 +345,7 @@ class MoneyTab(PanelTab):
 
     def _fill_categories(self, table, s) -> None:
         table.add_columns(
-            "category", "budget", "spent", "Δ", "committed", f"6-mo{'':>{_SPARK_W - 4}}"
+            "category", "budget", "spent", "Δ", "reserved", f"6-mo{'':>{_SPARK_W - 4}}"
         )
         over = {c.category for c in s.over_budget}
         for c in s.by_category:
@@ -364,7 +363,7 @@ class MoneyTab(PanelTab):
                 fmt(c.budget),
                 fmt(c.spent),
                 delta,
-                _committed_cell(c),
+                _reserved_cell(c),
                 Text(wide_sparkline(c.history, width=_SPARK_W, from_zero=True), style=FAINT),
             )
             self._ids.append(-1)
@@ -373,11 +372,11 @@ class MoneyTab(PanelTab):
     def _fill_expenses(self, table) -> None:
         rows = money.query_expenses(self.app.conn, self.view)
         inflows = money.prepaid_inflows(self.app.conn, self.view.span())
-        committed = money.annual_commitments(self.app.conn, self.view.months())
+        reserved = money.annual_commitments(self.app.conn, self.view.months())
         if not self.view.grouped:
             table.add_columns("date", "description", "category", "amount")
             self._add_inflows(table, inflows, grouped=False)
-            self._add_committed(table, committed, grouped=False)
+            self._add_reserved(table, reserved, grouped=False)
             for r in rows:
                 table.add_row(
                     r["date"], _description_cell(r), Text(r["category"]), fmt(r["amount"])
@@ -388,7 +387,7 @@ class MoneyTab(PanelTab):
 
         table.add_columns("", "date / category", "description", "amount")
         self._add_inflows(table, inflows, grouped=True)
-        self._add_committed(table, committed, grouped=True)
+        self._add_reserved(table, reserved, grouped=True)
         for slug, total, count, children in money.group_expenses(
             rows, collapsed=self.view.collapsed
         ):
@@ -403,7 +402,7 @@ class MoneyTab(PanelTab):
                 self._ids.append(r["id"])
                 self._groups.append("")
 
-    def _add_committed(self, table, committed, *, grouped: bool) -> None:
+    def _add_reserved(self, table, reserved, *, grouped: bool) -> None:
         """Annual commitments for the months on screen, pinned under the prepaid shares.
 
         `░` and faint, the same mark the BUDGET vs SPENT bar uses for the committed share of
@@ -421,18 +420,18 @@ class MoneyTab(PanelTab):
         Inert like the prepaid rows: `_ids` takes -1, so `enter`, `x` and the fold skip them.
         There is no row to edit — `s` and `o` on the recurring pane are where these live.
         """
-        for d in committed:
+        for d in reserved:
             label = Text(f"{d['name']} of {fmt(d['cost'])}/yr", style=FAINT)
             if not d["active"]:
                 label.append("  paused", style=FAINT)
             share = Text(fmt(d["share"]), style=FAINT)
-            when = Text("committed", style=FAINT)
+            when = Text("reserved", style=FAINT)
             if grouped:
-                table.add_row(Text(COMMITTED_GLYPH, style=FAINT), when, label, share)
+                table.add_row(Text("⇢", style=FAINT), when, label, share)
             else:
                 table.add_row(
                     when,
-                    Text(f"{COMMITTED_GLYPH} ", style=FAINT) + label,
+                    Text("⇢ ", style=FAINT) + label,
                     Text(d["category"], style=FAINT),
                     share,
                 )
@@ -448,9 +447,8 @@ class MoneyTab(PanelTab):
         BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
         """
         title = _PANEL_TITLES[pid]
-        for glyph, word in ((PRORATED_GLYPH, "prorated"), (COMMITTED_GLYPH, "committed")):
-            if any(glyph in line for line in lines):
-                title += f"   {mark(f'{glyph} {word}', FAINT)}"
+        if any(PRORATED_GLYPH in line for line in lines):
+            title += f"   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}"
         self.query_one(f"#{pid}", Static).update(title)
 
     def _add_inflows(self, table, inflows, *, grouped: bool) -> None:

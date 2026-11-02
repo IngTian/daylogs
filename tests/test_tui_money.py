@@ -1038,7 +1038,7 @@ async def test_a_row_with_no_note_gains_nothing(make_app, db, grouped):
 
 # ── the committed share, on all three surfaces ───────────────────────────
 async def test_an_annual_item_is_marked_on_the_bar_the_column_and_the_pane(make_app, db):
-    """One figure, three surfaces, one visual language — `░` on the bar and on the pane, and
+    """One figure, three surfaces, one visual language — `▒` on the bar and on the pane, and
     the amount with its share of the cap in the column.
 
     Three because they answer three questions: how much of this cap is spoken for (bar), how
@@ -1060,14 +1060,14 @@ async def test_an_annual_item_is_marked_on_the_bar_the_column_and_the_pane(make_
 
         raw = app.query_one("#budget-body", Static).content
         bar = (Content.from_markup(raw) if isinstance(raw, str) else raw).plain
-        assert "░" in bar, f"the bar must mark the committed share: {bar!r}"
+        assert "▒" in bar, f"the bar must mark the reserved share: {bar!r}"
         title = app.query_one("#budget-title", Static).content
         title = (Content.from_markup(title) if isinstance(title, str) else title).plain
-        assert "░ committed" in title, f"and name the glyph: {title!r}"
+        assert "▒ prorated" in title, f"and name the glyph: {title!r}"
 
         cells = [str(c) for k in app.query_one("#money-table").rows
                  for c in app.query_one("#money-table").get_row(k)]
-        assert any("20.00 100%" in c for c in cells), f"the whole cap is committed: {cells}"
+        assert any("20.00 100%" in c for c in cells), f"the whole cap is reserved: {cells}"
 
         while tab.view.pane != "expenses":
             await pilot.press("tab")
@@ -1076,7 +1076,12 @@ async def test_an_annual_item_is_marked_on_the_bar_the_column_and_the_pane(make_
         rows = [" ".join(str(c) for c in t.get_row(k)) for k in t.rows]
     named = [r for r in rows if "Yearly" in r]
     assert named, f"the pane must name the item: {rows}"
-    assert "░" in named[0] and "240.00" in named[0] and "20.00" in named[0], named[0]
+    # `⇢` on the pane, not the bar glyph: that pane has two non-cash row types and both
+    # use one mark, with the second column — `reserved` here, a date for a `#N` share —
+    # saying which. Words where the distinction has to be read; one glyph everywhere else.
+    assert "⇢" in named[0], named[0]
+    assert "reserved" in named[0], f"the column must say it is not a charge: {named[0]!r}"
+    assert "240.00" in named[0] and "20.00" in named[0], named[0]
 
 
 async def test_a_month_with_no_annual_item_gains_nothing(make_app, db):
@@ -1098,6 +1103,6 @@ async def test_a_month_with_no_annual_item_gains_nothing(make_app, db):
         title = (Content.from_markup(title) if isinstance(title, str) else title).plain
         t = app.query_one("#money-table")
         cells = [str(c) for k in t.rows for c in t.get_row(k)]
-    assert "░" not in bar, bar
-    assert "committed" not in title, title
+    assert "▒" not in bar, bar
+    assert "prorated" not in title, title
     assert any(c == "—" for c in cells), f"the column shows a dash, not 0.00  0%: {cells}"
