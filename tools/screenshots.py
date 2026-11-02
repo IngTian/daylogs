@@ -44,7 +44,12 @@ sys.path.insert(0, str(ROOT))
 from daylogs.body import add_food, add_weight  # noqa: E402
 from daylogs.config import load_config  # noqa: E402
 from daylogs.db import connect, ensure_schema  # noqa: E402
-from daylogs.money import add_expense, upsert_budget, upsert_recurring  # noqa: E402
+from daylogs.money import (  # noqa: E402
+    add_expense,
+    roll_month_budgets,
+    upsert_budget,
+    upsert_recurring,
+)
 from daylogs.summary import upsert_report  # noqa: E402
 from daylogs.tui.app import DaylogsApp  # noqa: E402
 
@@ -91,11 +96,25 @@ EXPENSES = [
     ("transport", 120.00, "transit pass", 2),
     ("utilities", 95.00, "hydro", 6),
     ("subscriptions", 20.99, "streaming", 1),
+    # `#12` and a note, so the expenses pane shows a prorated share row and a payment
+    # method — both invisible in a fixture without them.
+    ("subscriptions", 240.00, "Backups annual", 1, 12, None),
+    ("grocery", 38.80, "corner shop", 21, None, "debit"),
     ("entertainment", 54.00, "cinema", 15),
     ("education", 39.00, "book", 22),
 ]
 
-RECURRING = [("Streaming", "subscriptions", 20.99), ("Transit", "transport", 120.00)]
+# `cycle` is per item now: the annual one is what makes the `░ committed` share of a cap
+# visible, which is the whole reason it is in the fixture. A monthly-only fixture renders a
+# Money tab that cannot show three of the marks the app draws.
+RECURRING = [
+    ("Streaming", "subscriptions", 20.99, "monthly"),
+    ("Transit", "transport", 120.00, "monthly"),
+    # 360/yr -> 30.00 a month, which leaves the cap headroom. At 240 the fixture spent
+    # the subscriptions cap to the cent, and the committed zone correctly clamps to nothing
+    # at a full cap — so the mark this release adds was invisible in its own screenshot.
+    ("Backups", "subscriptions", 360.00, "annually"),
+]
 
 BUDGETS = [
     ("Rent", "housing", 1400.00),
@@ -145,23 +164,34 @@ def seed(root: Path):
         at = int(NOW.replace(hour=hour, minute=minute).timestamp())
         add_food(conn, description=description, kcal=kcal, source=source, date=TODAY, at=at)
 
-    for category, amount, description, day in EXPENSES:
+    for row in EXPENSES:
+        # Older rows are 4-tuples; the two that exercise `#N` and `~note` carry two more.
+        category, amount, description, day = row[:4]
+        months = row[4] if len(row) > 4 else None
+        note = row[5] if len(row) > 5 else None
         add_expense(
             conn,
             amount=amount,
             description=description,
             category=category,
             date=f"2026-08-{day:02d}",
+            prepaid_months=months,
+            note=note,
             cfg=cfg,
         )
 
-    for name, category, cost in RECURRING:
-        upsert_recurring(conn, name=name, cost=cost, cycle="monthly", category=category, cfg=cfg)
+    for name, category, cost, cycle in RECURRING:
+        upsert_recurring(conn, name=name, cost=cost, cycle=cycle, category=category, cfg=cfg)
 
     for name, category, amount in BUDGETS:
         upsert_budget(
             conn, month="2026-08", name=name, category=category, amount=amount, cfg=cfg
         )
+    # The roll, so the recurring items have budget lines of their own. Without it the
+    # hand-set caps share no name with any item, the `budget.name = recurring.name` join
+    # finds nothing, and the annual item's committed share cannot render — a fixture that
+    # looks complete while showing none of it.
+    roll_month_budgets(conn, month="2026-08", cfg=cfg)
 
     upsert_report(conn, date=REPORT_DATE, content=REPORT)
     conn.execute("UPDATE report SET generated_at = ?", (GENERATED_AT,))
