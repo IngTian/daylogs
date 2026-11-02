@@ -26,6 +26,7 @@ from daylogs.tui.widgets import (
     BAD,
     FAINT,
     GOOD,
+    LOCKED_GLYPH,
     PRORATED_GLYPH,
     WARN,
     budget_bars,
@@ -92,6 +93,25 @@ def _description_cell(row) -> Text:
 # the second copy derived which panel it was from the widget id — and a title whose wording
 # depends on that mapping is a worse thing to own than the two strings it saved.
 _PANEL_TITLES = {"budget-title": "BUDGET vs SPENT", "share-title": "WHERE IT WENT"}
+
+
+def _committed_cell(c) -> Text:
+    """How much of this category's cap is an annual item's monthly share, and what share of
+    the cap that is.
+
+    The percentage is the point — an amount alone does not say whether a cap is mostly
+    committed or barely touched by it, and "how much of this can I actually cut" is the
+    question the column exists for. Dimmed, because it qualifies the budget beside it rather
+    than competing with the Δ that carries the month's verdict.
+
+    A dash, not a blank or a zero, when nothing is committed: `—` is already this file's
+    "no meaningful value" mark on the budget bars, and `0.00  0%` on seven rows of nine would
+    read as data rather than as absence.
+    """
+    if c.prorated_budget <= 0 or c.budget <= 0:
+        return Text("—", style=FAINT)
+    pct = c.prorated_budget / c.budget * 100
+    return Text(f"{fmt(c.prorated_budget)} {pct:.0f}%", style=FAINT)
 
 
 def _coverage(d) -> str:
@@ -276,15 +296,22 @@ class MoneyTab(PanelTab):
         budget_lines = budget_bars(
             [(c.category, c.spent, c.budget) for c in budgeted],
             width=self.panel_width("#panel-budget", minimum=28),
-            prorated={c.category: c.prorated for c in budgeted},
+            prorated={c.category: c.prorated_spent for c in budgeted},
+            locked={c.category: c.prorated_budget for c in budgeted},
         )
         # Colour whole finished lines, never the pieces: the builders truncate on
         # character count, and markup would be counted as content. `shade` is the one
         # exception and is safe for the same reason — it substitutes a run that is already
         # measured, so `plain` is unchanged, and Textual's markup nests so the segment
         # style survives being inside the row's budget-status colour.
+        # Two shaded runs now, one per glyph. `shade` handles the first contiguous run of the
+        # glyph it is given, and the two zones use different glyphs in disjoint parts of the
+        # bar, so the calls compose — and both nest inside the row's status colour.
         budget_lines = [
-            mark(shade(line, PRORATED_GLYPH, FAINT), _budget_style(c.spent, c.budget))
+            mark(
+                shade(shade(line, PRORATED_GLYPH, FAINT), LOCKED_GLYPH, FAINT),
+                _budget_style(c.spent, c.budget),
+            )
             for line, c in zip(budget_lines, budgeted, strict=True)
         ]
         self.query_one("#budget-body", Static).update(
@@ -295,7 +322,7 @@ class MoneyTab(PanelTab):
         share_lines = ranked_bars(
             [(c.category, c.spent) for c in ranked],
             width=self.panel_width("#panel-share", minimum=28),
-            prorated={c.category: c.prorated for c in ranked},
+            prorated={c.category: c.prorated_spent for c in ranked},
         )
         share_lines = [shade(line, PRORATED_GLYPH, FAINT) for line in share_lines]
         self.query_one("#share-body", Static).update(
@@ -318,7 +345,9 @@ class MoneyTab(PanelTab):
             self._fill_recurring(table)
 
     def _fill_categories(self, table, s) -> None:
-        table.add_columns("category", "budget", "spent", "Δ", f"6-mo{'':>{_SPARK_W - 4}}")
+        table.add_columns(
+            "category", "budget", "spent", "Δ", "committed", f"6-mo{'':>{_SPARK_W - 4}}"
+        )
         over = {c.category for c in s.over_budget}
         for c in s.by_category:
             flag = "  ⚠" if c.category in over else ""
@@ -335,6 +364,7 @@ class MoneyTab(PanelTab):
                 fmt(c.budget),
                 fmt(c.spent),
                 delta,
+                _committed_cell(c),
                 Text(wide_sparkline(c.history, width=_SPARK_W, from_zero=True), style=FAINT),
             )
             self._ids.append(-1)
@@ -343,9 +373,11 @@ class MoneyTab(PanelTab):
     def _fill_expenses(self, table) -> None:
         rows = money.query_expenses(self.app.conn, self.view)
         inflows = money.prepaid_inflows(self.app.conn, self.view.span())
+        committed = money.annual_commitments(self.app.conn, self.view.months())
         if not self.view.grouped:
             table.add_columns("date", "description", "category", "amount")
             self._add_inflows(table, inflows, grouped=False)
+            self._add_committed(table, committed, grouped=False)
             for r in rows:
                 table.add_row(
                     r["date"], _description_cell(r), Text(r["category"]), fmt(r["amount"])
@@ -356,6 +388,7 @@ class MoneyTab(PanelTab):
 
         table.add_columns("", "date / category", "description", "amount")
         self._add_inflows(table, inflows, grouped=True)
+        self._add_committed(table, committed, grouped=True)
         for slug, total, count, children in money.group_expenses(
             rows, collapsed=self.view.collapsed
         ):
@@ -370,17 +403,54 @@ class MoneyTab(PanelTab):
                 self._ids.append(r["id"])
                 self._groups.append("")
 
+    def _add_committed(self, table, committed, *, grouped: bool) -> None:
+        """Annual commitments for the months on screen, pinned under the prepaid shares.
+
+        `░` and faint, the same mark the BUDGET vs SPENT bar uses for the committed share of
+        a cap, so the two surfaces read as one language rather than two coincidences. A
+        *different* glyph from `⇢`, because these are a different thing: `⇢` is a share of a
+        payment already made elsewhere, this is a share of a cap not yet charged at all.
+        Both are non-cash, which is why both are marked and dimmed — the pane's own question
+        is what left the account, and these did not.
+        The reason this row exists at all, when the panel and the categories column already
+        carry the figure: it is the only one that says *which item*. 22.50 of a subscriptions
+        cap is a number; `Tradingview 22.50 of 270.00/yr` is an answer.
+        `paused` is on the line because a paused item still holds the line it was already
+        rolled into — "not from now on", never "this never happened" — and a commitment you
+        have stopped renewing reads very differently from one you have not.
+        Inert like the prepaid rows: `_ids` takes -1, so `enter`, `x` and the fold skip them.
+        There is no row to edit — `s` and `o` on the recurring pane are where these live.
+        """
+        for d in committed:
+            label = Text(f"{d['name']} of {fmt(d['cost'])}/yr", style=FAINT)
+            if not d["active"]:
+                label.append("  paused", style=FAINT)
+            share = Text(fmt(d["share"]), style=FAINT)
+            when = Text("committed", style=FAINT)
+            if grouped:
+                table.add_row(Text(LOCKED_GLYPH, style=FAINT), when, label, share)
+            else:
+                table.add_row(
+                    when,
+                    Text(f"{LOCKED_GLYPH} ", style=FAINT) + label,
+                    Text(d["category"], style=FAINT),
+                    share,
+                )
+            self._ids.append(-1)
+            self._groups.append("")
+
     def _legend(self, pid: str, lines: list[str]) -> None:
         """Name `▒` beside the panel that drew one, and only when it did — an ordinary month
         carries no legend for a glyph it never shows.
 
-        Asked of the rendered lines rather than of `CategorySpend.prorated`, because the two
+        Asked of the rendered lines rather than of `CategorySpend.prorated_spent`, because the two
         genuinely disagree: a category with spend and no cap draws no fill to segment, so
         BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
         """
         title = _PANEL_TITLES[pid]
-        if any(PRORATED_GLYPH in line for line in lines):
-            title += f"   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}"
+        for glyph, word in ((PRORATED_GLYPH, "prorated"), (LOCKED_GLYPH, "committed")):
+            if any(glyph in line for line in lines):
+                title += f"   {mark(f'{glyph} {word}', FAINT)}"
         self.query_one(f"#{pid}", Static).update(title)
 
     def _add_inflows(self, table, inflows, *, grouped: bool) -> None:

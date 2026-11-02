@@ -8,6 +8,7 @@ from daylogs.money import (
     delete_recurring,
     list_budget,
     list_recurring,
+    roll_month_budgets,
     upsert_budget,
     upsert_recurring,
 )
@@ -1033,3 +1034,70 @@ async def test_a_row_with_no_note_gains_nothing(make_app, db, grouped):
         cells = await _expense_cells(pilot, app, grouped=grouped)
     cell = next(c for c in cells if hasattr(c, "plain") and "Gas" in c.plain)
     assert cell.plain == "Gas", f"trailing whitespace or marker crept in: {cell.plain!r}"
+
+
+# ── the committed share, on all three surfaces ───────────────────────────
+async def test_an_annual_item_is_marked_on_the_bar_the_column_and_the_pane(make_app, db):
+    """One figure, three surfaces, one visual language — `░` on the bar and on the pane, and
+    the amount with its share of the cap in the column.
+
+    Three because they answer three questions: how much of this cap is spoken for (bar), how
+    much and what fraction per category (column), and *by what item* (pane). The third is the
+    only one that names anything, which is the reason it exists rather than being a third copy
+    of the same number.
+    """
+    from textual.content import Content
+    from textual.widgets import Static
+
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    app = make_app()
+    async with app.run_test(size=(130, 40)) as pilot:
+        tab = await go_money(pilot, app)
+        tab.view.anchor = "2026-09-15"
+        tab.reload()
+        await pilot.pause()
+
+        raw = app.query_one("#budget-body", Static).content
+        bar = (Content.from_markup(raw) if isinstance(raw, str) else raw).plain
+        assert "░" in bar, f"the bar must mark the committed share: {bar!r}"
+        title = app.query_one("#budget-title", Static).content
+        title = (Content.from_markup(title) if isinstance(title, str) else title).plain
+        assert "░ committed" in title, f"and name the glyph: {title!r}"
+
+        cells = [str(c) for k in app.query_one("#money-table").rows
+                 for c in app.query_one("#money-table").get_row(k)]
+        assert any("20.00 100%" in c for c in cells), f"the whole cap is committed: {cells}"
+
+        while tab.view.pane != "expenses":
+            await pilot.press("tab")
+            await pilot.pause()
+        t = app.query_one("#money-table")
+        rows = [" ".join(str(c) for c in t.get_row(k)) for k in t.rows]
+    named = [r for r in rows if "Yearly" in r]
+    assert named, f"the pane must name the item: {rows}"
+    assert "░" in named[0] and "240.00" in named[0] and "20.00" in named[0], named[0]
+
+
+async def test_a_month_with_no_annual_item_gains_nothing(make_app, db):
+    """The regression guard on all three surfaces at once."""
+    from textual.content import Content
+    from textual.widgets import Static
+
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    app = make_app()
+    async with app.run_test(size=(130, 40)) as pilot:
+        tab = await go_money(pilot, app)
+        tab.view.anchor = "2026-09-15"
+        tab.reload()
+        await pilot.pause()
+        raw = app.query_one("#budget-body", Static).content
+        bar = (Content.from_markup(raw) if isinstance(raw, str) else raw).plain
+        title = app.query_one("#budget-title", Static).content
+        title = (Content.from_markup(title) if isinstance(title, str) else title).plain
+        t = app.query_one("#money-table")
+        cells = [str(c) for k in t.rows for c in t.get_row(k)]
+    assert "░" not in bar, bar
+    assert "committed" not in title, title
+    assert any(c == "—" for c in cells), f"the column shows a dash, not 0.00  0%: {cells}"
