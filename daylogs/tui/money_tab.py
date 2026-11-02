@@ -24,9 +24,9 @@ from daylogs.parse import (
 from daylogs.tui.common import PanelTab
 from daylogs.tui.widgets import (
     BAD,
+    COMMITTED_GLYPH,
     FAINT,
     GOOD,
-    LOCKED_GLYPH,
     PRORATED_GLYPH,
     WARN,
     budget_bars,
@@ -297,7 +297,7 @@ class MoneyTab(PanelTab):
             [(c.category, c.spent, c.budget) for c in budgeted],
             width=self.panel_width("#panel-budget", minimum=28),
             prorated={c.category: c.prorated_spent for c in budgeted},
-            locked={c.category: c.prorated_budget for c in budgeted},
+            committed={c.category: c.prorated_budget for c in budgeted},
         )
         # Colour whole finished lines, never the pieces: the builders truncate on
         # character count, and markup would be counted as content. `shade` is the one
@@ -309,7 +309,7 @@ class MoneyTab(PanelTab):
         # bar, so the calls compose — and both nest inside the row's status colour.
         budget_lines = [
             mark(
-                shade(shade(line, PRORATED_GLYPH, FAINT), LOCKED_GLYPH, FAINT),
+                shade(shade(line, PRORATED_GLYPH, FAINT), COMMITTED_GLYPH, FAINT),
                 _budget_style(c.spent, c.budget),
             )
             for line, c in zip(budget_lines, budgeted, strict=True)
@@ -428,11 +428,11 @@ class MoneyTab(PanelTab):
             share = Text(fmt(d["share"]), style=FAINT)
             when = Text("committed", style=FAINT)
             if grouped:
-                table.add_row(Text(LOCKED_GLYPH, style=FAINT), when, label, share)
+                table.add_row(Text(COMMITTED_GLYPH, style=FAINT), when, label, share)
             else:
                 table.add_row(
                     when,
-                    Text(f"{LOCKED_GLYPH} ", style=FAINT) + label,
+                    Text(f"{COMMITTED_GLYPH} ", style=FAINT) + label,
                     Text(d["category"], style=FAINT),
                     share,
                 )
@@ -448,7 +448,7 @@ class MoneyTab(PanelTab):
         BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
         """
         title = _PANEL_TITLES[pid]
-        for glyph, word in ((PRORATED_GLYPH, "prorated"), (LOCKED_GLYPH, "committed")):
+        for glyph, word in ((PRORATED_GLYPH, "prorated"), (COMMITTED_GLYPH, "committed")):
             if any(glyph in line for line in lines):
                 title += f"   {mark(f'{glyph} {word}', FAINT)}"
         self.query_one(f"#{pid}", Static).update(title)

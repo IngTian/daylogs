@@ -387,7 +387,7 @@ appended prose where it was convenient rather than editing the map.
   keeps in step so a rename cannot reclassify a cap, and neither filters on `active`: a line
   already rolled stays when you pause the item, so its share is still a commitment for that
   month. A `source='manual'` line has no item behind it and contributes nothing, by definition.
-  **Three surfaces, one visual language, and the third is not a third copy.** `LOCKED_GLYPH`
+  **Three surfaces, one visual language, and the third is not a third copy.** `COMMITTED_GLYPH`
   (`░`) marks the committed share on the BUDGET vs SPENT bar and on the expenses pane; the
   categories pane carries the amount with its percentage of the cap, because an amount alone
   does not say whether a cap is mostly committed or barely touched. A *different* glyph from
