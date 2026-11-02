@@ -520,14 +520,14 @@ def test_the_summary_splits_each_category_into_paid_and_prorated(db):
                 date="2026-09-20")
     s = summarize_month(db, month="2026-09", today="2026-09-30")
     cat = next(c for c in s.by_category if c.category == "subscriptions")
-    assert (cat.spent, cat.prorated) == (29.99, 20.0)
-    assert round(cat.spent - cat.prorated, 2) == 9.99, "the rest is cash out this month"
+    assert (cat.spent, cat.prorated_spent) == (29.99, 20.0)
+    assert round(cat.spent - cat.prorated_spent, 2) == 9.99, "the rest is cash out this month"
 
 
 def test_a_category_with_no_prepayment_reports_no_prorated_part(db):
     add_expense(db, amount=52.10, description="market", category="grocery", date="2026-09-03")
     s = summarize_month(db, month="2026-09", today="2026-09-30")
-    assert next(c for c in s.by_category if c.category == "grocery").prorated == 0.0
+    assert next(c for c in s.by_category if c.category == "grocery").prorated_spent == 0.0
 
 
 async def test_both_panels_mark_the_prorated_segment(make_app, db, type_into):

@@ -2,6 +2,7 @@ import pytest
 
 from daylogs.money import (
     MoneyError,
+    annual_commitments,
     delete_recurring,
     list_budget,
     list_recurring,
@@ -14,6 +15,10 @@ from daylogs.money import (
     upsert_recurring,
 )
 
+
+def _cats(summary):
+    """Categories by slug, so a test can name the one it means."""
+    return {c.category: c for c in summary.by_category}
 
 # ── recurring ────────────────────────────────────────────────────────────
 def test_monthly_equivalent_divides_annual_by_twelve():
@@ -389,3 +394,111 @@ def test_a_rename_carries_the_line_in_every_month_it_was_rolled_into(db, make_cf
         names = [b["name"] for b in list_budget(db, month=month)]
         assert names == ["Streaming Plus"], f"{month} kept a stale line: {names}"
         assert roll_month_budgets(db, month=month, cfg=cfg) == 0
+
+
+# ── how much of a cap is an annual commitment ────────────────────────────
+def test_an_annual_item_marks_its_share_of_the_cap_as_prorated(db):
+    """The budget side has always prorated — `roll_month_budgets` writes `monthly_cost` — and
+    the result was indistinguishable from a genuinely monthly cap.
+
+    That is a different question from `prorated_spent`, which is the share of *spend* that came
+    from a `#N` charge dated elsewhere. A month can have one, the other, both or neither: this
+    one needs an annual **recurring item**, that one needs a prepaid **expense**. Conflating
+    them under one name is why they are two fields.
+    """
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert cat.budget == 30.0, "20.00 from the annual plus 10.00 monthly"
+    assert cat.prorated_budget == 20.0, "the annual item's monthly share"
+    assert cat.prorated_spent == 0.0, "nothing has been spent, let alone prepaid"
+
+
+def test_a_monthly_only_cap_has_no_prorated_budget(db):
+    """The common case, pinned so the column stays empty when it should."""
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert (cat.budget, cat.prorated_budget) == (10.0, 0.0)
+
+
+def test_a_hand_set_budget_line_is_never_prorated(db):
+    """`b` writes `source='manual'` with no recurring item behind it, so there is no cycle to
+    read. A manual cap is whatever you typed, by definition not an annual share."""
+    upsert_budget(db, month="2026-11", name="Clothing", category="housing", amount=300.0)
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["housing"]
+    assert (cat.budget, cat.prorated_budget) == (300.0, 0.0)
+
+
+def test_a_paused_annual_item_still_counts_in_a_month_it_was_rolled_into(db):
+    """Pausing means "not from now on", never "this never happened" — a line already rolled
+    stays, because you may have paid it. So the share it contributes is still an annual
+    commitment for that month, and the column must say so rather than quietly dropping it
+    when the item is paused later."""
+    rid = upsert_recurring(
+        db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions"
+    )
+    roll_month_budgets(db, month="2026-11")
+    update_recurring(db, rid, active=False)
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert (cat.budget, cat.prorated_budget) == (20.0, 20.0)
+
+
+def test_a_renamed_item_keeps_its_rolled_line_prorated(db):
+    """`_rename_rolled_budgets` moves the budget line with the item, so the join that decides
+    "is this an annual share" has to follow the rename too — otherwise renaming a
+    subscription silently reclassifies its cap as an ordinary monthly one."""
+    rid = upsert_recurring(
+        db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions"
+    )
+    roll_month_budgets(db, month="2026-11")
+    update_recurring(db, rid, name="Yearly Renamed")
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert cat.prorated_budget == 20.0, "the rename must not reclassify the cap"
+
+
+def test_only_annual_items_are_listed_as_commitments(db):
+    """A monthly item is not a commitment — it is this month's bill, and you can stop paying
+    it next month. Seeded with both because a test carrying only an annual item passes with
+    the `cycle` filter removed entirely, which a mutation run demonstrated.
+    """
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    got = annual_commitments(db, ["2026-11"])
+    assert [d["name"] for d in got] == ["Yearly"], got
+    assert got[0]["share"] == 20.0 and got[0]["cost"] == 240.0
+
+
+def test_a_commitment_carries_whether_the_item_is_still_active(db):
+    """A commitment you have stopped renewing reads very differently from one you have not,
+    and the rolled line survives the pause either way."""
+    rid = upsert_recurring(
+        db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions"
+    )
+    roll_month_budgets(db, month="2026-11")
+    assert annual_commitments(db, ["2026-11"])[0]["active"] is True
+    update_recurring(db, rid, active=False)
+    got = annual_commitments(db, ["2026-11"])
+    assert got[0]["active"] is False, "paused, but still committed for this month"
+    assert got[0]["share"] == 20.0
+
+
+def test_commitments_are_ordered_biggest_first(db):
+    """A short pinned list answers "what is holding this cap down", so the biggest is first."""
+    for name, cost in (("Small", 60.0), ("Large", 600.0), ("Middle", 240.0)):
+        upsert_recurring(db, name=name, cost=cost, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    assert [d["name"] for d in annual_commitments(db, ["2026-11"])] == [
+        "Large", "Middle", "Small"
+    ]
+
+
+def test_no_months_means_no_commitments(db):
+    """An unbounded span has no calendar months, the way `Span.months()` returns `[]` — and
+    `[]` through the `month IN (...)` marks would be a syntax error, not an empty result."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    assert annual_commitments(db, []) == []

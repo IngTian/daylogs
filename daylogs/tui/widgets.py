@@ -16,6 +16,13 @@ _NO_SHARE = "—"
 # line, and a segment distinguished by hue alone would both fight that and break the rule
 # that colour is never the only signal. `shade` adds the colour on top, afterwards.
 PRORATED_GLYPH = "▒"
+# The share of a *cap* an annual recurring item has already committed — a different question
+# from PRORATED_GLYPH, which marks a share of *spend*. A month can carry either, both or
+# neither: this one needs an annual recurring item, that one a `#N` expense. Two glyphs
+# because one mark for two questions is how a figure and its own explanation drift apart.
+# Lighter than `▒` and solid where `·` is a single dot, so all three zones read apart with no
+# colour at all.
+LOCKED_GLYPH = "░"
 
 
 # Good/bad signalling. Named rather than inlined so one edit changes every
@@ -288,6 +295,7 @@ def budget_bars(
     label_width: int = 14,
     bar_width: int = 14,
     prorated: dict[str, float] | None = None,
+    locked: dict[str, float] | None = None,
 ) -> list[str]:
     """`label ███████░░░ 412/500 ⚠` — spent against its own budget.
 
@@ -299,16 +307,30 @@ def budget_bars(
     the month's charges) drove it to -44 of 14 cells, and `_EMPTY * (14 - -44)`
     then emitted a 58-character bar that pushed the amounts past the line's width
     and off the panel — the row rendered as bare dots with no numbers at all.
+
+    Three zones, left to right: spend, free room, then `locked` — the share of the cap an
+    annual item has already committed. Locked sits at the far end, where the allowance runs
+    out, because that is what it means: spoken for. It is clamped to the *unfilled* region, so
+    spend eats the free room first and the three can never sum past the bar — at a full cap
+    the locked zone is gone, which reads correctly, since nothing is left either way.
     """
     bar_width = _fit_bar(width, label_width, _BUDGET_TAIL, bar_width)
     prorated = prorated or {}
+    locked = locked or {}
     out: list[str] = []
     for name, spent, budget in items:
         if budget > 0:
             frac = spent / budget
             filled = min(max(int(round(frac * bar_width)), 0), bar_width)
             pro = _prorated_cells(prorated.get(name, 0.0), budget, bar_width, filled)
-            bar = PRORATED_GLYPH * pro + _FULL * (filled - pro) + _EMPTY * (bar_width - filled)
+            free = bar_width - filled
+            lock = _prorated_cells(locked.get(name, 0.0), budget, bar_width, free)
+            bar = (
+                PRORATED_GLYPH * pro
+                + _FULL * (filled - pro)
+                + _EMPTY * (free - lock)
+                + LOCKED_GLYPH * lock
+            )
             flag = " ⚠" if spent > budget else "  "
             tail = f"{money(spent):>9} /{money(budget):>9}{flag}"
         else:

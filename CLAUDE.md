@@ -342,7 +342,7 @@ appended prose where it was convenient rather than editing the map.
   category group it would fold into a total that answers a cash question.
   **Both panels split the fill the same way**, because `spent` is two different quantities
   added together and the panels are where the number is actually read: a category showed
-  `30.00 / 50.00` as one green bar with 20.00 of it proration. `CategorySpend.prorated`
+  `30.00 / 50.00` as one green bar with 20.00 of it proration. `CategorySpend.prorated_spent`
   carries the split and comes from `_prorated_by_category`, which sums **`prepaid_inflows`**
   rather than re-walking `_prepaid_shares` — the panel's segment and the rows the pane pins
   are then the same arithmetic, and two readers of one question is exactly how a total and
@@ -371,6 +371,38 @@ appended prose where it was convenient rather than editing the map.
   month *is* an ordinary expense, and a second representation of the plain case is a branch
   in every reader. `0` is the clearing value on `update_expense`, for the same reason `""` is
   the note's — it drops None to tell "not mentioned" from "set to nothing".
+  **Two prorations, named apart, because a month can carry either, both or neither.**
+  `prorated_spent` is the share of *spend* that came from a `#N` charge dated in another
+  month; `prorated_budget` is the share of the *cap* an annual recurring item has already
+  committed, written by `roll_month_budgets` as `monthly_cost`. One needs a prepaid expense,
+  the other an annual item. The field was called `prorated` while only the first existed, and
+  one word for two quantities is how a figure and its own explanation drift apart — the
+  failure this block already records twice. `_annual_budget_by_category` aggregates the
+  second per category and `money.annual_commitments` lists it per item.
+  The budget side had prorated since `roll_month_budgets` first wrote `monthly_cost`, and the
+  result was indistinguishable from a genuinely monthly cap: a `subscriptions` line could be
+  two thirds an annual commitment with nothing saying so, which read as "no proration exists"
+  precisely because the `▒` that *was* implemented answers the other question and correctly
+  drew nothing. Both joins are on `budget.name = recurring.name`, which `_rename_rolled_budgets`
+  keeps in step so a rename cannot reclassify a cap, and neither filters on `active`: a line
+  already rolled stays when you pause the item, so its share is still a commitment for that
+  month. A `source='manual'` line has no item behind it and contributes nothing, by definition.
+  **Three surfaces, one visual language, and the third is not a third copy.** `LOCKED_GLYPH`
+  (`░`) marks the committed share on the BUDGET vs SPENT bar and on the expenses pane; the
+  categories pane carries the amount with its percentage of the cap, because an amount alone
+  does not say whether a cap is mostly committed or barely touched. A *different* glyph from
+  `▒` on purpose: one mark for two questions is the thing this block keeps warning about.
+  On the bar the zones run spend, free, committed — committed at the far end because that is
+  where the allowance runs out, clamped to the *unfilled* region so spend eats the free room
+  first and the three can never sum past the bar. At a full cap the committed zone is gone,
+  which reads correctly: nothing is left either way.
+  The expenses pane row earns its place by **naming the item**, which neither panel does —
+  `22.50` is a number, `Tradingview of 270.00/yr` is an answer. That makes `░` a *second* kind
+  of non-cash row there, after `⇢`, on a pane whose own question is what left the account.
+  Both are marked and dimmed for exactly that reason, and both are inert. It also carries
+  `paused`, because a commitment you have stopped renewing reads very differently from one you
+  have not, and the line survives the pause either way.
+
 - **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
   `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by
   `PRAGMA table_info` so it is idempotent. Still not a migration framework, and it must stay

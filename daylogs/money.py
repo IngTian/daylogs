@@ -438,9 +438,18 @@ class CategorySpend:
     spent: float
     delta: float
     history: list[float] = field(default_factory=list)
-    # How much of `spent` is a prorated share rather than money that left in this span.
+    # Two different prorations, named apart because a month can carry either, both or
+    # neither and one word for both is how a total and its own list came to disagree before.
+    #
+    # `prorated_spent`: how much of `spent` is a share of a `#N` charge dated in another
+    # month. Needs a prepaid **expense**.
+    # `prorated_budget`: how much of `budget` is an annual recurring item's monthly share,
+    # written by `roll_month_budgets` as `monthly_cost`. Needs an annual **recurring item**,
+    # and says how much of the cap is already committed rather than discretionary.
+    #
     # Appended last so positional construction of the fields above keeps working.
-    prorated: float = 0.0
+    prorated_spent: float = 0.0
+    prorated_budget: float = 0.0
 
 
 @dataclass
@@ -518,7 +527,8 @@ def summarize_span(
 
     spent_by_cat = _spent_by_category(conn, span)
     budget_by_cat = _budget_by_category(conn, months)
-    prorated_by_cat = _prorated_by_category(conn, span)
+    prorated_spent_by_cat = _prorated_by_category(conn, span)
+    prorated_budget_by_cat = _annual_budget_by_category(conn, months)
 
     by_category: list[CategorySpend] = []
     for cat in sorted(set(budget_by_cat) | set(spent_by_cat)):
@@ -531,7 +541,8 @@ def summarize_span(
                 spent=spent,
                 delta=round(budget - spent, 2),
                 history=history.get(cat, [0.0] * HISTORY_MONTHS),
-                prorated=prorated_by_cat.get(cat, 0.0),
+                prorated_spent=prorated_spent_by_cat.get(cat, 0.0),
+                prorated_budget=prorated_budget_by_cat.get(cat, 0.0),
             )
         )
 
@@ -735,6 +746,77 @@ def _budget_by_category(conn, months: list[str]) -> dict[str, float]:
         sql = "SELECT category, SUM(amount) AS total FROM budget GROUP BY category"
         args = []
     return {r["category"]: round(float(r["total"]), 2) for r in conn.execute(sql, args)}
+
+
+def annual_commitments(conn, months: list[str]) -> list[dict]:
+    """The annual recurring items with a budget line in `months`, and what each commits.
+
+    `_annual_budget_by_category` aggregates this per category, which answers "how much of
+    this cap is spoken for" but never says *by what*. The recurring pane names the items but
+    does not tie them to a month. So this is the one surface that says both: Tradingview,
+    22.50 of November, from 270.00 a year.
+
+    Per **item**, summed over the months in range, the same window `_budget_by_category` and
+    `_annual_budget_by_category` use — so the three figures are comparable rather than three
+    answers to slightly different questions.
+
+    No `active` filter, for the reason the aggregate has none: a line already rolled stays
+    when you pause the item, because you may have paid it.
+    """
+    if not months:
+        return []
+    marks = ", ".join("?" for _ in months)
+    rows = conn.execute(
+        f"SELECT b.name, b.category, SUM(b.amount) AS share, r.cost, r.active"
+        f" FROM budget b JOIN recurring r ON r.name = b.name"
+        f" WHERE b.month IN ({marks}) AND r.cycle = 'annually'"
+        f" GROUP BY b.name, b.category, r.cost, r.active"
+        f" ORDER BY share DESC, b.name ASC",
+        list(months),
+    )
+    return [
+        {
+            "name": r["name"],
+            "category": r["category"],
+            "share": round(float(r["share"]), 2),
+            "cost": float(r["cost"]),
+            "active": bool(r["active"]),
+        }
+        for r in rows
+    ]
+
+
+def _annual_budget_by_category(conn, months: list[str]) -> dict[str, float]:
+    """How much of each category's cap is an annual recurring item's monthly share.
+
+    The budget side has prorated since `roll_month_budgets` first wrote `monthly_cost`, and
+    the result was indistinguishable from a genuinely monthly cap — so a `subscriptions`
+    line could be two thirds an annual commitment with nothing saying so. This is the
+    question "how much of this cap is already spoken for".
+
+    Joined on `budget.name = recurring.name`, which is what `_rename_rolled_budgets` keeps in
+    step, so renaming an item does not silently reclassify its cap. A `source='manual'` line
+    has no item behind it and contributes nothing, by definition. A **paused** item still
+    counts in a month it was already rolled into: pausing means "not from now on", never
+    "this never happened", so the share stays an annual commitment for that month — which is
+    why there is no `active` filter here.
+
+    Summed over the same `months` as `_budget_by_category`, so the two figures are comparable
+    and inherit the same `1w` mismatch recorded there.
+    """
+    if months:
+        marks = ", ".join("?" for _ in months)
+        where, args = f"WHERE b.month IN ({marks})", list(months)
+    else:
+        where, args = "", []
+    rows = conn.execute(
+        f"SELECT b.category, SUM(b.amount) AS total FROM budget b"
+        f" JOIN recurring r ON r.name = b.name"
+        f" {where}{' AND' if where else 'WHERE'} r.cycle = 'annually'"
+        f" GROUP BY b.category",
+        args,
+    )
+    return {r["category"]: round(float(r["total"]), 2) for r in rows}
 
 
 def _month_after(month: str) -> str:
