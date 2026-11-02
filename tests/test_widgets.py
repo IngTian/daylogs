@@ -493,28 +493,28 @@ def test_ranked_bars_without_prorated_is_exactly_what_it_was():
     assert ranked_bars(items, width=60) == ranked_bars(items, width=60, prorated={})
 
 
-# ── the locked share of a cap ────────────────────────────────────────────
+# ── the committed share of a cap ────────────────────────────────────────────
 # A third zone, because the bar's extent is the cap and the cap is two things: what is still
 # discretionary and what an annual item has already committed. `▒` (prorated *spend*) and `░`
-# (locked *cap*) are different glyphs because a month can carry either, both or neither — one
+# (committed *cap*) are different glyphs because a month can carry either, both or neither — one
 # needs a `#N` expense, the other an annual recurring item.
-def test_the_locked_share_marks_the_far_end_of_the_cap():
-    """Locked sits at the right, where the allowance runs out: "this much is spoken for".
+def test_the_committed_share_marks_the_far_end_of_the_cap():
+    """Committed sits at the right, where the allowance runs out: "this much is spoken for".
     Spend grows from the left, so the two zones cannot overwrite each other."""
-    line = budget_bars([("subs", 0.0, 100.0)], width=60, locked={"subs": 50.0})[0]
+    line = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 50.0})[0]
     bar = line[14:28]
     assert bar.count("░") == 7, f"half a 14-cell cap: {bar!r}"
     assert bar.endswith("░" * 7), f"and at the far end: {bar!r}"
     assert bar.count("·") == 7, f"the rest is free: {bar!r}"
 
 
-def test_spending_eats_the_free_room_before_the_locked_room():
-    """Clamped to the unfilled region. As spend grows the locked zone shrinks, which reads
+def test_spending_eats_the_free_room_before_the_committed_room():
+    """Clamped to the unfilled region. As spend grows the committed zone shrinks, which reads
     correctly — at a full cap nothing is left, committed or otherwise — and never lets the
     three zones sum past the bar."""
-    wide = budget_bars([("subs", 0.0, 100.0)], width=60, locked={"subs": 50.0})[0][14:28]
-    half = budget_bars([("subs", 50.0, 100.0)], width=60, locked={"subs": 50.0})[0][14:28]
-    full = budget_bars([("subs", 100.0, 100.0)], width=60, locked={"subs": 50.0})[0][14:28]
+    wide = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
+    half = budget_bars([("subs", 50.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
+    full = budget_bars([("subs", 100.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
     assert (wide.count("░"), half.count("░"), full.count("░")) == (7, 7, 0)
     assert len(wide) == len(half) == len(full) == 14, "the bar keeps its width throughout"
     assert full.count("█") == 14, "a full cap is a full bar"
@@ -524,7 +524,7 @@ def test_both_prorations_can_appear_in_one_bar():
     """They answer different questions and are independent: a `#N` charge spread into this
     month, and a cap partly committed to an annual item."""
     line = budget_bars(
-        [("subs", 50.0, 100.0)], width=60, prorated={"subs": 50.0}, locked={"subs": 30.0}
+        [("subs", 50.0, 100.0)], width=60, prorated={"subs": 50.0}, committed={"subs": 30.0}
     )[0]
     bar = line[14:28]
     assert "▒" in bar and "░" in bar, f"both marks: {bar!r}"
@@ -532,28 +532,28 @@ def test_both_prorations_can_appear_in_one_bar():
     assert len(bar) == 14
 
 
-def test_a_cap_with_nothing_locked_is_exactly_what_it_was():
-    """The regression guard: every existing caller passes no `locked` and must be untouched."""
+def test_a_cap_with_nothing_committed_is_exactly_what_it_was():
+    """The regression guard: every existing caller passes no `committed` and must be untouched."""
     items = [("subs", 50.0, 100.0), ("rent", 750.0, 750.0), ("food", 540.69, 500.0)]
-    assert budget_bars(items, width=60) == budget_bars(items, width=60, locked={})
+    assert budget_bars(items, width=60) == budget_bars(items, width=60, committed={})
     assert "░" not in "".join(budget_bars(items, width=60))
 
 
-def test_a_fully_locked_cap_shows_no_free_room():
-    line = budget_bars([("subs", 0.0, 100.0)], width=60, locked={"subs": 100.0})[0]
+def test_a_fully_committed_cap_shows_no_free_room():
+    line = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 100.0})[0]
     bar = line[14:28]
     assert bar == "░" * 14, f"all committed, none free: {bar!r}"
 
 
-def test_a_tiny_locked_share_still_gets_a_cell():
+def test_a_tiny_committed_share_still_gets_a_cell():
     """Same lesson as the prorated fill and the from_zero sparkline: a real component that
     rounds to zero cells renders as absent, and absent is a different claim from small."""
-    line = budget_bars([("subs", 0.0, 1000.0)], width=60, locked={"subs": 5.0})[0]
+    line = budget_bars([("subs", 0.0, 1000.0)], width=60, committed={"subs": 5.0})[0]
     assert "░" in line, f"5.00 of 1000 is under half a cell but is not nothing: {line!r}"
 
 
-def test_an_unbudgeted_row_cannot_be_locked():
+def test_an_unbudgeted_row_cannot_be_committed():
     """No cap means no bar to divide — the `budget <= 0` branch draws dots and a dash, and a
-    locked share of nothing is not a thing."""
-    line = budget_bars([("subs", 12.0, 0.0)], width=60, locked={"subs": 30.0})[0]
+    committed share of nothing is not a thing."""
+    line = budget_bars([("subs", 12.0, 0.0)], width=60, committed={"subs": 30.0})[0]
     assert "░" not in line, line
