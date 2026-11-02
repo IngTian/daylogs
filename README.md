@@ -345,6 +345,16 @@ maintenance for the day, then the average and a sparkline over the horizon.
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
 
+A bar carries up to three zones, because a cap is not one quantity. Spend fills from
+the left, and inside it `▒` marks the part that is a **prorated share** of a payment
+dated in another month — a `#12` charge counts a twelfth here, not all of it. At the
+far end, `░` marks the part of the cap an **annual** subscription has already
+committed, which is the room you cannot reclaim by spending less this month. Both are
+dimmed and both are glyphs, so they survive a terminal with no colour; each is named
+in the panel title, and only when one is actually drawn. The categories pane carries
+the same committed figure with its share of the cap, since an amount alone does not
+say whether a cap is mostly spoken for or barely touched.
+
 ![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/money.png)
 
 Ranked bars rather than pie charts, deliberately: a terminal has about eight
