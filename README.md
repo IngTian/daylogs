@@ -345,15 +345,20 @@ maintenance for the day, then the average and a sparkline over the horizon.
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
 
-A bar carries up to three zones, because a cap is not one quantity. Spend fills from
-the left, and inside it `▒` marks the part that is a **prorated share** of a payment
-dated in another month — a `#12` charge counts a twelfth here, not all of it. At the
-far end, `░` marks the part of the cap an **annual** subscription has already
-committed, which is the room you cannot reclaim by spending less this month. Both are
-dimmed and both are glyphs, so they survive a terminal with no colour; each is named
-in the panel title, and only when one is actually drawn. The categories pane carries
-the same committed figure with its share of the cap, since an amount alone does not
-say whether a cap is mostly spoken for or barely touched.
+`▒` marks **proration** — a multi-month amount cut into monthly slices. It appears in
+two places on a bar, and *where* is what tells them apart, because a bar already fills
+from the left with what you spent and ends in dots for what you did not:
+
+- inside the fill, it is a slice of **spend** — a `#12` charge counts a twelfth here,
+  not all of it, because only a twelfth belongs to this month;
+- past the dots at the far end, it is a slice of the **cap** — an annual subscription's
+  monthly share, which is room you cannot reclaim by spending less.
+
+Same arithmetic either way; the only difference is whether the money has moved yet. The
+glyph is dimmed and it is a glyph rather than a colour, so it survives a terminal with
+none, and the panel names it only when one is drawn. The categories pane shows the
+reserved figure with its share of the cap, since an amount alone does not say whether a
+cap is mostly spoken for or barely touched.
 
 ![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/money.png)
 

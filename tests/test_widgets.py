@@ -495,16 +495,16 @@ def test_ranked_bars_without_prorated_is_exactly_what_it_was():
 
 # ── the committed share of a cap ────────────────────────────────────────────
 # A third zone, because the bar's extent is the cap and the cap is two things: what is still
-# discretionary and what an annual item has already committed. `▒` (prorated *spend*) and `░`
+# discretionary and what an annual item has already committed. `▒` (prorated *spend*) and `▒`
 # (committed *cap*) are different glyphs because a month can carry either, both or neither — one
 # needs a `#N` expense, the other an annual recurring item.
 def test_the_committed_share_marks_the_far_end_of_the_cap():
     """Committed sits at the right, where the allowance runs out: "this much is spoken for".
     Spend grows from the left, so the two zones cannot overwrite each other."""
-    line = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 50.0})[0]
+    line = budget_bars([("subs", 0.0, 100.0)], width=60, reserved={"subs": 50.0})[0]
     bar = line[14:28]
-    assert bar.count("░") == 7, f"half a 14-cell cap: {bar!r}"
-    assert bar.endswith("░" * 7), f"and at the far end: {bar!r}"
+    assert bar.count("▒") == 7, f"half a 14-cell cap: {bar!r}"
+    assert bar.endswith("▒" * 7), f"and at the far end: {bar!r}"
     assert bar.count("·") == 7, f"the rest is free: {bar!r}"
 
 
@@ -512,48 +512,111 @@ def test_spending_eats_the_free_room_before_the_committed_room():
     """Clamped to the unfilled region. As spend grows the committed zone shrinks, which reads
     correctly — at a full cap nothing is left, committed or otherwise — and never lets the
     three zones sum past the bar."""
-    wide = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
-    half = budget_bars([("subs", 50.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
-    full = budget_bars([("subs", 100.0, 100.0)], width=60, committed={"subs": 50.0})[0][14:28]
-    assert (wide.count("░"), half.count("░"), full.count("░")) == (7, 7, 0)
+    wide = budget_bars([("subs", 0.0, 100.0)], width=60, reserved={"subs": 50.0})[0][14:28]
+    half = budget_bars([("subs", 50.0, 100.0)], width=60, reserved={"subs": 50.0})[0][14:28]
+    full = budget_bars([("subs", 100.0, 100.0)], width=60, reserved={"subs": 50.0})[0][14:28]
+    assert (wide.count("▒"), half.count("▒"), full.count("▒")) == (7, 7, 0)
     assert len(wide) == len(half) == len(full) == 14, "the bar keeps its width throughout"
     assert full.count("█") == 14, "a full cap is a full bar"
 
 
-def test_both_prorations_can_appear_in_one_bar():
-    """They answer different questions and are independent: a `#N` charge spread into this
-    month, and a cap partly committed to an annual item."""
+def test_one_glyph_two_runs_and_position_carries_the_difference():
+    """Both prorations use one glyph, so *where* a run sits is what distinguishes them.
+
+    There used to be two shades. The owner could not tell them apart, and they are the same
+    arithmetic anyway — a multi-month amount cut into months — differing only in whether the
+    money has moved. The bar already encodes that: it fills from the left with what was spent
+    and ends in dots for what was not. So a mosaic run touching the fill is a slice of
+    *spend*, and a run past the dots is a slice of the *cap*. This pins that layout, because
+    once the shades are gone the layout is the only thing left saying which is which.
+    """
+    # 20 of the 50 spent came from a `#N` charge; 30 of the 100 cap is an annual item.
     line = budget_bars(
-        [("subs", 50.0, 100.0)], width=60, prorated={"subs": 50.0}, committed={"subs": 30.0}
+        [("subs", 50.0, 100.0)], width=60, prorated={"subs": 20.0}, reserved={"subs": 30.0}
     )[0]
     bar = line[14:28]
-    assert "▒" in bar and "░" in bar, f"both marks: {bar!r}"
-    assert bar.index("▒") < bar.index("░"), "spend from the left, cap from the right"
     assert len(bar) == 14
+    # spend run: mosaic then solid, flush left. cap run: mosaic, flush right. dots between.
+    assert bar.startswith("▒"), f"the spend slice leads: {bar!r}"
+    assert bar.endswith("▒"), f"the cap slice trails: {bar!r}"
+    assert "·" in bar, f"free room separates them: {bar!r}"
+    assert "█" in bar, f"and the cash spend is still solid: {bar!r}"
+    left, _, right = bar.partition("·" * bar.count("·"))
+    assert set(left) == {"▒", "█"}, f"left of the dots is spend only: {left!r}"
+    assert set(right) == {"▒"}, f"right of the dots is cap only: {right!r}"
+
+
+def test_an_entirely_prorated_spend_is_still_two_readable_runs():
+    """The ambiguous case, pinned on purpose: when *all* the spend is a `#N` share there is no
+    solid cell to anchor the left run, so the bar is mosaic-dots-mosaic. The free room between
+    them is the only separator, which is why the two zones are never allowed to touch — if
+    free room ever collapsed to nothing the two runs would merge into one and the layout would
+    stop saying anything."""
+    bar = budget_bars(
+        [("subs", 50.0, 100.0)], width=60, prorated={"subs": 50.0}, reserved={"subs": 30.0}
+    )[0][14:28]
+    assert "█" not in bar, f"nothing was paid in cash this month: {bar!r}"
+    assert "·" in bar, f"and the dots still separate the two runs: {bar!r}"
+    runs = [r for r in bar.split("·") if r]
+    assert len(runs) == 2 and set("".join(runs)) == {"▒"}, f"two mosaic runs: {bar!r}"
 
 
 def test_a_cap_with_nothing_committed_is_exactly_what_it_was():
     """The regression guard: every existing caller passes no `committed` and must be untouched."""
     items = [("subs", 50.0, 100.0), ("rent", 750.0, 750.0), ("food", 540.69, 500.0)]
-    assert budget_bars(items, width=60) == budget_bars(items, width=60, committed={})
-    assert "░" not in "".join(budget_bars(items, width=60))
+    assert budget_bars(items, width=60) == budget_bars(items, width=60, reserved={})
+    assert "▒" not in "".join(budget_bars(items, width=60))
 
 
 def test_a_fully_committed_cap_shows_no_free_room():
-    line = budget_bars([("subs", 0.0, 100.0)], width=60, committed={"subs": 100.0})[0]
+    line = budget_bars([("subs", 0.0, 100.0)], width=60, reserved={"subs": 100.0})[0]
     bar = line[14:28]
-    assert bar == "░" * 14, f"all committed, none free: {bar!r}"
+    assert bar == "▒" * 14, f"all committed, none free: {bar!r}"
 
 
 def test_a_tiny_committed_share_still_gets_a_cell():
     """Same lesson as the prorated fill and the from_zero sparkline: a real component that
     rounds to zero cells renders as absent, and absent is a different claim from small."""
-    line = budget_bars([("subs", 0.0, 1000.0)], width=60, committed={"subs": 5.0})[0]
-    assert "░" in line, f"5.00 of 1000 is under half a cell but is not nothing: {line!r}"
+    line = budget_bars([("subs", 0.0, 1000.0)], width=60, reserved={"subs": 5.0})[0]
+    assert "▒" in line, f"5.00 of 1000 is under half a cell but is not nothing: {line!r}"
 
 
 def test_an_unbudgeted_row_cannot_be_committed():
     """No cap means no bar to divide — the `budget <= 0` branch draws dots and a dash, and a
     committed share of nothing is not a thing."""
-    line = budget_bars([("subs", 12.0, 0.0)], width=60, committed={"subs": 30.0})[0]
-    assert "░" not in line, line
+    line = budget_bars([("subs", 12.0, 0.0)], width=60, reserved={"subs": 30.0})[0]
+    assert "▒" not in line, line
+
+
+def test_the_two_runs_always_keep_a_cell_between_them():
+    """One glyph means position is the only thing telling the two runs apart, so they are
+    never allowed to become one block.
+
+    Reachable, and reproduced before the guard existed: every expense in the category marked
+    `#N` (so the whole fill is mosaic, no solid) *and* the reservation covering all the
+    remaining cap (so no dots) rendered fourteen identical cells. The amounts beside it do not
+    disambiguate either — nothing on the row said where spend ended and cap began.
+
+    The guard costs the reserved run one cell, and only in this case. That is the cheaper lie:
+    a bar one cell off still reads, a bar that asserts nothing does not.
+    """
+    bar = budget_bars(
+        [("x", 20.0, 50.0)], width=52, prorated={"x": 20.0}, reserved={"x": 30.0}
+    )[0][14:28]
+    assert len(bar) == 14
+    assert "█" not in bar and "·" in bar, f"no solid to separate them, so a dot must: {bar!r}"
+    runs = [r for r in bar.replace("·", " ").split() if r]
+    assert len(runs) == 2, f"two readable mosaic runs, not one block: {bar!r}"
+
+
+def test_the_guard_does_not_fire_when_something_else_separates_them():
+    """It costs a cell, so it only pays when it has to. A solid run between the two mosaics
+    is a boundary already, and dots that survive the reservation are too."""
+    # solid between them
+    solid = budget_bars(
+        [("x", 50.0, 100.0)], width=52, prorated={"x": 20.0}, reserved={"x": 30.0}
+    )[0][14:28]
+    assert "█" in solid and solid.endswith("▒"), solid
+    # and with no prorated spend at all there is only one run, so nothing to separate
+    one = budget_bars([("x", 50.0, 100.0)], width=52, reserved={"x": 30.0})[0][14:28]
+    assert one.count("▒") == 4, f"the reserved run keeps its full width: {one!r}"
