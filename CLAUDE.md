@@ -185,13 +185,34 @@ appended prose where it was convenient rather than editing the map.
   `@work(exclusive=True)`, so a second un-factored entry cancels the first — and
   `asyncio.CancelledError` is a `BaseException`, so `except Exception` never saw it. A
   second activity on the same day therefore discarded the first **row**, which is precisely
-  what this bullet forbids, on the success path of an ordinary hurried day. Worse, worker 2
-  re-reads the day's activities to infer a PAL, so the vanished row was missing from *its*
-  input too and the day was inferred from half of itself — on the code path whose own
-  comment says "The day, not the entry: a PAL is not additive". The handler re-raises, or
-  Textual marks the worker FAILED rather than CANCELLED, and it deliberately does **not**
-  touch the popup or toast: the keyed indicator belongs to the worker still running, and
-  clearing it there is the "screen goes quiet mid-call" defect that has its own test.
+  what this bullet forbids, on the success path of an ordinary hurried day. The handler
+  re-raises, because a *swallowed* cancel is recorded as `SUCCESS` — measured on textual
+  8.2.8, not CANCELLED and not FAILED; nothing in this app reads `Worker.state`, so the
+  `raise` is hygiene rather than load-bearing, and the first version of this note had it
+  wrong in a file whose own rule is that recorded Textual internals are measured facts.
+  It calls **`body.add_activity` directly, never `_write_activity`**, which continues into
+  `reload()` and a success toast. Both are wrong from a cancelled worker, and the reload is
+  worse than wrong: at app shutdown the nodes are already pruned, so `query_one` raises
+  `NoMatches` *inside* the `except`, replaces the `CancelledError`, and Textual reports
+  ERROR with a `show_locals=True` traceback — putting `cfg.db_path` on screen as the last
+  image of a clean quit. Reproduced; the row survived either way, so the first draft of
+  this fix traded silence for a panic. `test_an_inference_in_flight_at_shutdown_keeps_its_row_and_exits_clean`
+  is the tripwire, and it exists because no test covered a cancellation that is not a
+  supersede.
+  It deliberately does **not** touch the popup: the keyed indicator belongs to the worker
+  still running (`WorkerManager.add_worker` cancels the group *before* starting the
+  replacement, which then re-begins the same key), and clearing it from the cancelled worker
+  is the "screen goes quiet mid-call" defect that has its own test.
+  **Rescuing the row does not fix worker 2's view of the day, and no test may claim it
+  does.** `claude._run` kills and `await proc.wait()`s its child on `BaseException`, so the
+  unwind suspends while worker 2's `logged` re-query — above its `try` — runs immediately.
+  Measured false at every unwind length but zero, and the real path is ~21 hops, so a
+  two-activity day can still get a one-activity PAL. An earlier version of the test asserted
+  the opposite and **passed**, because a fake runner returning without awaiting lets the
+  rescue land first: the `test_fixing_the_category_does_not_loop_forever` shape again. The
+  clean fix is to insert on submit and `UPDATE` the factor when the estimate lands, which
+  deletes this handler instead of adding to it — deliberately not done here, because it
+  touches both submit paths and the "only the entry path infers a factor" rule.
   Food's equivalent cannot do this and the asymmetry is the **schema**, not an oversight:
   `food.kcal` is `NOT NULL` and a superseded estimate has no number, so that path can only
   *state* the loss — it names the dropped line and promises no recovery key, because prompt

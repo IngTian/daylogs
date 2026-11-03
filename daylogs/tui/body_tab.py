@@ -763,10 +763,13 @@ class BodyTab(PanelTab):
             # Deliberately no "press f then ↑" — prompt history is a per-label deque and any
             # food line submitted in between moves what ↑ reaches, so the hint would be wrong
             # exactly when it is needed.
+            # "cancelled", not "superseded by a newer estimate": the other cancel path is
+            # app shutdown, where nothing superseded anything, and this sentence also goes
+            # to the rotating log.
             self.app.notify_error(
-                f"{r.description} was superseded by a newer estimate and not logged"
+                f"{r.description} was not logged — the estimate was cancelled"
             )
-            raise  # Textual needs it to mark the worker CANCELLED, not FAILED
+            raise  # or a swallowed cancel is recorded as SUCCESS for work that never ran
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
@@ -1111,18 +1114,40 @@ class BodyTab(PanelTab):
             # `BaseException`, so the `except Exception` below never caught it and a second
             # un-factored activity on the same day silently discarded the first **row**.
             #
-            # That was worse than the food case in two ways. It contradicted the invariant
-            # this docstring states, and worker 2 re-reads `logged` from the database at the
-            # top — so the vanished row was missing there too, and the day's PAL was inferred
-            # from a partial day, on the exact code path whose comment says "The day, not the
-            # entry: a PAL is not additive." Logging two activities in one day is the flow
-            # that re-query exists for.
+            # Rescuing the row does **not** fix worker 2's view of the day, and it would be
+            # convenient to claim otherwise. `claude._run` kills and `await proc.wait()`s its
+            # child on `BaseException`, so this unwind suspends, while worker 2's first step
+            # — the `logged` re-query above the `try` — runs immediately. Measured: the row
+            # lands after that read at every unwind length except zero, and the real path is
+            # ~21 hops. So a two-activity day can still get a one-activity PAL; what is
+            # fixed is that the activity is no longer *gone*. The clean answer is to insert
+            # on submit and `UPDATE` the factor when the estimate lands, which would delete
+            # this handler rather than add to it — a separate slice, because it touches both
+            # submit paths and the "only the entry path infers a factor" invariant.
             #
-            # No `_set_inferring(False)` and no toast: the popup key belongs to the worker
-            # that is still running, and worker 2 will announce the day it resolves. The row
-            # is what had to survive.
-            self._write_activity(r, source="estimated")
-            raise  # Textual needs it to mark the worker CANCELLED, not FAILED
+            # `add_activity` directly, **not** `_write_activity`, which continues into
+            # `self.reload()` and `self.app.notify(...)`. Both are wrong from here. The
+            # toast is a success message for an entry whose number never arrived, and the
+            # reload reaches the DOM — so when the cancellation is the one app shutdown
+            # causes, `query_one("#weight-head")` raises `NoMatches` *inside* this handler,
+            # replacing the `CancelledError`. Textual then takes its `except Exception`
+            # branch and reports ERROR rather than CANCELLED, printing a traceback with
+            # `show_locals=True` — which puts `cfg.db_path` on the user's screen as the
+            # parting image of a clean quit. Reproduced at teardown; the row survived
+            # either way, so this was a regression from silence to a panic.
+            #
+            # No `_set_inferring(False)` either: the popup key belongs to the worker that is
+            # still running, and `WorkerManager.add_worker` cancels the group *before*
+            # starting the replacement, so the replacement re-begins that same key.
+            body.add_activity(
+                self.app.conn,
+                description=r.description,
+                date=r.date,
+                at=r.at,
+                factor=r.factor,
+                source="estimated",
+            )
+            raise  # or a swallowed cancel is recorded as SUCCESS for work that never ran
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_inferring(False)
             self._write_activity(r, source="estimated")
