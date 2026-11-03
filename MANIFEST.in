@@ -1,0 +1,35 @@
+# What the sdist carries. The wheel is what `pip`/`uv` install and it never included
+# tests; this file exists for the source tarball, which did.
+#
+# setuptools' implicit defaults glob `tests/test*.py` — which matches `test_*.py` and
+# therefore shipped 49 test files, 60% of the tarball, while missing `conftest.py` and
+# `helpers.py` by name. So every sdist since 0.2.0 carried a suite that cannot run: 17
+# files ImportError on `helpers`, 3 on `conftest`, and the rest error at fixture setup.
+#
+# That is not merely wasteful, it is actively harmful in one specific way. The shipped
+# suite includes `test_log_isolation.py`, whose own docstring says "The autouse fixture in
+# conftest is what holds this; this is its tripwire" — so it ships the tripwire without
+# the thing it trips. `test_cli.py` ships too and calls `main()` many times, each running
+# `setup_logging()` off `Path.home()`; with no `conftest.py` there is no `_logs_to_tmp`,
+# and anyone running the shipped tests appends to their own real
+# `~/.daylogs/logs/daylogs.log` — the exact defect that test exists to prevent.
+#
+# Pruning rather than grafting, because the tests serve this repo and not the package: a
+# user installs `day` to record a weight, and the suite needs a dev install
+# (`uv pip install -e '.[dev]'`) to be runnable at all. Grafting would also be defensible
+# — it would ship the fixtures and make the suite work — but shipping half of it is not,
+# and 767 KB of unrunnable test code is the worse half to keep.
+prune tests
+
+# Development and release scaffolding, none of which a source consumer can use: the
+# screenshot renderer drives a live app against its own fixture, and the workflows only
+# mean anything inside this GitHub repo.
+prune .github
+exclude tools/screenshots.py
+
+# What remains is the 36 modules, `pyproject.toml` and `README.md` — the last because
+# `readme = "README.md"` makes setuptools include it as package metadata whatever this file
+# says. Verified rather than assumed: `CLAUDE.md` is *not* in the tarball and never was, and
+# neither is `assets/`, which the README does not need because its three image links are
+# absolute `raw.githubusercontent.com` URLs. Measured: 1,323,922 -> 522,060 uncompressed
+# bytes, with every module still present.

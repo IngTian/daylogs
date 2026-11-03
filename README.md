@@ -349,7 +349,7 @@ The two answer different questions and deliberately do not add up to the same nu
 BUDGET vs SPENT asks whether you are inside the cap, so it counts the cash that left your
 account. WHERE IT WENT asks what the month *cost*, so it also counts an annual item's
 monthly share — reserved in the cap and never typed as a charge, which on cash alone makes
-a 270.00/yr subscription look free for eleven months and like a 270.00 spike in the
+a 360.00/yr subscription look free for eleven months and like a 360.00 spike in the
 twelfth. Its title says `incl. reserved` in any month that has one, and the `▒` run marks
 the part that was not cash moving this month.
 

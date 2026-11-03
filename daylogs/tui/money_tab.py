@@ -341,8 +341,8 @@ class MoneyTab(PanelTab):
 
         # This panel asks what the month *cost*, so it ranks `incurred`, not `spent` — the
         # one surface that does. An active annual item's monthly share is reserved in the cap
-        # and never logged as an expense, so on `spent` alone a 270.00/yr subscription showed
-        # as nothing in eleven months and a 270.00 spike in the twelfth, and the owner's
+        # and never logged as an expense, so on `spent` alone a 360.00/yr subscription showed
+        # as nothing in eleven months and a 360.00 spike in the twelfth, and the owner's
         # actual practice is to record the renewal in `recurring` and not type it at all —
         # which made it invisible here in all twelve.
         #
@@ -449,8 +449,8 @@ class MoneyTab(PanelTab):
         charged at all. Two shades of grey is not a distinction a reader can make, which is
         why there is one glyph here and in the bar, and why the column says which.
         The reason this row exists at all, when the panel and the categories column already
-        carry the figure: it is the only one that says *which item*. 22.50 of a subscriptions
-        cap is a number; `Tradingview 22.50 of 270.00/yr` is an answer.
+        carry the figure: it is the only one that says *which item*. 30.00 of a subscriptions
+        cap is a number; `Backups 30.00 of 360.00/yr` is an answer.
         `paused` is on the line because a paused item still holds the line it was already
         rolled into — "not from now on", never "this never happened" — and a commitment you
         have stopped renewing reads very differently from one you have not.

@@ -453,7 +453,7 @@ class CategorySpend:
     # What the month *cost* in this category, against `spent`, which is what left the
     # account. The difference is an active annual item: its monthly share is reserved in
     # the cap and — because the owner records the renewal in `recurring` rather than as an
-    # expense — never logged as spend at all. So a 270.00/yr subscription cost 22.50 this
+    # expense — never logged as spend at all. So a 360.00/yr subscription cost 30.00 this
     # month while `spent` says nothing happened, and "where did it go" answered with
     # `spent` alone omitted it twelve months out of twelve.
     #
@@ -788,8 +788,8 @@ def annual_commitments(conn, months: list[str]) -> list[dict]:
 
     `_annual_budget_by_category` aggregates this per category, which answers "how much of
     this cap is spoken for" but never says *by what*. The recurring pane names the items but
-    does not tie them to a month. So this is the one surface that says both: Tradingview,
-    22.50 of November, from 270.00 a year.
+    does not tie them to a month. So this is the one surface that says both: Backups,
+    30.00 of November, from 360.00 a year.
 
     Per **item**, summed over the months in range, the same window `_budget_by_category` and
     `_annual_budget_by_category` use — so the three figures are comparable rather than three
