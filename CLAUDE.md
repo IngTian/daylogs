@@ -741,6 +741,25 @@ appended prose where it was convenient rather than editing the map.
   entirely, which is the marker the prorate invariant above leans on.
   An edit writes only the fields it parsed. The submitted line is authoritative: drop the note
   words and the note is cleared; submit unchanged and the note survives.
+  **`#N` is an ordinary editable field for the same reasons, and was not one for eight
+  releases.** `_submit_expense`'s `update_expense` call predates the feature by two weeks, and
+  the commit that wired `prepaid_months` through storage, rendering, parsing and the *add*
+  path missed this one edge — so the marker was displayed, round-tripped into the prefill by
+  `render_expense`, re-parsed by `parse_expense`, and then dropped at the write. Adding `#3`
+  to a line and deleting the `#12` the prefill handed you both looked accepted and changed
+  nothing, while the prompt's own subtitle advertised `#months` as a field *while editing*.
+  The data layer was never the problem: `prepaid_months` is in `update_expense`'s `allowed`
+  set and `0` is documented there as the clearing value — a value no caller had ever passed.
+  `prepaid_months=r.prepaid_months or 0` is the whole fix, the same shape as `note or ""`
+  beside it and for the same reason: a line with no `#` *clears* the marker, because
+  `update_expense` drops None to tell "not mentioned" from "set to nothing". The clearing
+  direction is the one that stayed invisible — changing `#12` to `#2` at least re-rendered
+  the old marker on the pane, where clearing it left a line that looked written.
+  Writing the test exposed the pinned-row defect by accident: with a `#N` charge on the pane,
+  `_add_inflows` pins an inert `⇢` share above the payments and `_fill_table` leaves the
+  cursor on row 0, so `enter` is a dropped keypress — the first draft of the round-trip test
+  wrote nothing and **passed**. Both prepaid tests therefore step `down` first and assert
+  `prompt.is_open` before they assert anything about the row.
   **Cleared means NULL, from either write path.** `add_expense` normalised through
   `note or None` while `update_expense` dropped None and passed `""` into the UPDATE, so a
   cleared note became `''` and a never-set one NULL — two representations of one state, with

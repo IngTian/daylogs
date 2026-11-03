@@ -1228,3 +1228,100 @@ async def test_where_it_went_says_nothing_about_reserved_when_there_is_none(make
     assert "WHERE IT WENT" in title
     assert "incl. reserved" not in title, f"nothing is reserved: {title}"
     assert "40.00" in share and "100.0%" in share
+
+
+# ── the `#N` marker is an ordinary editable field ────────────────────────────
+# It is displayed, `render_expense` round-trips the token into the prefill and
+# `parse_expense` parses it back — so the grammar invited an edit that `update_expense`
+# then dropped, because this call site predates the feature by two weeks. The data layer
+# was ready the whole time: `prepaid_months` is in its `allowed` set and `0` is documented
+# as the clearing value, with no caller ever passing it.
+async def test_editing_an_expense_can_add_a_prepaid_marker(make_app, db, type_into):
+    """Adding `#3` to a plain expense. Silently did nothing: the write dropped the field,
+    so the pane re-rendered without a marker and the totals never prorated."""
+    add_expense(db, amount=90.0, description="boots", category="other", date="2026-09-04")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        app.prompt.value = ""
+        await type_into(pilot, "90 boots !other @2026-09-04 #3")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1, "an edit must not insert a second row"
+    assert rows[0]["prepaid_months"] == 3, (
+        f"the marker the line asked for was dropped at the write: {dict(rows[0])}"
+    )
+
+
+async def test_editing_an_expense_can_clear_a_prepaid_marker(make_app, db, type_into):
+    """Dropping the `#12` the prefill handed you. The submitted line is authoritative —
+    the same rule as the note — so a line with no `#` makes it an ordinary expense again.
+
+    This is the direction that stayed invisible: changing `#12` to `#2` at least re-renders
+    the old marker on the pane, while clearing it leaves a line that looks accepted.
+    """
+    add_expense(db, amount=240.0, description="bulk buy", category="grocery",
+                date="2026-09-04", prepaid_months=12)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        # Past the pinned inert share row. A `#N` charge makes `_add_inflows` pin one `⇢`
+        # row above the payments, `_fill_table` puts the cursor on row 0, and `enter` there
+        # is a dropped keypress — so without this the test writes nothing and still passes.
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        assert "#12" in app.prompt.value, (
+            f"the prefill has to offer the marker, or there is nothing to clear: "
+            f"{app.prompt.value!r}"
+        )
+        app.prompt.value = ""
+        await type_into(pilot, "240 bulk buy !grocery @2026-09-04")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert rows[0]["prepaid_months"] is None, (
+        "a line with no `#` clears the marker, the way dropping the note words clears "
+        f"the note: {dict(rows[0])}"
+    )
+
+
+async def test_an_edit_that_does_not_mention_the_marker_keeps_the_rest(make_app, db, type_into):
+    """The guard on `or 0`: clearing the marker must not also disturb the other fields,
+    and a resubmitted prefill must round-trip unchanged."""
+    add_expense(db, amount=240.0, description="bulk buy", category="grocery",
+                date="2026-09-04", prepaid_months=12, note="visa")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("down")           # past the pinned inert share row
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        prefilled = app.prompt.value
+        assert "#12" in prefilled, f"nothing to round-trip: {prefilled!r}"
+        await pilot.press("enter")          # submit it back unchanged
+        await pilot.pause()
+    rows = all_expenses(db)
+    assert len(rows) == 1
+    assert (rows[0]["amount"], rows[0]["description"], rows[0]["category"]) == (
+        240.0, "bulk buy", "grocery"
+    )
+    assert rows[0]["prepaid_months"] == 12, (
+        f"submitting the prefill unchanged must not clear the marker: {prefilled!r}"
+    )
+    assert rows[0]["note"] == "visa", "nor the note"
