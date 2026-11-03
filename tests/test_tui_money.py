@@ -1273,11 +1273,10 @@ async def test_editing_an_expense_can_clear_a_prepaid_marker(make_app, db, type_
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.pause()
-        # Past the pinned inert share row. A `#N` charge makes `_add_inflows` pin one `⇢`
-        # row above the payments, `_fill_table` puts the cursor on row 0, and `enter` there
-        # is a dropped keypress — so without this the test writes nothing and still passes.
-        await pilot.press("down")
-        await pilot.pause()
+        # No `down` needed: `_skip_inert_rows` leaves the cursor on the first actionable
+        # row, past the pinned `⇢` share this `#12` charge produces. The `prompt.is_open`
+        # assertion below is what keeps that honest — an earlier draft of this test pressed
+        # `enter` on the pinned row, wrote nothing, and passed.
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
@@ -1307,9 +1306,7 @@ async def test_an_edit_that_does_not_mention_the_marker_keeps_the_rest(make_app,
         await go_money(pilot, app)
         await pilot.press("tab")
         await pilot.pause()
-        await pilot.press("down")           # past the pinned inert share row
-        await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("enter")          # `_skip_inert_rows` already skipped the share
         await pilot.pause()
         assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
         prefilled = app.prompt.value
@@ -1325,3 +1322,85 @@ async def test_an_edit_that_does_not_mention_the_marker_keeps_the_rest(make_app,
         f"submitting the prefill unchanged must not clear the marker: {prefilled!r}"
     )
     assert rows[0]["note"] == "visa", "nor the note"
+
+
+# ── the pinned `⇢` rows must not take the cursor ─────────────────────────────
+# They are inert by design — a share is arithmetic over a charge in another month, and
+# arming an edit from one would write to the wrong month. The defect was putting the cursor
+# on one: `table.clear(columns=True)` resets to row 0, and rows 0..n are the pinned shares,
+# so in any month holding a `#N` charge or a rolled annual item, arriving by `tab` landed
+# somewhere `enter` did nothing and `x` described a state you were not in.
+async def test_arriving_on_the_expenses_pane_skips_the_pinned_share_rows(
+    make_app, db, type_into
+):
+    """The case hit twice while writing other tests. `enter` on arrival must arm the first
+    real payment, not die on the share pinned above it."""
+    add_expense(db, amount=240.0, description="bulk buy", category="grocery",
+                date="2026-09-04", prepaid_months=12)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        cells = await _expense_cells(pilot, app, grouped=False)
+        assert any("⇢" in c for c in cells), (
+            f"fixture must actually pin a share, or this test proves nothing: {cells}"
+        )
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "enter on arrival hit the inert pinned row"
+        assert "bulk buy" in app.prompt.value, (
+            f"armed the wrong row: {app.prompt.value!r}"
+        )
+
+
+async def test_enter_on_a_pinned_share_row_says_why_instead_of_nothing(
+    make_app, db, type_into
+):
+    """Reachable by arrowing back up onto it. Silence is what a dropped keypress looks
+    like — the message is generic because a `#N` share and an annual reservation both land
+    here, and "edit the charge it came from" is false for a reservation."""
+    add_expense(db, amount=240.0, description="bulk buy", category="grocery",
+                date="2026-09-04", prepaid_months=12)
+    app = make_app()
+    notes = []
+    async with app.run_test(size=(120, 34)) as pilot:
+        app.notify = lambda msg, **kw: notes.append(str(msg))  # type: ignore[method-assign]
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("up")             # back onto the pinned share
+        await pilot.pause()
+        notes.clear()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not app.prompt.is_open, "a share must not arm an edit — it is another month"
+    assert any("not a payment" in n for n in notes), (
+        f"enter on a pinned row was silent: {notes}"
+    )
+
+
+async def test_delete_on_a_pinned_share_row_does_not_blame_a_group_header(
+    make_app, db, type_into
+):
+    """`x` said "select a row, not a group header" on the ungrouped pane, which has none —
+    sending you to look for a state you were not in. A group header has a slug; a pinned
+    share has neither id nor slug, and that is what tells them apart."""
+    add_expense(db, amount=240.0, description="bulk buy", category="grocery",
+                date="2026-09-04", prepaid_months=12)
+    app = make_app()
+    notes = []
+    async with app.run_test(size=(120, 34)) as pilot:
+        app.notify = lambda msg, **kw: notes.append(str(msg))  # type: ignore[method-assign]
+        await go_money(pilot, app)
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.press("up")
+        await pilot.pause()
+        notes.clear()
+        await pilot.press("x")
+        await pilot.pause()
+    assert any("not a payment" in n for n in notes), f"wrong or missing message: {notes}"
+    assert not any("group header" in n for n in notes), (
+        f"there are no group headers on this pane: {notes}"
+    )
