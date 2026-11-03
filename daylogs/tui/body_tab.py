@@ -7,6 +7,7 @@ What lives here is key handling, the estimate review flow, and rendering.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 
 from rich.text import Text
@@ -746,6 +747,26 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
+        except asyncio.CancelledError:
+            # A second `f` with no `=kcal` cancels this one, and `CancelledError` is a
+            # `BaseException`, so the `except Exception` below never saw it: the first meal
+            # was dropped with no row, no toast, no error and no log line, while the prompt
+            # closing read as "accepted". Say so instead, naming the line, because this is
+            # the one path where the entry cannot be saved: `food.kcal` is `NOT NULL`, there
+            # is no number yet, and inventing one would be worse than losing it. The
+            # activity path *can* save its row and therefore does.
+            #
+            # No `_set_estimating(False)`: the popup is keyed, and the worker that cancelled
+            # this one owns that key while it is still running. Clearing it here is the
+            # original "screen goes quiet mid-call" defect, which has its own test.
+            #
+            # Deliberately no "press f then ↑" — prompt history is a per-label deque and any
+            # food line submitted in between moves what ↑ reaches, so the hint would be wrong
+            # exactly when it is needed.
+            self.app.notify_error(
+                f"{r.description} was superseded by a newer estimate and not logged"
+            )
+            raise  # Textual needs it to mark the worker CANCELLED, not FAILED
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
@@ -1083,6 +1104,25 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
+        except asyncio.CancelledError:
+            # A cancellation *is* a failed inference, so this invariant applies to it: the
+            # description is the user's data and the factor is a guess, and losing the first
+            # because the second superseded it is the worse outcome. `CancelledError` is a
+            # `BaseException`, so the `except Exception` below never caught it and a second
+            # un-factored activity on the same day silently discarded the first **row**.
+            #
+            # That was worse than the food case in two ways. It contradicted the invariant
+            # this docstring states, and worker 2 re-reads `logged` from the database at the
+            # top — so the vanished row was missing there too, and the day's PAL was inferred
+            # from a partial day, on the exact code path whose comment says "The day, not the
+            # entry: a PAL is not additive." Logging two activities in one day is the flow
+            # that re-query exists for.
+            #
+            # No `_set_inferring(False)` and no toast: the popup key belongs to the worker
+            # that is still running, and worker 2 will announce the day it resolves. The row
+            # is what had to survive.
+            self._write_activity(r, source="estimated")
+            raise  # Textual needs it to mark the worker CANCELLED, not FAILED
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_inferring(False)
             self._write_activity(r, source="estimated")

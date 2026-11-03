@@ -181,6 +181,25 @@ appended prose where it was convenient rather than editing the map.
   not to resting BMR. It is also why a factor is **not clearable** through the edit
   prompt: `_update` drops None, so a line with no `=` leaves the stored factor
   alone, which is what keeps a factorless row's description fixable at all.
+  **"Failed" includes *cancelled*, and that needs its own `except`.** Both workers are
+  `@work(exclusive=True)`, so a second un-factored entry cancels the first — and
+  `asyncio.CancelledError` is a `BaseException`, so `except Exception` never saw it. A
+  second activity on the same day therefore discarded the first **row**, which is precisely
+  what this bullet forbids, on the success path of an ordinary hurried day. Worse, worker 2
+  re-reads the day's activities to infer a PAL, so the vanished row was missing from *its*
+  input too and the day was inferred from half of itself — on the code path whose own
+  comment says "The day, not the entry: a PAL is not additive". The handler re-raises, or
+  Textual marks the worker FAILED rather than CANCELLED, and it deliberately does **not**
+  touch the popup or toast: the keyed indicator belongs to the worker still running, and
+  clearing it there is the "screen goes quiet mid-call" defect that has its own test.
+  Food's equivalent cannot do this and the asymmetry is the **schema**, not an oversight:
+  `food.kcal` is `NOT NULL` and a superseded estimate has no number, so that path can only
+  *state* the loss — it names the dropped line and promises no recovery key, because prompt
+  history is a per-label deque that any food line submitted in between moves. The old
+  behaviour was silence on both: no row, no toast, no error, no log line, while the prompt
+  closing read as acceptance. `test_a_second_estimate_cancels_the_first_without_clearing_the_indicator`
+  drove this exact sequence for weeks while asserting only the call count and the popup,
+  which is how it shipped; the two `test_a_superseded_*` tests assert the entry's fate.
 - **Only the entry path infers a factor; an edit never does.** Fixing a typo in a
   description must not silently re-roll the number the whole day is measured
   against. The activity worker also has its **own** `@work` group: sharing the food

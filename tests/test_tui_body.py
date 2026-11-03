@@ -3298,3 +3298,107 @@ async def test_the_sort_survives_switching_sub_view(make_app, db):
         await pilot.press("tab")
         await pilot.pause()
         assert (body_tab.sort_field, body_tab.sort_desc) == ("value", False)
+
+
+# ── a superseded estimate must not take the entry with it ────────────────────
+# `@work(exclusive=True)` cancels the first worker when the second starts, and
+# `asyncio.CancelledError` is a `BaseException` — so the `except Exception` in both workers
+# never saw it. The sequence is one a hurried user types without noticing, and the existing
+# `test_a_second_estimate_cancels_the_first_without_clearing_the_indicator` drives it
+# exactly while asserting only the call count and the popup, which is how it shipped.
+async def test_a_superseded_food_estimate_says_the_meal_was_not_logged(
+    make_app, db, type_into, monkeypatch
+):
+    """Food is the path where the entry genuinely cannot be saved — `food.kcal` is
+    `NOT NULL` and no number exists yet — so the requirement is that the loss is *stated*.
+    Silence read as acceptance: the prompt closed, no row appeared, and nothing said why."""
+    import asyncio
+
+    started = asyncio.Event()
+    calls = []
+
+    async def two_stage(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)  # cancelled by the second press
+        started.set()
+        return Estimate(description="soup", kcal=400)
+
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", two_stage)
+    errors = []
+    app = make_app()
+    async with app.run_test() as pilot:
+        app.notify_error = lambda msg, **kw: errors.append(msg)  # type: ignore[method-assign]
+        await go_body(pilot, app)
+        await pilot.press("f")
+        await type_into(pilot, "chicken salad")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await type_into(pilot, "soup")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        await pilot.pause()
+    assert len(calls) == 2, f"expected two estimate calls, got {len(calls)}"
+    assert any("chicken salad" in m for m in errors), (
+        f"the dropped meal has to be named, or the loss is invisible: {errors}"
+    )
+    # And it must not promise a recovery key: prompt history is a per-label deque, so any
+    # food line submitted in between moves what `↑` reaches.
+    assert not any("↑" in m for m in errors), f"do not promise history: {errors}"
+
+
+async def test_a_superseded_activity_estimate_still_records_the_activity(
+    make_app, db, type_into
+):
+    """The activity path *can* save its row — `activity.factor` is nullable — and the
+    invariant in `_run_factor_estimate`'s own docstring says it must: "losing the first
+    because the second failed is the worse outcome". A cancellation is a failed inference.
+
+    Worse than the food case, because worker 2 re-reads the day's activities to infer a PAL
+    (which is not additive), so a vanished first row also corrupted the second's input.
+    """
+    import asyncio
+
+    started = asyncio.Event()
+    calls = []
+
+    async def two_stage(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)  # cancelled by the second press
+        started.set()
+        return {"factor": 1.6}
+
+    app = make_app(runner_json=two_stage)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "morning run")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("a")
+        await type_into(pilot, "evening gym")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        await pilot.pause()
+        descriptions = [r["description"] for r in _act_rows(db, app.today())]
+        factors = {r["description"]: r["factor"] for r in _act_rows(db, app.today())}
+    assert len(calls) == 2, f"expected two inference calls, got {len(calls)}"
+    assert "morning run" in descriptions, (
+        f"the superseded activity was discarded: {descriptions}"
+    )
+    assert factors["morning run"] is None, (
+        "a cancelled inference produced no number, so the row carries NULL and the day "
+        f"falls back to the profile baseline: {factors}"
+    )
+    # The second worker re-reads the day from the database, so the rescued row has to be
+    # visible to it — a PAL is not additive, and inferring one from half the day is the
+    # second, quieter half of this defect. Asserted on the prompt the runner was handed,
+    # since `runner_json` is the low-level wrapper and sees text, not the activity list.
+    asked = calls[1]["user_prompt"]
+    assert "morning run" in asked and "evening gym" in asked, (
+        f"worker 2 inferred a PAL from a partial day: {asked!r}"
+    )
