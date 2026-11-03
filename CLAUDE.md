@@ -430,6 +430,35 @@ appended prose where it was convenient rather than editing the map.
   signal. That pane row earns its place by **naming the item** — `22.50` is a number,
   `Tradingview of 270.00/yr` is an answer — and it carries `paused` too, since a commitment
   you have stopped renewing reads differently from one you have not.
+  **`spent` is cash and `incurred` is cost, and exactly one surface takes the second.**
+  WHERE IT WENT ranks `CategorySpend.incurred` (`spent + prorated_budget`); every other
+  surface — the header, BUDGET vs SPENT, `delta`, `over_budget`, the categories pane —
+  stays on `spent`. The reason is the owner's own bookkeeping, confirmed rather than
+  assumed: he records an annual renewal in `recurring` and **does not type the charge as an
+  expense**, so the money never appears in `expense` at all and "where did it go" answered
+  on cash alone omitted a 270.00/yr subscription in twelve months out of twelve. Measured
+  on his November: the panel read `subscriptions 2.81` while the cap beside it was 64%
+  committed.
+  The budget side must **not** follow, and that is the guard on the whole idea: the cap
+  already contains `prorated_budget` (`roll_month_budgets` writes `monthly_cost`), so
+  charging `incurred` against it would spend the reserved share twice and report an annual
+  item as over budget in a month nothing was bought.
+  It is also why this is *not* the `#N` mechanism wearing a different hat, and why marking
+  an annual renewal `#12` is the wrong fix even though it looks like the same arithmetic:
+  the charge's share and the cap's share are **both** 22.50, so a marked renewal would be
+  counted twice every month rather than once. `#N` prorates a charge that exists;
+  `prorated_budget` stands in for one that deliberately does not.
+  The panel therefore sums to more than the header's `spent`, by exactly `total_reserved`,
+  and says so — `_legend`'s `note` puts `incl. reserved` in the title, reusing the header's
+  own word, and is suppressed when nothing is reserved. A `note` parameter only one caller
+  passes is deliberate here: a total silently disagreeing with another total is the failure
+  this file records more than once, so the one panel that does it carries the sentence.
+  `incurred` is deliberately not named `cost` — `recurring.cost` is a per-cycle price, and
+  one word for two quantities is the drift this block already records twice.
+  The panel's filter tests the two **inputs** (`spent != 0 or prorated_budget != 0`) rather
+  than `incurred`, because a refund that exactly cancels a reserved share incurs 0.00 and
+  still had both things happen: it belongs on screen at 0.00, not dropped as though the
+  month were empty.
 
 - **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
   `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by

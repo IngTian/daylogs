@@ -300,7 +300,14 @@ class MoneyTab(PanelTab):
         # Filtering it out left WHERE IT WENT adding up to gross spend while the
         # header showed the net, with nothing on screen to explain the gap. The
         # renderers give such a row its amount and no share.
-        spent = [c for c in s.by_category if c.spent != 0]
+        #
+        # Either term qualifies, and the test is on the two *inputs* rather than on
+        # `incurred`: a category whose refund exactly cancels its reserved share incurs 0.00
+        # and still had both things happen, so it belongs on the panel showing 0.00 and no
+        # share, not dropped as if the month were empty. A reserved-only category — an
+        # annual item in a month nothing was bought — reaches the panel through the second
+        # term alone, which is the whole point of the change.
+        costed = [c for c in s.by_category if c.spent != 0 or c.prorated_budget != 0]
         budgeted = sorted(
             (c for c in s.by_category if c.budget > 0 or c.spent != 0),
             key=lambda c: c.budget,
@@ -332,11 +339,22 @@ class MoneyTab(PanelTab):
             "\n".join(budget_lines) if budget_lines else "  no budget lines yet — press b"
         )
 
-        ranked = sorted(spent, key=lambda c: c.spent, reverse=True)
+        # This panel asks what the month *cost*, so it ranks `incurred`, not `spent` — the
+        # one surface that does. An active annual item's monthly share is reserved in the cap
+        # and never logged as an expense, so on `spent` alone a 270.00/yr subscription showed
+        # as nothing in eleven months and a 270.00 spike in the twelfth, and the owner's
+        # actual practice is to record the renewal in `recurring` and not type it at all —
+        # which made it invisible here in all twelve.
+        #
+        # BUDGET vs SPENT above deliberately keeps `spent`: its extent is the cap, and the
+        # cap already contains the reserved share, so filling with `incurred` would spend
+        # that share twice and show an annual item as over budget in a month nothing was
+        # bought. Same figures, two questions — that is why only one panel moved.
+        ranked = sorted(costed, key=lambda c: c.incurred, reverse=True)
         share_lines = ranked_bars(
-            [(c.category, c.spent) for c in ranked],
+            [(c.category, c.incurred) for c in ranked],
             width=self.panel_width("#panel-share", minimum=28),
-            prorated={c.category: c.prorated_spent for c in ranked},
+            prorated={c.category: c.prorated_incurred for c in ranked},
         )
         share_lines = [shade(line, PRORATED_GLYPH, FAINT) for line in share_lines]
         self.query_one("#share-body", Static).update(
@@ -344,7 +362,11 @@ class MoneyTab(PanelTab):
         )
 
         self._legend("budget-title", budget_lines)
-        self._legend("share-title", share_lines)
+        self._legend(
+            "share-title",
+            share_lines,
+            note="incl. reserved" if s.total_reserved > 0 else "",
+        )
 
     def _fill_table(self, s) -> None:
         table = self.query_one("#money-table", DataTable)
@@ -453,17 +475,27 @@ class MoneyTab(PanelTab):
             self._ids.append(-1)
             self._groups.append("")
 
-    def _legend(self, pid: str, lines: list[str]) -> None:
+    def _legend(self, pid: str, lines: list[str], *, note: str = "") -> None:
         """Name `▒` beside the panel that drew one, and only when it did — an ordinary month
         carries no legend for a glyph it never shows.
 
         Asked of the rendered lines rather than of `CategorySpend.prorated_spent`, because the two
         genuinely disagree: a category with spend and no cap draws no fill to segment, so
         BUDGET vs SPENT can have nothing to explain while WHERE IT WENT is 100% prorated.
+
+        `note` exists for exactly one panel and that is not a smell to tidy away: WHERE IT
+        WENT sums to more than the header's `spent` whenever a reserved share is counted,
+        and a total silently disagreeing with another total is the failure this file records
+        more than once. It reuses the header's own word — `reserved` — so the two surfaces
+        read as one sentence instead of two numbers. Suppressed when nothing is reserved,
+        like the glyph legend beside it, because a month with no annual item has no
+        discrepancy to explain.
         """
         title = _PANEL_TITLES[pid]
         if any(PRORATED_GLYPH in line for line in lines):
             title += f"   {mark(f'{PRORATED_GLYPH} prorated', FAINT)}"
+        if note:
+            title += f"   {mark(note, FAINT)}"
         self.query_one(f"#{pid}", Static).update(title)
 
     def _add_inflows(self, table, inflows, *, grouped: bool) -> None:

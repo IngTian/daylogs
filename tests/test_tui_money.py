@@ -1167,3 +1167,64 @@ async def test_past_the_cap_the_overrun_is_the_whole_story(make_app, db):
         head = _head(app)
     assert "over" in head, head
     assert "free" not in head and "reserved" not in head, head
+
+
+# ── WHERE IT WENT counts what the month cost, not what cash left ────────────
+async def test_where_it_went_counts_an_annual_items_reserved_share(make_app, db):
+    """An active annual item's monthly share is reserved in the cap and never logged as an
+    expense — the renewal lives in `recurring` and is not typed as a charge — so on `spent`
+    alone a 240.00/yr subscription showed as nothing here in every month of its life.
+
+    BUDGET vs SPENT deliberately does not move: its extent is the cap, and the cap already
+    contains the share, so filling with the cost would spend it twice.
+    """
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    add_expense(db, amount=5.0, description="App", category="subscriptions", date="2026-09-02")
+    add_expense(db, amount=75.0, description="food", category="grocery", date="2026-09-03")
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_money(pilot, app)
+        share = _panel(app, "#share-body")
+        budget = _panel(app, "#budget-body")
+        title = _panel(app, "#share-title")
+    assert "25.00" in share, f"5.00 spent plus the 20.00 reserved share: {share}"
+    assert "5.00 " not in share.replace("25.00", ""), "the cash figure alone is not the cost"
+    # No total is printed, so the percentages are what pin the denominator: 25.0% of the
+    # month means it divided by 100.00 (80.00 cash + 20.00 reserved), not by 80.00 — on
+    # which subscriptions would have been 6.2% and grocery 93.8%.
+    assert "25.0%" in share and "75.0%" in share, f"shares of 100.00: {share}"
+    assert "5.00" in budget, "the budget bar still measures the cap against cash spent"
+    assert "incl. reserved" in title, f"and the panel says why it exceeds spent: {title}"
+
+
+async def test_where_it_went_lists_a_category_with_only_a_reserved_share(make_app, db):
+    """The case the change exists for and the one the old `spent != 0` filter dropped
+    outright: an annual item in a month nothing was bought. Eleven months in twelve."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    add_expense(db, amount=60.0, description="food", category="grocery", date="2026-09-03")
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_money(pilot, app)
+        share = _panel(app, "#share-body")
+    assert "subscriptions" in share, f"nothing was bought, but it still cost 20.00: {share}"
+    assert "20.00" in share
+    assert "25.0%" in share, "20.00 of an 80.00 month"
+
+
+async def test_where_it_went_says_nothing_about_reserved_when_there_is_none(make_app, db):
+    """The legend and its note are both suppressed when there is nothing to explain — a month
+    with no annual item has no discrepancy with the header, so it carries no clause about
+    one. Same discipline as the glyph legend beside it."""
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    add_expense(db, amount=40.0, description="food", category="grocery", date="2026-09-03")
+    app = make_app()
+    async with app.run_test(size=(110, 34)) as pilot:
+        await go_money(pilot, app)
+        title = _panel(app, "#share-title")
+        share = _panel(app, "#share-body")
+    assert "WHERE IT WENT" in title
+    assert "incl. reserved" not in title, f"nothing is reserved: {title}"
+    assert "40.00" in share and "100.0%" in share
