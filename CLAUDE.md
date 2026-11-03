@@ -427,8 +427,8 @@ appended prose where it was convenient rather than editing the map.
   saying which — a date for a `#N` share, the word `reserved` for a commitment. Words where
   the distinction has to be read, one glyph everywhere else: two shades of grey is not a
   distinction a reader can make, and this block's own rule is that colour is never the only
-  signal. That pane row earns its place by **naming the item** — `22.50` is a number,
-  `Tradingview of 270.00/yr` is an answer — and it carries `paused` too, since a commitment
+  signal. That pane row earns its place by **naming the item** — `30.00` is a number,
+  `Backups of 360.00/yr` is an answer — and it carries `paused` too, since a commitment
   you have stopped renewing reads differently from one you have not.
   **`spent` is cash and `incurred` is cost, and exactly one surface takes the second.**
   WHERE IT WENT ranks `CategorySpend.incurred` (`spent + prorated_budget`); every other
@@ -436,16 +436,16 @@ appended prose where it was convenient rather than editing the map.
   stays on `spent`. The reason is the owner's own bookkeeping, confirmed rather than
   assumed: he records an annual renewal in `recurring` and **does not type the charge as an
   expense**, so the money never appears in `expense` at all and "where did it go" answered
-  on cash alone omitted a 270.00/yr subscription in twelve months out of twelve. Measured
-  on his November: the panel read `subscriptions 2.81` while the cap beside it was 64%
-  committed.
+  on cash alone omitted a 360.00/yr subscription in twelve months out of twelve. Measured
+  on the owner's own data before the change: near-zero subscriptions spend on the panel,
+  beside a cap most of which was already committed.
   The budget side must **not** follow, and that is the guard on the whole idea: the cap
   already contains `prorated_budget` (`roll_month_budgets` writes `monthly_cost`), so
   charging `incurred` against it would spend the reserved share twice and report an annual
   item as over budget in a month nothing was bought.
   It is also why this is *not* the `#N` mechanism wearing a different hat, and why marking
   an annual renewal `#12` is the wrong fix even though it looks like the same arithmetic:
-  the charge's share and the cap's share are **both** 22.50, so a marked renewal would be
+  the charge's share and the cap's share are **both** 30.00, so a marked renewal would be
   counted twice every month rather than once. `#N` prorates a charge that exists;
   `prorated_budget` stands in for one that deliberately does not.
   The panel therefore sums to more than the header's `spent`, by exactly `total_reserved`,

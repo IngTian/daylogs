@@ -76,6 +76,32 @@ jobs:
           print("app.tcss present, and only daylogs/ ships:", wheel)
           PY
 
+      # The sdist too, which nothing checked for eight releases. setuptools' implicit
+      # defaults glob `tests/test*.py`, so every sdist since 0.2.0 shipped 49 test files
+      # — 60% of the tarball — while missing `conftest.py` and `helpers.py` by name. That
+      # ships `test_log_isolation.py`, the tripwire for the autouse fixture in the
+      # conftest it does not ship, so running the shipped suite wrote to the user's own
+      # `~/.daylogs/logs/`. `MANIFEST.in` prunes it; this is what keeps it pruned,
+      # because a file uploaded to PyPI cannot be taken back.
+      - name: sdist ships the source and not the suite
+        run: |
+          python - <<'PY'
+          import glob, sys, tarfile
+          sdist = glob.glob("dist/*.tar.gz")[0]
+          names = tarfile.open(sdist).getnames()
+          leaked = [n for n in names if "/tests/" in n or "/.github/" in n]
+          if leaked:
+              sys.exit(f"{sdist} ships dev files: {leaked[:5]} ({len(leaked)} total)")
+          # The positive control. An absence check cannot tell "clean" from "read
+          # nothing", and this repo has already shipped a grep guard that passed with its
+          # predicate short-circuited. The floor is well under the real count (36) so
+          # deleting a module cannot trip it, while an empty or unreadable tarball does.
+          modules = [n for n in names if "/daylogs/" in n and n.endswith(".py")]
+          if len(modules) < 20:
+              sys.exit(f"{sdist} carries only {len(modules)} modules — the check is blind")
+          print(f"{sdist}: {len(modules)} modules, no tests, no workflows")
+          PY
+
       - name: installed wheel runs
         run: |
           python -m venv /tmp/smoke
