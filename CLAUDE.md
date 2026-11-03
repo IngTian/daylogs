@@ -465,6 +465,23 @@ appended prose where it was convenient rather than editing the map.
   keeps in step so a rename cannot reclassify a cap, and neither filters on `active`: a line
   already rolled stays when you pause the item, so its share is still a commitment for that
   month. A `source='manual'` line has no item behind it and contributes nothing, by definition.
+  **`reserved` is a question about a month, so the `all` horizon answers it nowhere.** Both
+  functions take `span.months()`, which is empty only for `all` — and they used to resolve
+  that one input in opposite directions: `annual_commitments` returned `[]` while
+  `_annual_budget_by_category` dropped its WHERE and summed every annual budget row ever
+  rolled. The header therefore stated a figure (216.91 on the owner's data) that the pane
+  explained with zero rows: a total with no list, which is the failure this block records
+  more than once. Both return nothing now.
+  Resolved toward silence rather than toward agreement, and that was the **owner's call**,
+  on his own reasoning — "why would i ever want to read the whole history reserve". Reserved
+  means "how much of this cap is already spoken for", which you ask about a month you can
+  still act on; summed over a whole history it is a number nobody would use, and the pane
+  could only explain it with one row per item per month. Agreeing the other way was the
+  alternative and it is the one to re-open if the question ever changes.
+  The **cap** total deliberately still sums everything at `all`, because "spent X of budget
+  Y over all time" is a coherent retrospective pair. Only the within-cap commitment stops
+  meaning anything once the months are added together, which is why
+  `test_the_all_horizon_reserves_nothing_anywhere` asserts both halves at once.
   **One mark for proration, and position carries the rest.** There were two glyphs, `▒` for a
   share of *spend* and `░` for a share of the *cap*. The owner could not tell them apart —
   "these two weird characters", and "what is a locked glyph" — and he was right that they are

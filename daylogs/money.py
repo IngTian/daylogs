@@ -838,18 +838,30 @@ def _annual_budget_by_category(conn, months: list[str]) -> dict[str, float]:
 
     Summed over the same `months` as `_budget_by_category`, so the two figures are comparable
     and inherit the same `1w` mismatch recorded there.
+
+    **No months means no answer, not every month.** `Span.months()` is empty only for the
+    unbounded `all` horizon, and this used to drop the WHERE there and sum every annual
+    budget row ever rolled — so the header stated a figure (216.91 on the owner's data) that
+    the expenses pane explained with zero rows, because `annual_commitments` returns `[]` for
+    the same input. A total with no list is the failure this module records more than once.
+    Resolved toward *nothing* rather than toward agreement, on the owner's own reasoning:
+    reserved answers "how much of this cap is already spoken for", which is a question about
+    a month you can still act on. Added up over your whole history it is not a figure anyone
+    would use, and the pane could only explain it with one row per item per month.
+    So `all` now shows no reserved figure anywhere — header, bar, column and pane agree by
+    being silent. The cap total deliberately still sums everything at `all`, because "spent
+    X of budget Y over all time" is a coherent retrospective pair; it is only the
+    *within-cap commitment* that stops meaning anything once the months are summed.
     """
-    if months:
-        marks = ", ".join("?" for _ in months)
-        where, args = f"WHERE b.month IN ({marks})", list(months)
-    else:
-        where, args = "", []
+    if not months:
+        return {}
+    marks = ", ".join("?" for _ in months)
     rows = conn.execute(
         f"SELECT b.category, SUM(b.amount) AS total FROM budget b"
         f" JOIN recurring r ON r.name = b.name"
-        f" {where}{' AND' if where else 'WHERE'} r.cycle = 'annually'"
+        f" WHERE b.month IN ({marks}) AND r.cycle = 'annually'"
         f" GROUP BY b.category",
-        args,
+        list(months),
     )
     return {r["category"]: round(float(r["total"]), 2) for r in rows}
 
