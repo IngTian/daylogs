@@ -308,7 +308,21 @@ appended prose where it was convenient rather than editing the map.
 - **A payment can cover several months, and every *total* counts it by the months it
   covers.** `#N` on an expense line sets `expense.prepaid_months`; the row is stored once, at
   the real amount and date, and `_prepaid_shares` spreads `amount/N` across the N calendar
-  months from its own. This is not a new opinion about accounting — the budget side has
+  months from its own.
+  **The case it is for is a one-off bulk buy, not a subscription**, and getting that backwards
+  kept the feature unused for seven weeks. Every surface taught it as
+  `240 Insurance !subscriptions #12` — the one case where it is the *wrong* tool, because an
+  annual subscription belongs in `recurring` with `#annually`, which prorates the budget side
+  and leaves no charge to mark. Meanwhile the owner was hand-rolling exactly what `#N` does:
+  one `Costco (prorated)` expense row per month, at invented dates, with no row anywhere
+  carrying what actually left the account. Measured against his data, one `#2` row produces
+  *identical* monthly totals to his two manual rows — so nothing was missing from the
+  arithmetic, only from the example. Document it with a bulk buy.
+  A marked bulk buy raises the covered months' spend and does **not** raise their caps. That
+  is deliberate and it is the honest reading: the money was not budgeted, and spreading it
+  says when it was spent rather than pretending it was planned. Auto-raising the cap was
+  considered and rejected — it would make unbudgeted spending invisible to the budget, which
+  is the one question this tab exists to answer. This is not a new opinion about accounting — the budget side has
   always prorated (`roll_month_budgets` writes `monthly_cost`), so summing the raw charge
   made the renewal month read 240.00 against a 20.00 cap while the other eleven read a
   saving. It netted out over a year and no single month was right, which is a problem for a

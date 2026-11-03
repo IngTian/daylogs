@@ -1106,3 +1106,64 @@ async def test_a_month_with_no_annual_item_gains_nothing(make_app, db):
     assert "▒" not in bar, bar
     assert "prorated" not in title, title
     assert any(c == "—" for c in cells), f"the column shows a dash, not 0.00  0%: {cells}"
+
+
+# ── the header's reserved split ──────────────────────────────────────────
+def _head(app):
+    from textual.content import Content
+    from textual.widgets import Static
+
+    raw = app.query_one("#money-head", Static).content
+    return (Content.from_markup(raw) if isinstance(raw, str) else raw).plain
+
+
+async def test_the_header_separates_free_from_reserved(make_app, db):
+    """`left` counted the reserved share as available. For an *active* annual item that share
+    sits in the cap and the charge is never logged as spend, so the month read better than it
+    was and the gap never closed — every month, by the same amount."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    upsert_budget(db, month="2026-09", name="Food", category="grocery", amount=400.0)
+    roll_month_budgets(db, month="2026-09")
+    app = make_app()
+    async with app.run_test(size=(130, 40)) as pilot:
+        tab = await go_money(pilot, app)
+        tab.view.anchor = "2026-09-15"
+        tab.reload()
+        await pilot.pause()
+        head = _head(app)
+    assert "400.00 free" in head, f"420 cap minus the 20 reserved: {head!r}"
+    assert "20.00 reserved" in head, head
+    assert "left" not in head, "the split replaces it rather than sitting beside it"
+
+
+async def test_a_month_with_nothing_reserved_still_says_left(make_app, db):
+    """Nine months in twelve have nothing reserved, and "0.00 reserved" on all of them would
+    be noise. The plain wording is the common case and stays."""
+    upsert_budget(db, month="2026-09", name="Food", category="grocery", amount=400.0)
+    app = make_app()
+    async with app.run_test(size=(130, 40)) as pilot:
+        tab = await go_money(pilot, app)
+        tab.view.anchor = "2026-09-15"
+        tab.reload()
+        await pilot.pause()
+        head = _head(app)
+    assert "400.00 left" in head, head
+    assert "reserved" not in head and "free" not in head, head
+
+
+async def test_past_the_cap_the_overrun_is_the_whole_story(make_app, db):
+    """Nothing is free either way once you are over, so the split would only dilute the one
+    number that matters."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    add_expense(db, amount=500.0, description="splurge", category="subscriptions",
+                date="2026-09-10")
+    app = make_app()
+    async with app.run_test(size=(130, 40)) as pilot:
+        tab = await go_money(pilot, app)
+        tab.view.anchor = "2026-09-15"
+        tab.reload()
+        await pilot.pause()
+        head = _head(app)
+    assert "over" in head, head
+    assert "free" not in head and "reserved" not in head, head

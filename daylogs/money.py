@@ -458,6 +458,11 @@ class MonthSummary:
     total_spent: float
     total_budget: float
     remaining: float
+    # How much of `total_budget` an annual item has already reserved. The header needs one
+    # figure for "what is left that is not actually mine to spend": for an *active* annual
+    # item the share is reserved in the cap and never logged as spend, so `remaining` counts
+    # it as available and the gap never closes.
+    total_reserved: float
     by_category: list[CategorySpend]
     day_of_month: int
     days_in_month: int
@@ -558,6 +563,7 @@ def summarize_span(
         total_spent=total_spent,
         total_budget=total_budget,
         remaining=round(total_budget - total_spent, 2),
+        total_reserved=round(sum(c.prorated_budget for c in by_category), 2),
         by_category=by_category,
         day_of_month=day,
         days_in_month=total_days,

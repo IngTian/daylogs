@@ -235,6 +235,20 @@ class MoneyTab(PanelTab):
                 f"{fmt(abs(s.remaining))} {'over' if over else 'left'}",
                 f"bold {BAD}" if over else GOOD,
             )
+            # Split `left` when something is reserved, because the reserved part is not
+            # yours to spend: an *active* annual item puts its monthly share in the cap and
+            # the charge is never logged as spend, so `remaining` counted that share as
+            # available every month and the gap never closed. `free` is the number to act on;
+            # `left` is still the arithmetic of budget minus spent, and the two add up.
+            #
+            # Only when non-zero and only when under budget — "0.00 reserved" on nine months
+            # in twelve is noise, and past the cap nothing is free either way, so the overrun
+            # is the whole story.
+            if s.total_reserved > 0 and not over:
+                remaining = (
+                    mark(f"{fmt(s.remaining - s.total_reserved)} free", GOOD)
+                    + mark(f" · {fmt(s.total_reserved)} reserved", FAINT)
+                )
             head = (
                 f"{v.label()}   spent {fmt(s.total_spent)}"
                 f" / {fmt(s.total_budget)} budget   {remaining}"
