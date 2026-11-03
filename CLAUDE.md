@@ -400,6 +400,24 @@ appended prose where it was convenient rather than editing the map.
   charge's own date is on the line because that is where `g` has to take you. Pinned above
   rather than sorted or grouped in: a share has no date of its own to sort by, and inside a
   category group it would fold into a total that answers a cash question.
+  **Inert is not the same as holding the cursor, and for two releases it was.**
+  `table.clear(columns=True)` puts the cursor on row 0 and these rows *are* rows 0..n, so in
+  any month carrying a `#N` charge or a rolled annual item, arriving by `tab` landed on one:
+  `enter` did nothing whatsoever and `x` answered "select a row, not a group header" on the
+  ungrouped pane, which has none. Both refusals were right about the row and wrong to be
+  reached. `_fill_table` ends in `_skip_inert_rows`, which moves to the first row with an id
+  **or** a group — a header is actionable because `enter` folds it, so the pinned rows are
+  the only kind with neither. It never moves off an actionable row, so `_reselect` still wins
+  for the keys that name a row as they go.
+  The keys keep their refusals for the case the cursor can still reach by arrowing up, and
+  both say `_NOT_A_PAYMENT` — one string, because a `#N` share and an annual reservation are
+  equally un-editable and it must name no remedy: "edit the charge it came from" is false for
+  a reservation, which has no charge anywhere. `x` tells the two id-less kinds apart by
+  `_selected_group()`, since a header has a slug and a pinned row has neither.
+  This was found **twice, by accident**, while testing other things — both times a test
+  pressed `enter` on arrival, wrote nothing, and passed, because the row it meant to edit
+  still held the value it was asserting. Any test that arms an edit on this pane therefore
+  asserts `prompt.is_open` before it asserts anything about the row.
   **Both panels split the fill the same way**, because `spent` is two different quantities
   added together and the panels are where the number is actually read: a category showed
   `30.00 / 50.00` as one green bar with 20.00 of it proration. `CategorySpend.prorated_spent`

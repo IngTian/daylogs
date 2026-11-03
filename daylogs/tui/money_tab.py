@@ -92,6 +92,12 @@ def _description_cell(row) -> Text:
 # the second copy derived which panel it was from the widget id — and a title whose wording
 # depends on that mapping is a worse thing to own than the two strings it saved.
 _PANEL_TITLES = {"budget-title": "BUDGET vs SPENT", "share-title": "WHERE IT WENT"}
+# What `enter` and `x` say on a pinned `⇢` row. One string for both keys and both pinned
+# kinds: a `#N` share and an annual reservation are equally un-editable, and the reason is
+# the same one the rows are faint for — the amount is not a payment this month. It names no
+# remedy on purpose, because the obvious one ("edit the charge it came from") does not exist
+# for a reservation, and a share's charge lives in another month where `g` has to take you.
+_NOT_A_PAYMENT = "that row is not a payment — nothing to edit or delete here"
 
 
 def _reserved_cell(c) -> Text:
@@ -379,6 +385,32 @@ class MoneyTab(PanelTab):
             self._fill_expenses(table)
         else:
             self._fill_recurring(table)
+        self._skip_inert_rows(table)
+
+    def _skip_inert_rows(self, table) -> None:
+        """Leave the cursor on a row a keypress can act on.
+
+        `table.clear(columns=True)` puts the cursor on row 0, and on the expenses pane rows
+        0..n are the pinned `⇢` shares and reservations, which `_add_inflows`/`_add_reserved`
+        mark inert with `_ids = -1`. So in any month holding a `#N` charge or a rolled annual
+        item, arriving by `tab` landed on a row where `enter` did nothing at all and `x`
+        claimed you had selected a group header. Both are *correct* refusals of an
+        un-actionable row; the defect is that the cursor was put there in the first place.
+
+        A group header is actionable — `enter` folds it — so the test is "has an id, or has a
+        group", not "has an id". The pinned rows are the only kind with neither.
+
+        Found twice while writing other tests, which is the real argument for fixing it here
+        rather than only explaining it at the keys: a test that pressed `enter` on arrival
+        wrote nothing and *passed*, because the row it meant to edit kept the value it was
+        asserting. Cheap and conservative — it never moves the cursor off an actionable row,
+        so `_reselect` (which runs after `reload`) still wins for the keys that name a row.
+        """
+        for i, row_id in enumerate(self._ids):
+            if row_id >= 0 or self._groups[i]:
+                if i:
+                    table.move_cursor(row=i)
+                return
 
     def _fill_categories(self, table, s) -> None:
         table.add_columns(
@@ -673,6 +705,13 @@ class MoneyTab(PanelTab):
             return
         row_id = self._selected_id()
         if row_id is None:
+            # Reachable by arrowing up onto a pinned `⇢` row — `_skip_inert_rows` keeps the
+            # cursor off them on arrival, but not afterwards. Silence is what a dropped
+            # keypress looks like, which `key_toggle_active` four methods away already says
+            # in as many words. Deliberately generic: both pinned kinds funnel through here,
+            # and "edit the charge it came from" is false for a reservation, which has no
+            # charge anywhere.
+            self.app.notify(_NOT_A_PAYMENT, timeout=3)
             return
         which = "expense" if self.view.pane == "expenses" else "recurring"
         row = self.app.conn.execute(
@@ -768,7 +807,14 @@ class MoneyTab(PanelTab):
             return
         row_id = self._selected_id()
         if row_id is None:
-            self.app.notify("select a row, not a group header", timeout=3)
+            # Two row kinds have no id and they are not the same thing. A group header has a
+            # slug; a pinned `⇢` share has neither id nor slug. Naming group headers on the
+            # ungrouped pane — which has none — sent you looking for a state you were not in.
+            self.app.notify(
+                "select a row, not a group header" if self._selected_group()
+                else _NOT_A_PAYMENT,
+                timeout=3,
+            )
             return
         pane = self.view.pane
         which = "expense" if pane == "expenses" else "recurring"
