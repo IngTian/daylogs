@@ -6,6 +6,8 @@ reason the tabs stay thin: anything with a rule lives in a module with tests.
 
 from __future__ import annotations
 
+import re
+
 _BLOCKS = "▁▂▃▄▅▆▇█"
 _FULL = "█"
 _EMPTY = "·"
@@ -68,7 +70,7 @@ def mark(text: str, style: str = "") -> str:
 
 
 def shade(line: str, glyph: str, style: str) -> str:
-    """Style just the run of `glyph` inside a line that has already been measured.
+    """Style every run of `glyph` inside a line that has already been measured.
 
     `mark` colours whole finished lines because markup counts toward `len()`. A bar whose
     *segments* mean different things still needs part of one line styled, and substituting a
@@ -76,19 +78,20 @@ def shade(line: str, glyph: str, style: str) -> str:
     stays correct, and Textual's markup nests, so this composes with the `mark()` a caller
     wraps around the whole row.
 
-    The glyph is what actually distinguishes the segment; this only emphasises it. Handles
-    the first contiguous run, which is all the bar builders produce — the prorated slice is
-    always one block at the start of the fill.
+    The glyph is what actually distinguishes the segment; this only emphasises it.
+
+    *Every* run, not the first. `budget_bars` emits two since #61 collapsed the two
+    proration shades into one glyph — a prorated-spend run inside the fill and a reserved
+    run past the dots — and styling only the first left the reserved one at full strength in
+    the row's budget-status colour while its twin was dim. The two-run dim was live for an
+    hour in 0.6.0 and the collapse dropped it by accident; nothing ever asked for it back.
+    They cannot merge into one visual run: `budget_bars` keeps a free cell between them.
     """
     if not style:
         return line
-    start = line.find(glyph)
-    if start < 0:
-        return line
-    end = start
-    while end < len(line) and line[end] == glyph:
-        end += 1
-    return f"{line[:start]}[{style}]{line[start:end]}[/]{line[end:]}"
+    return re.sub(
+        f"{re.escape(glyph)}+", lambda m: f"[{style}]{m.group()}[/]", line
+    )
 
 
 def view_row(names: tuple[str, ...], active: str) -> str:
@@ -300,7 +303,7 @@ def budget_bars(
     prorated: dict[str, float] | None = None,
     reserved: dict[str, float] | None = None,
 ) -> list[str]:
-    """`label ███████░░░ 412/500 ⚠` — spent against its own budget.
+    """`label ███████··· 412/500 ⚠` — spent against its own budget.
 
     Each bar is scaled to that category's own cap, not to the largest category, so
     "how close am I to this limit" is readable per row. Over-budget rows carry the
@@ -311,11 +314,11 @@ def budget_bars(
     then emitted a 58-character bar that pushed the amounts past the line's width
     and off the panel — the row rendered as bare dots with no numbers at all.
 
-    Three zones, left to right: spend, free room, then `committed` — the share of the cap an
-    annual item has already committed. Committed sits at the far end, where the allowance runs
+    Three zones, left to right: spend, free room, then `reserved` — the share of the cap an
+    annual item has already committed. Reserved sits at the far end, where the allowance runs
     out, because that is what it means: spoken for. It is clamped to the *unfilled* region, so
     spend eats the free room first and the three can never sum past the bar — at a full cap
-    the committed zone is gone, which reads correctly, since nothing is left either way.
+    the reserved zone is gone, which reads correctly, since nothing is left either way.
     """
     bar_width = _fit_bar(width, label_width, _BUDGET_TAIL, bar_width)
     prorated = prorated or {}
