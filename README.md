@@ -345,6 +345,14 @@ maintenance for the day, then the average and a sparkline over the horizon.
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
 
+The two answer different questions and deliberately do not add up to the same number.
+BUDGET vs SPENT asks whether you are inside the cap, so it counts the cash that left your
+account. WHERE IT WENT asks what the month *cost*, so it also counts an annual item's
+monthly share — reserved in the cap and never typed as a charge, which on cash alone makes
+a 270.00/yr subscription look free for eleven months and like a 270.00 spike in the
+twelfth. Its title says `incl. reserved` in any month that has one, and the `▒` run marks
+the part that was not cash moving this month.
+
 `#N` on an expense line says "this one payment covers N months". The row is stored once,
 at the real amount and the real date — `960.60` on the day it left your account — and every
 monthly *total* counts `960.60 ÷ 2` in each of the two months it covers.

@@ -2,6 +2,7 @@ import pytest
 
 from daylogs.money import (
     MoneyError,
+    add_expense,
     annual_commitments,
     delete_recurring,
     list_budget,
@@ -524,3 +525,76 @@ def test_nothing_reserved_when_every_item_is_monthly(db):
     upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
     roll_month_budgets(db, month="2026-11")
     assert summarize_month(db, month="2026-11", today="2026-11-02").total_reserved == 0.0
+
+
+# ── what the month cost, against what left the account ──────────────────────
+# `incurred` is the accrual reading of a category and `spent` is the cash one. They differ by
+# an active annual item's monthly share, which is reserved in the cap and — because the owner
+# records the renewal in `recurring` rather than typing the charge — never logged as spend at
+# all. On `spent` alone a 240.00/yr subscription cost nothing in every month of its life.
+def test_incurred_adds_the_reserved_share_to_what_was_spent(db):
+    """The headline case: a category with both a real charge and an annual commitment."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    add_expense(db, amount=5.0, description="App", category="subscriptions", date="2026-11-02")
+
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert cat.spent == 5.0, "cash: only the charge"
+    assert cat.incurred == 25.0, "cost: the charge plus the annual item's 20.00 share"
+    assert cat.prorated_incurred == 20.0, "the part that is not cash that moved this month"
+    assert cat.incurred - cat.prorated_incurred == cat.spent - cat.prorated_spent == 5.0, (
+        "the solid remainder is this month's own cash, by both routes"
+    )
+
+
+def test_a_reserved_only_category_still_incurs_its_share(db):
+    """The case the change exists for, and the one `spent != 0` used to drop outright: an
+    annual item in a month nothing was bought. Eleven months in twelve look like this."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert cat.spent == 0.0, "nothing was bought"
+    assert (cat.incurred, cat.prorated_incurred) == (20.0, 20.0), "and it still cost 20.00"
+
+
+def test_incurred_equals_spent_without_an_annual_item(db):
+    """The common case, pinned so the two readings cannot drift apart when there is nothing
+    to prorate. Seeded with a *monthly* item because a test carrying no recurring row at all
+    passes with the `cycle` filter dropped."""
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    add_expense(db, amount=7.0, description="App", category="subscriptions", date="2026-11-02")
+
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert (cat.spent, cat.incurred) == (7.0, 7.0)
+    assert cat.prorated_incurred == 0.0
+
+
+def test_the_budget_is_still_measured_against_spent_not_incurred(db):
+    """The guard on the whole change. The cap *already contains* `prorated_budget`, so
+    charging `incurred` against it would spend the reserved share twice and report an annual
+    item as over budget in a month nothing was bought. `delta` stays `budget - spent`."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+
+    s = summarize_month(db, month="2026-11", today="2026-11-02")
+    cat = _cats(s)["subscriptions"]
+    assert (cat.budget, cat.incurred) == (20.0, 20.0), "the cap and the cost coincide here"
+    assert cat.delta == 20.0, "the whole cap is still unspent — not 0.00"
+    assert cat not in s.over_budget, "an untouched annual item is not an overrun"
+    assert s.total_spent == 0.0, "the header's cash figure does not move either"
+
+
+def test_a_refund_cancelling_a_reserved_share_still_incurs_zero(db):
+    """Both terms are real and they net. Pinned because the panel filters on the two inputs
+    rather than on `incurred` for exactly this row: it had activity and belongs on screen at
+    0.00, not dropped as though the month were empty."""
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    add_expense(db, amount=-20.0, description="Refund", category="subscriptions",
+                date="2026-11-02")
+
+    cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
+    assert (cat.spent, cat.prorated_budget) == (-20.0, 20.0), "both terms present"
+    assert cat.incurred == 0.0, "and they cancel"

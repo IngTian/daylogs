@@ -450,6 +450,28 @@ class CategorySpend:
     # Appended last so positional construction of the fields above keeps working.
     prorated_spent: float = 0.0
     prorated_budget: float = 0.0
+    # What the month *cost* in this category, against `spent`, which is what left the
+    # account. The difference is an active annual item: its monthly share is reserved in
+    # the cap and — because the owner records the renewal in `recurring` rather than as an
+    # expense — never logged as spend at all. So a 270.00/yr subscription cost 22.50 this
+    # month while `spent` says nothing happened, and "where did it go" answered with
+    # `spent` alone omitted it twelve months out of twelve.
+    #
+    # `incurred` is the accrual reading and `spent` is the cash one. Deliberately not named
+    # `cost`: `recurring.cost` is a *per-cycle price* and one word for two quantities is how
+    # a figure and its own explanation drift apart — the failure this dataclass's own
+    # comment above already records.
+    #
+    # It is **not** what the budget is measured against, and `delta` stays `budget - spent`:
+    # the cap already contains `prorated_budget`, so charging it again would have an annual
+    # item eat its own allowance twice and read as over budget in a month nothing was
+    # bought. Only the part-to-whole panel takes `incurred`.
+    incurred: float = 0.0
+    # The part of `incurred` that is not cash that moved this month — a `#N` share from an
+    # earlier month plus an annual item's slice of the cap. Both are proration, which is why
+    # they add rather than needing a mark each, and the remainder (`incurred -
+    # prorated_incurred`, identically `spent - prorated_spent`) is the cash this month.
+    prorated_incurred: float = 0.0
 
 
 @dataclass
@@ -536,9 +558,14 @@ def summarize_span(
     prorated_budget_by_cat = _annual_budget_by_category(conn, months)
 
     by_category: list[CategorySpend] = []
+    # A category with an annual item but nothing bought has a budget row, so it is already
+    # in `budget_by_cat` and needs no third set here — but the union is what guarantees
+    # that, and dropping either side would hide a reserved-only category from the panel.
     for cat in sorted(set(budget_by_cat) | set(spent_by_cat)):
         budget = budget_by_cat.get(cat, 0.0)
         spent = spent_by_cat.get(cat, 0.0)
+        prorated_spent = prorated_spent_by_cat.get(cat, 0.0)
+        prorated_budget = prorated_budget_by_cat.get(cat, 0.0)
         by_category.append(
             CategorySpend(
                 category=cat,
@@ -546,8 +573,10 @@ def summarize_span(
                 spent=spent,
                 delta=round(budget - spent, 2),
                 history=history.get(cat, [0.0] * HISTORY_MONTHS),
-                prorated_spent=prorated_spent_by_cat.get(cat, 0.0),
-                prorated_budget=prorated_budget_by_cat.get(cat, 0.0),
+                prorated_spent=prorated_spent,
+                prorated_budget=prorated_budget,
+                incurred=round(spent + prorated_budget, 2),
+                prorated_incurred=round(prorated_spent + prorated_budget, 2),
             )
         )
 
