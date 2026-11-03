@@ -1,5 +1,6 @@
 import pytest
 
+from daylogs.horizon import resolve
 from daylogs.money import (
     MoneyError,
     add_expense,
@@ -11,6 +12,7 @@ from daylogs.money import (
     pending_roll,
     roll_month_budgets,
     summarize_month,
+    summarize_span,
     update_recurring,
     upsert_budget,
     upsert_recurring,
@@ -498,8 +500,13 @@ def test_commitments_are_ordered_biggest_first(db):
 
 
 def test_no_months_means_no_commitments(db):
-    """An unbounded span has no calendar months, the way `Span.months()` returns `[]` — and
-    `[]` through the `month IN (...)` marks would be a syntax error, not an empty result."""
+    """An unbounded span has no calendar months, the way `Span.months()` returns `[]`.
+
+    Originally a note about SQL mechanics — `[]` through the `month IN (...)` marks is a
+    syntax error, not an empty result — and now a stated decision, because the aggregate
+    beside it had resolved the same input the opposite way. See
+    `test_the_all_horizon_reserves_nothing_anywhere`.
+    """
     upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
     roll_month_budgets(db, month="2026-11")
     assert annual_commitments(db, []) == []
@@ -598,3 +605,38 @@ def test_a_refund_cancelling_a_reserved_share_still_incurs_zero(db):
     cat = _cats(summarize_month(db, month="2026-11", today="2026-11-02"))["subscriptions"]
     assert (cat.spent, cat.prorated_budget) == (-20.0, 20.0), "both terms present"
     assert cat.incurred == 0.0, "and they cancel"
+
+
+def test_the_all_horizon_reserves_nothing_anywhere(db):
+    """`reserved` is a question about a month you can still act on, so the unbounded horizon
+    answers it nowhere rather than summing it.
+
+    It used to answer in two contradictory ways from one input: `annual_commitments([])`
+    returned `[]` while `_annual_budget_by_category([])` dropped its WHERE and summed every
+    annual budget row ever rolled — so the header stated a figure the expenses pane explained
+    with zero rows. Measured on real data before the fix: 216.91 against nothing.
+
+    The cap total deliberately still sums everything, because "spent X of budget Y over all
+    time" is a coherent retrospective pair. Only the within-cap commitment stops meaning
+    anything once the months are added together, which is why this asserts both at once.
+    """
+    upsert_recurring(db, name="Yearly", cost=360.0, cycle="annually", category="subscriptions")
+    upsert_recurring(db, name="Rent", cost=500.0, cycle="monthly", category="housing")
+    for month in ("2026-09", "2026-10", "2026-11"):
+        roll_month_budgets(db, month=month)
+
+    bounded = summarize_month(db, month="2026-11", today="2026-11-03")
+    assert bounded.total_reserved == 30.0, "one month still reserves the monthly share"
+
+    unbounded = summarize_span(db, span=resolve("all", anchor="2026-11-03"), today="2026-11-03")
+    assert unbounded.total_reserved == 0.0, (
+        "three rolled months summed to 90.00, which the pane could only explain with one "
+        "row per item per month"
+    )
+    assert all(c.prorated_budget == 0.0 for c in unbounded.by_category), (
+        "the categories column and the bar zone read the same field, so they go quiet too"
+    )
+    assert annual_commitments(db, []) == [], "and the pane pins nothing, as it always did"
+    assert unbounded.total_budget == 1590.0, (
+        "the cap total still sums history — 3 x (30 + 500) — because spend does too"
+    )
