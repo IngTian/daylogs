@@ -3298,3 +3298,154 @@ async def test_the_sort_survives_switching_sub_view(make_app, db):
         await pilot.press("tab")
         await pilot.pause()
         assert (body_tab.sort_field, body_tab.sort_desc) == ("value", False)
+
+
+# ── a superseded estimate must not take the entry with it ────────────────────
+# `@work(exclusive=True)` cancels the first worker when the second starts, and
+# `asyncio.CancelledError` is a `BaseException` — so the `except Exception` in both workers
+# never saw it. The sequence is one a hurried user types without noticing, and the existing
+# `test_a_second_estimate_cancels_the_first_without_clearing_the_indicator` drives it
+# exactly while asserting only the call count and the popup, which is how it shipped.
+async def test_a_superseded_food_estimate_says_the_meal_was_not_logged(
+    make_app, db, type_into, monkeypatch
+):
+    """Food is the path where the entry genuinely cannot be saved — `food.kcal` is
+    `NOT NULL` and no number exists yet — so the requirement is that the loss is *stated*.
+    Silence read as acceptance: the prompt closed, no row appeared, and nothing said why."""
+    import asyncio
+
+    started = asyncio.Event()
+    calls = []
+
+    async def two_stage(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)  # cancelled by the second press
+        started.set()
+        return Estimate(description="soup", kcal=400)
+
+    monkeypatch.setattr("daylogs.tui.body_tab.estimate.from_text", two_stage)
+    errors = []
+    app = make_app()
+    async with app.run_test() as pilot:
+        app.notify_error = lambda msg, **kw: errors.append(msg)  # type: ignore[method-assign]
+        await go_body(pilot, app)
+        await pilot.press("f")
+        await type_into(pilot, "chicken salad")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("f")
+        await type_into(pilot, "soup")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        await pilot.pause()
+    assert len(calls) == 2, f"expected two estimate calls, got {len(calls)}"
+    assert any("chicken salad" in m for m in errors), (
+        f"the dropped meal has to be named, or the loss is invisible: {errors}"
+    )
+    # And it must not promise a recovery key: prompt history is a per-label deque, so any
+    # food line submitted in between moves what `↑` reaches.
+    assert not any("↑" in m for m in errors), f"do not promise history: {errors}"
+    # The whole asymmetry with the activity handler rests on "there is no number, and
+    # inventing one is worse than losing it" — so pin that nothing was written.
+    # `_write_food` passes `kcal=r.kcal or 0`, so symmetrising the two handlers would book a
+    # 0 kcal meal, and without this line that mutant leaves the suite green.
+    assert list_food(db, date=app.today()) == [], (
+        "a superseded estimate has no kcal, so the row must be absent rather than invented"
+    )
+
+
+async def test_a_superseded_activity_estimate_still_records_the_activity(
+    make_app, db, type_into
+):
+    """The activity path *can* save its row — `activity.factor` is nullable — and the
+    invariant in `_run_factor_estimate`'s own docstring says it must: "losing the first
+    because the second failed is the worse outcome". A cancellation is a failed inference.
+
+    Worse than the food case, because worker 2 re-reads the day's activities to infer a PAL
+    (which is not additive), so a vanished first row also corrupted the second's input.
+    """
+    import asyncio
+
+    started = asyncio.Event()
+    calls = []
+
+    async def two_stage(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            await asyncio.sleep(3600)  # cancelled by the second press
+        started.set()
+        return {"factor": 1.6}
+
+    app = make_app(runner_json=two_stage)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "morning run")
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("a")
+        await type_into(pilot, "evening gym")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        await pilot.pause()
+        descriptions = [r["description"] for r in _act_rows(db, app.today())]
+        factors = {r["description"]: r["factor"] for r in _act_rows(db, app.today())}
+    assert len(calls) == 2, f"expected two inference calls, got {len(calls)}"
+    assert "morning run" in descriptions, (
+        f"the superseded activity was discarded: {descriptions}"
+    )
+    assert factors["morning run"] is None, (
+        "a cancelled inference produced no number, so the row carries NULL and the day "
+        f"falls back to the profile baseline: {factors}"
+    )
+    # Deliberately NOT asserting that worker 2 saw "morning run" in the day it inferred
+    # from. It does not, and an earlier version of this test claimed it did and passed —
+    # because a fake runner that returns without awaiting lets worker 1's unwind complete
+    # first. `claude._run` kills and `await proc.wait()`s its child on `BaseException`, so
+    # in production the rescue write lands *after* worker 2's `logged` re-query: measured
+    # false at every unwind length but zero, and the real path is ~21 hops. Freezing a green
+    # assertion for behaviour production does not have is the shape this repo already
+    # polices by name in `test_fixing_the_category_does_not_loop_forever`. What this test
+    # pins is the narrower, true thing: the activity is no longer gone.
+
+
+async def test_an_inference_in_flight_at_shutdown_keeps_its_row_and_exits_clean(
+    make_app, db, type_into
+):
+    """The other cancel path, which has no replacement worker behind it.
+
+    The first version of the rescue called `_write_activity`, which continues into
+    `self.reload()` — so at shutdown, with the nodes already pruned, `query_one` raised
+    `NoMatches` *inside* the `except asyncio.CancelledError` and replaced it. Textual then
+    reported ERROR rather than CANCELLED and printed a traceback with `show_locals=True`,
+    putting `cfg.db_path` on screen as the last thing a clean quit showed. The row survived
+    either way, so the regression was silence turning into a panic.
+
+    No test covered a cancellation that is *not* a supersede, which is how that shipped.
+    """
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def never_returns(**kwargs):
+        started.set()
+        await asyncio.sleep(3600)
+
+    app = make_app(runner_json=never_returns)
+    async with app.run_test() as pilot:
+        await go_body(pilot, app)
+        await pilot.press("a")
+        await type_into(pilot, "morning run")
+        await pilot.press("enter")
+        await started.wait()
+        await pilot.pause()
+        # and now the context manager tears the app down with the worker still awaiting
+    assert app._exception is None, f"shutdown raised instead of cancelling: {app._exception}"
+    rows = _act_rows(db, app.today())
+    assert [r["description"] for r in rows] == ["morning run"], (
+        f"the in-flight activity was lost at shutdown: {rows}"
+    )
+    assert rows[0]["factor"] is None, "no number arrived, so the row carries NULL"

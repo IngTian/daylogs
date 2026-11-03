@@ -7,6 +7,7 @@ What lives here is key handling, the estimate review flow, and rendering.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 
 from rich.text import Text
@@ -746,6 +747,29 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
+        except asyncio.CancelledError:
+            # A second `f` with no `=kcal` cancels this one, and `CancelledError` is a
+            # `BaseException`, so the `except Exception` below never saw it: the first meal
+            # was dropped with no row, no toast, no error and no log line, while the prompt
+            # closing read as "accepted". Say so instead, naming the line, because this is
+            # the one path where the entry cannot be saved: `food.kcal` is `NOT NULL`, there
+            # is no number yet, and inventing one would be worse than losing it. The
+            # activity path *can* save its row and therefore does.
+            #
+            # No `_set_estimating(False)`: the popup is keyed, and the worker that cancelled
+            # this one owns that key while it is still running. Clearing it here is the
+            # original "screen goes quiet mid-call" defect, which has its own test.
+            #
+            # Deliberately no "press f then ↑" — prompt history is a per-label deque and any
+            # food line submitted in between moves what ↑ reaches, so the hint would be wrong
+            # exactly when it is needed.
+            # "cancelled", not "superseded by a newer estimate": the other cancel path is
+            # app shutdown, where nothing superseded anything, and this sentence also goes
+            # to the rotating log.
+            self.app.notify_error(
+                f"{r.description} was not logged — the estimate was cancelled"
+            )
+            raise  # or a swallowed cancel is recorded as SUCCESS for work that never ran
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_estimating(False)
             self.app.notify_error(f"estimate failed: {e}")
@@ -1083,6 +1107,47 @@ class BodyTab(PanelTab):
                 timeout_sec=self.app.cfg.estimate_timeout_sec,
                 model=self.app.cfg.claude_model,
             )
+        except asyncio.CancelledError:
+            # A cancellation *is* a failed inference, so this invariant applies to it: the
+            # description is the user's data and the factor is a guess, and losing the first
+            # because the second superseded it is the worse outcome. `CancelledError` is a
+            # `BaseException`, so the `except Exception` below never caught it and a second
+            # un-factored activity on the same day silently discarded the first **row**.
+            #
+            # Rescuing the row does **not** fix worker 2's view of the day, and it would be
+            # convenient to claim otherwise. `claude._run` kills and `await proc.wait()`s its
+            # child on `BaseException`, so this unwind suspends, while worker 2's first step
+            # — the `logged` re-query above the `try` — runs immediately. Measured: the row
+            # lands after that read at every unwind length except zero, and the real path is
+            # ~21 hops. So a two-activity day can still get a one-activity PAL; what is
+            # fixed is that the activity is no longer *gone*. The clean answer is to insert
+            # on submit and `UPDATE` the factor when the estimate lands, which would delete
+            # this handler rather than add to it — a separate slice, because it touches both
+            # submit paths and the "only the entry path infers a factor" invariant.
+            #
+            # `add_activity` directly, **not** `_write_activity`, which continues into
+            # `self.reload()` and `self.app.notify(...)`. Both are wrong from here. The
+            # toast is a success message for an entry whose number never arrived, and the
+            # reload reaches the DOM — so when the cancellation is the one app shutdown
+            # causes, `query_one("#weight-head")` raises `NoMatches` *inside* this handler,
+            # replacing the `CancelledError`. Textual then takes its `except Exception`
+            # branch and reports ERROR rather than CANCELLED, printing a traceback with
+            # `show_locals=True` — which puts `cfg.db_path` on the user's screen as the
+            # parting image of a clean quit. Reproduced at teardown; the row survived
+            # either way, so this was a regression from silence to a panic.
+            #
+            # No `_set_inferring(False)` either: the popup key belongs to the worker that is
+            # still running, and `WorkerManager.add_worker` cancels the group *before*
+            # starting the replacement, so the replacement re-begins that same key.
+            body.add_activity(
+                self.app.conn,
+                description=r.description,
+                date=r.date,
+                at=r.at,
+                factor=r.factor,
+                source="estimated",
+            )
+            raise  # or a swallowed cancel is recorded as SUCCESS for work that never ran
         except Exception as e:  # surfaced to the user, not swallowed
             self._set_inferring(False)
             self._write_activity(r, source="estimated")

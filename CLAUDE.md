@@ -181,6 +181,46 @@ appended prose where it was convenient rather than editing the map.
   not to resting BMR. It is also why a factor is **not clearable** through the edit
   prompt: `_update` drops None, so a line with no `=` leaves the stored factor
   alone, which is what keeps a factorless row's description fixable at all.
+  **"Failed" includes *cancelled*, and that needs its own `except`.** Both workers are
+  `@work(exclusive=True)`, so a second un-factored entry cancels the first — and
+  `asyncio.CancelledError` is a `BaseException`, so `except Exception` never saw it. A
+  second activity on the same day therefore discarded the first **row**, which is precisely
+  what this bullet forbids, on the success path of an ordinary hurried day. The handler
+  re-raises, because a *swallowed* cancel is recorded as `SUCCESS` — measured on textual
+  8.2.8, not CANCELLED and not FAILED; nothing in this app reads `Worker.state`, so the
+  `raise` is hygiene rather than load-bearing, and the first version of this note had it
+  wrong in a file whose own rule is that recorded Textual internals are measured facts.
+  It calls **`body.add_activity` directly, never `_write_activity`**, which continues into
+  `reload()` and a success toast. Both are wrong from a cancelled worker, and the reload is
+  worse than wrong: at app shutdown the nodes are already pruned, so `query_one` raises
+  `NoMatches` *inside* the `except`, replaces the `CancelledError`, and Textual reports
+  ERROR with a `show_locals=True` traceback — putting `cfg.db_path` on screen as the last
+  image of a clean quit. Reproduced; the row survived either way, so the first draft of
+  this fix traded silence for a panic. `test_an_inference_in_flight_at_shutdown_keeps_its_row_and_exits_clean`
+  is the tripwire, and it exists because no test covered a cancellation that is not a
+  supersede.
+  It deliberately does **not** touch the popup: the keyed indicator belongs to the worker
+  still running (`WorkerManager.add_worker` cancels the group *before* starting the
+  replacement, which then re-begins the same key), and clearing it from the cancelled worker
+  is the "screen goes quiet mid-call" defect that has its own test.
+  **Rescuing the row does not fix worker 2's view of the day, and no test may claim it
+  does.** `claude._run` kills and `await proc.wait()`s its child on `BaseException`, so the
+  unwind suspends while worker 2's `logged` re-query — above its `try` — runs immediately.
+  Measured false at every unwind length but zero, and the real path is ~21 hops, so a
+  two-activity day can still get a one-activity PAL. An earlier version of the test asserted
+  the opposite and **passed**, because a fake runner returning without awaiting lets the
+  rescue land first: the `test_fixing_the_category_does_not_loop_forever` shape again. The
+  clean fix is to insert on submit and `UPDATE` the factor when the estimate lands, which
+  deletes this handler instead of adding to it — deliberately not done here, because it
+  touches both submit paths and the "only the entry path infers a factor" rule.
+  Food's equivalent cannot do this and the asymmetry is the **schema**, not an oversight:
+  `food.kcal` is `NOT NULL` and a superseded estimate has no number, so that path can only
+  *state* the loss — it names the dropped line and promises no recovery key, because prompt
+  history is a per-label deque that any food line submitted in between moves. The old
+  behaviour was silence on both: no row, no toast, no error, no log line, while the prompt
+  closing read as acceptance. `test_a_second_estimate_cancels_the_first_without_clearing_the_indicator`
+  drove this exact sequence for weeks while asserting only the call count and the popup,
+  which is how it shipped; the two `test_a_superseded_*` tests assert the entry's fate.
 - **Only the entry path infers a factor; an edit never does.** Fixing a typo in a
   description must not silently re-roll the number the whole day is measured
   against. The activity worker also has its **own** `@work` group: sharing the food
