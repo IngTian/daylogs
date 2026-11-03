@@ -93,11 +93,21 @@ do not reason about any of them or ask about them.
   burn against calendar progress: `day_of_month` of `days_in_month`. 84% of
   budget on day 27 of 31 is fine; on day 12 it is not. Make that comparison
   explicitly — it is the most useful thing you can say.
+- `reserved` is the part of `remaining` already committed to an annual
+  subscription's monthly share. It is not spendable, and it is never logged as
+  spend, so it does not shrink as the month goes on. When it is a meaningful
+  slice of what is left, say so plainly — "1,200 left, 50 of it already
+  committed" — rather than quoting `remaining` alone. When it is zero, do not
+  mention it.
 - `payload.money.month.over_budget`: categories already past their cap. Note
   severity. Cross-check against the category's `history` — sometimes an
   overrun is one recurring line that could be cut.
 - `payload.money.month.under_budget_remaining`: spare room. Call out notable
-  ones; don't enumerate all of them.
+  ones; don't enumerate all of them. Each carries `reserved` as well —
+  a category whose `remaining` is mostly `reserved` has little real room, so do
+  not offer it as somewhere to spend. State the two figures; do not subtract
+  them, because a cap can be committed past what is left and a negative
+  difference would read as an overrun that has not happened.
 - `payload.money.by_category[].history`: six monthly totals, the last being
   this month. Flag a category that has clearly stepped up or down against its
   own recent shape.
@@ -215,6 +225,15 @@ def build_payload(conn, cfg, *, date: str) -> dict:
                 "spent": summary.total_spent,
                 "budget": summary.total_budget,
                 "remaining": summary.remaining,
+                # `remaining` is `budget - spent`, which counts an annual item's monthly
+                # share as available — the share is reserved in the cap and, because the
+                # renewal lives in `recurring` rather than as an expense, never logged as
+                # spend, so that gap never closes. Without this the digest described a
+                # fully-committed cap as spare room, monthly, in prose, on the surface
+                # read daily and not navigated to. Sent *beside* `remaining` rather than
+                # netted out of it, because the screen states the two separately and a
+                # payload that disagreed with the header would be a third reading.
+                "reserved": summary.total_reserved,
                 "day_of_month": summary.day_of_month,
                 "days_in_month": summary.days_in_month,
                 "over_budget": [
@@ -222,7 +241,18 @@ def build_payload(conn, cfg, *, date: str) -> dict:
                     for c in summary.over_budget
                 ],
                 "under_budget_remaining": [
-                    {"category": c.category, "remaining": c.delta}
+                    # Per category too, and this is the list that was actually wrong: it is
+                    # built from `delta`, which ignores `prorated_budget` entirely, and the
+                    # task calls it "spare room". Deliberately not subtracted here —
+                    # `delta - prorated_budget` goes negative for a category this very list
+                    # calls under budget (cap 30 = 20 annual + 10 monthly, 15 logged: delta
+                    # 15, reserved 20, "free" -5), which is why `_reserved_cell` states an
+                    # amount and a share rather than a difference.
+                    {
+                        "category": c.category,
+                        "remaining": c.delta,
+                        "reserved": c.prorated_budget,
+                    }
                     for c in summary.under_budget_remaining
                 ],
             },

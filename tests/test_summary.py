@@ -342,3 +342,64 @@ def test_a_once_weighed_day_is_unaffected(db, tmp_path):
     b = build_payload(db, cfg, date="2026-09-14")["body"]
     assert b["weight_kg"] == 82.0
     assert b["tdee"] == round(b["bmr"] * b["activity_factor"])
+
+
+# ── the digest must not call a committed cap spare room ──────────────────────
+def test_the_payload_carries_what_is_reserved(db, tmp_path):
+    """`remaining` is `budget - spent`, which counts an annual item's monthly share as
+    available: the share is reserved in the cap and — because the renewal lives in
+    `recurring` rather than as an expense — never logged as spend, so the gap never closes.
+
+    The daily read therefore described a fully-committed cap as spare room, monthly, in
+    prose, on the one surface read without navigating to it. Measured on real data before
+    this: subscriptions showed 32.60 remaining of which 22.50 was already promised.
+    """
+    from daylogs.money import roll_month_budgets, upsert_recurring
+
+    upsert_recurring(db, name="Yearly", cost=360.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-08")
+    add_expense(db, amount=2.0, description="app", category="subscriptions", date="2026-08-26")
+
+    p = build_payload(db, _cfg(tmp_path), date="2026-08-26")
+    month = p["money"]["month"]
+    assert month["reserved"] == 30.0, (
+        f"the month total has to carry it beside `remaining`: {month}"
+    )
+    # Sent beside `remaining`, never netted out of it: the screen states the two
+    # separately, and a payload that disagreed with the header would be a third reading.
+    assert month["remaining"] == 28.0, "30.00 cap less 2.00 spent, unchanged"
+
+    spare = {c["category"]: c for c in month["under_budget_remaining"]}
+    assert spare["subscriptions"]["remaining"] == 28.0
+    assert spare["subscriptions"]["reserved"] == 30.0, (
+        "this is the list the task calls spare room, and it was built from `delta` alone"
+    )
+
+
+def test_the_prompt_tells_the_model_not_to_subtract_what_is_reserved(db, tmp_path):
+    """`remaining - reserved` goes negative for a category this very list calls under
+    budget — a cap of 30 that is 20 annual plus 10 monthly, with 15 logged, gives delta 15
+    and reserved 20, so a subtraction reads as an overrun that has not happened. That is why
+    the screen states an amount and a share rather than a difference, and the prompt has to
+    say the same thing or the model will do the arithmetic itself.
+    """
+    assert "reserved" in SYSTEM_PROMPT, "the field is undocumented to the model"
+    assert "do not subtract" in SYSTEM_PROMPT.lower(), (
+        "a payload field with no instruction is a field the model will interpret freely"
+    )
+
+
+def test_a_month_with_no_annual_item_reserves_nothing_in_the_payload(db, tmp_path):
+    """The common case, pinned so the figure stays absent when it should. Seeded with a
+    *monthly* recurring item, because a payload with no recurring row at all passes with the
+    cycle filter dropped entirely."""
+    from daylogs.money import roll_month_budgets, upsert_recurring
+
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-08")
+    add_expense(db, amount=2.0, description="app", category="subscriptions", date="2026-08-26")
+
+    month = build_payload(db, _cfg(tmp_path), date="2026-08-26")["money"]["month"]
+    assert month["reserved"] == 0.0
+    spare = {c["category"]: c for c in month["under_budget_remaining"]}
+    assert spare["subscriptions"]["reserved"] == 0.0
