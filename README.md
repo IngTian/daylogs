@@ -180,7 +180,7 @@ figures above them are always today's.
 | `expense ›` | `12.40 lunch !restaurant` | amount, description, category |
 | `expense ›` | `127 Grocery Item X !grocery ~receipt in wallet` | with a note |
 | `expense ›` | `-24.99 returned shoes !grocery` | a refund |
-| `expense ›` | `240 Insurance !subscriptions #12` | one payment covering 12 months |
+| `expense ›` | `960.60 Costco bulk buy !grocery #2` | one payment, spread over 2 months |
 | `budget ›` | `500 !grocery` | named after the category |
 | `recurring ›` | `20.99 Streaming !subscriptions #monthly` | monthly |
 | `new category ›` | `gym Gym & Pool` | slug, then an optional display name |
@@ -344,6 +344,16 @@ maintenance for the day, then the average and a sparkline over the horizon.
 **Money** shows BUDGET vs SPENT beside WHERE IT WENT. The first scales each bar to
 that category's own cap, so "how close to this limit" is readable per row; the
 second is a ranked share list.
+
+`#N` on an expense line says "this one payment covers N months". The row is stored once,
+at the real amount and the real date — `960.60` on the day it left your account — and every
+monthly *total* counts `960.60 ÷ 2` in each of the two months it covers.
+
+Reach for it when a **one-off** purchase is really several months of something: a bulk shop,
+a flight, boots. It is not for subscriptions — an annual subscription belongs in `recurring`
+with `#annually`, which prorates the *budget* side instead, and then there is no charge to
+mark. Marking a bulk buy raises those months' spend and does not raise their caps, which is
+the honest reading: you spent money you had not budgeted, and spreading it tells you when.
 
 `▒` marks **proration** — a multi-month amount cut into monthly slices. It appears in
 two places on a bar, and *where* is what tells them apart, because a bar already fills

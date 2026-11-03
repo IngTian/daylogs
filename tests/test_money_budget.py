@@ -502,3 +502,25 @@ def test_no_months_means_no_commitments(db):
     upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
     roll_month_budgets(db, month="2026-11")
     assert annual_commitments(db, []) == []
+
+
+def test_the_summary_totals_what_is_reserved(db):
+    """The header needs one number for "how much of what is left is not actually mine to
+    spend". Per-category bars already show it; the header said only `left`, which counts the
+    reserved share as though it were available — and for an active annual item that share is
+    never logged as spend, so the gap never closes.
+    """
+    upsert_recurring(db, name="Yearly", cost=240.0, cycle="annually", category="subscriptions")
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    upsert_budget(db, month="2026-11", name="Food", category="grocery", amount=400.0)
+    roll_month_budgets(db, month="2026-11")
+    s = summarize_month(db, month="2026-11", today="2026-11-02")
+    assert s.total_budget == 430.0, "400 food + 20 annual share + 10 monthly"
+    assert s.total_reserved == 20.0, "only the annual item's share is reserved"
+    assert s.remaining == 430.0, "nothing spent yet"
+
+
+def test_nothing_reserved_when_every_item_is_monthly(db):
+    upsert_recurring(db, name="Monthly", cost=10.0, cycle="monthly", category="subscriptions")
+    roll_month_budgets(db, month="2026-11")
+    assert summarize_month(db, month="2026-11", today="2026-11-02").total_reserved == 0.0
