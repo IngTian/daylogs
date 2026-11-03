@@ -875,10 +875,25 @@ class MoneyTab(PanelTab):
             return
         # Push the pre-image only once the write has succeeded: a MoneyError would
         # otherwise leave a bogus entry that `u` applies to a row which never changed.
+        # `prepaid_months` belongs here for exactly the reason `note` does: it is displayed,
+        # `render_expense` round-trips the `#N` token into the prefill, and `parse_expense`
+        # parses it back — so the grammar invited an edit the write then dropped. Adding `#3`
+        # to a line, or deleting the `#12` the prefill handed you, both appeared to work and
+        # changed nothing. This call predates the feature by two weeks, and the commit that
+        # wired prepaid through storage, rendering, parsing and the add path missed this one
+        # edge; the data layer has been ready the whole time, with `0` documented as the
+        # clearing value and no caller ever passing it.
+        #
+        # `or 0` is the same shape as `note or ""` beside it and means the same thing: the
+        # submitted line is authoritative, so a line with no `#` clears the marker rather
+        # than leaving the stored one alone. `update_expense` drops None to tell "not
+        # mentioned" from "set to nothing", which is why the falsy case cannot simply pass
+        # through — and `_check_months(0 or None)` resolves to NULL, the state meaning an
+        # ordinary expense.
         money.update_expense(
             self.app.conn, row_id, cfg,
             amount=r.amount, description=r.description, category=r.category,
-            date=r.date, note=r.note or ""
+            date=r.date, note=r.note or "", prepaid_months=r.prepaid_months or 0
         )
         self.app.undo_stack.push("expense", dict(before))
         self.app.notify(f"{fmt(r.amount)} {r.description} → {r.category} · u to undo", timeout=4)
