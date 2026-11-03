@@ -104,7 +104,7 @@ EXPENSES = [
     ("education", 39.00, "book", 22),
 ]
 
-# `cycle` is per item now: the annual one is what makes the `░ committed` share of a cap
+# `cycle` is per item now: the annual one is what makes the `▒` reserved share of a cap
 # visible, which is the whole reason it is in the fixture. A monthly-only fixture renders a
 # Money tab that cannot show three of the marks the app draws.
 RECURRING = [

@@ -976,8 +976,8 @@ async def _expense_cells(pilot, app, *, grouped):
 
 @pytest.mark.parametrize("grouped", [False, True])
 async def test_the_note_is_shown_beside_the_description(make_app, db, grouped):
-    """48 of 234 real expenses carry a note naming which card paid, and the app displayed it
-    nowhere — settable, exported, round-tripped through the edit prefill, invisible."""
+    """A note names which card paid, and the app displayed it nowhere — settable,
+    exported, round-tripped through the edit prefill, invisible."""
     add_expense(db, amount=47.20, description="Costco Gas", category="transport",
                 date="2026-09-14", note="CIBC MC")
     app = make_app()

@@ -75,11 +75,11 @@ def _description_cell(row) -> Text:
     counting 20.00. Reproduced before fixing: the marker showed ungrouped and not grouped.
 
     The note was settable, exported and round-tripped through the edit prefill, and displayed
-    nowhere; 48 of 234 real expenses carry one, naming which card paid. It is separated by a
+    nowhere, on a field whose real use is naming which card paid. It is separated by a
     two-space gap and *then* dimmed, in that order of importance: dim says "secondary", and
     the gap is what still says "two fields" where dim does not render — colour is emphasis,
-    never the only signal. A falsy note adds nothing at all, which also covers the one row in
-    the real database holding `''` rather than NULL from before the write paths agreed.
+    never the only signal. A falsy note adds nothing at all, which also covers rows written
+    holding `''` rather than NULL from before the two write paths agreed.
     """
     cell = Text(_described(row))
     note = row["note"] if "note" in row.keys() else None
@@ -317,9 +317,10 @@ class MoneyTab(PanelTab):
         # exception and is safe for the same reason — it substitutes a run that is already
         # measured, so `plain` is unchanged, and Textual's markup nests so the segment
         # style survives being inside the row's budget-status colour.
-        # Two shaded runs now, one per glyph. `shade` handles the first contiguous run of the
-        # glyph it is given, and the two zones use different glyphs in disjoint parts of the
-        # bar, so the calls compose — and both nest inside the row's status colour.
+        # One call, one glyph: both bar zones are `PRORATED_GLYPH` since #61, and `shade`
+        # styles every contiguous run of it, so the prorated-spend run inside the fill and
+        # the reserved run past the dots are dimmed alike. The guard in `budget_bars` keeps a
+        # free cell between them, so dimming both cannot make them read as one run.
         budget_lines = [
             mark(
                 shade(line, PRORATED_GLYPH, FAINT),
@@ -419,12 +420,12 @@ class MoneyTab(PanelTab):
     def _add_reserved(self, table, reserved, *, grouped: bool) -> None:
         """Annual commitments for the months on screen, pinned under the prepaid shares.
 
-        `░` and faint, the same mark the BUDGET vs SPENT bar uses for the committed share of
-        a cap, so the two surfaces read as one language rather than two coincidences. A
-        *different* glyph from `⇢`, because these are a different thing: `⇢` is a share of a
-        payment already made elsewhere, this is a share of a cap not yet charged at all.
-        Both are non-cash, which is why both are marked and dimmed — the pane's own question
-        is what left the account, and these did not.
+        `⇢` and faint, the *same* mark the prepaid shares take, because the pane has one
+        question — what left the account — and both answers to it are "not this". The
+        distinction between them is carried in words, in the second column: a date for a
+        share of a payment already made elsewhere, `reserved` for a share of a cap not yet
+        charged at all. Two shades of grey is not a distinction a reader can make, which is
+        why there is one glyph here and in the bar, and why the column says which.
         The reason this row exists at all, when the panel and the categories column already
         carry the figure: it is the only one that says *which item*. 22.50 of a subscriptions
         cap is a number; `Tradingview 22.50 of 270.00/yr` is an answer.

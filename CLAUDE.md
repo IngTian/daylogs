@@ -252,9 +252,15 @@ appended prose where it was convenient rather than editing the map.
   is asserted byte-identical to the input, which is what keeps the builders' arithmetic
   correct. Textual's markup **nests**, so this composes with the `mark()` the caller wraps
   around the whole row: a budget line ends up with its status colour over the full line and
-  `dim` over the glyph run inside it, verified as two spans rather than assumed. It handles
-  the first contiguous run, which is all the builders emit. Do not reach for it to colour
-  anything the builders did not mark with a glyph of its own.
+  `dim` over the glyph run inside it, verified as two spans rather than assumed. It styles
+  **every** contiguous run, because `budget_bars` emits two of them: collapsing the two
+  proration shades into one glyph (#61) also collapsed `shade(shade(…))` into one call, and
+  since `shade` then handled only the first run the reserved zone silently went back to full
+  strength in the row's status colour while the prorated-spend zone stayed dim. The two-run
+  dim was live for an hour in 0.6.0 and nothing asked for it back — the commit message's
+  "the work the second shade was doing" meant the second *grey*, not the second call. The
+  runs still cannot merge: `budget_bars` keeps a free cell between them. Do not reach for it
+  to colour anything the builders did not mark with a glyph of its own.
 - **The TREND panel plots one series at a time, and only weight fits its own range.**
   `c` cycles weight · intake · net over the window `+`/`-` already control; the two are
   independent, so zooming must not reset the series. Weight is self-fitted because

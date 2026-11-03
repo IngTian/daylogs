@@ -1,7 +1,10 @@
 import pytest
 
 from daylogs.tui.widgets import (
+    _EMPTY,
     BAD,
+    FAINT,
+    PRORATED_GLYPH,
     arrow,
     budget_bars,
     burn_bar,
@@ -430,6 +433,34 @@ def test_shade_is_a_no_op_without_a_style_or_a_glyph():
     assert shade("abc ▒▒▒", "▒", "") == "abc ▒▒▒"
 
 
+def test_shade_dims_both_proration_runs_of_a_budget_bar():
+    """#61 collapsed the two proration shades into one glyph and `shade(shade(…))` into one
+    call, so the reserved run past the dots went back to full strength while the
+    prorated-spend run inside the fill stayed dim — one concept, two brightnesses. Built
+    from the real bar rather than a hand-typed line, because the defect was in how many runs
+    `budget_bars` emits, which a synthetic line cannot be wrong about."""
+    from textual.content import Content
+
+    line = budget_bars(
+        [("subscriptions", 90.0, 200.0)],
+        width=60,
+        prorated={"subscriptions": 80.0},
+        reserved={"subscriptions": 100.0},
+    )[0]
+    assert line.count(PRORATED_GLYPH) and _EMPTY in line, (
+        f"fixture must draw both runs with a gap: {line!r}"
+    )
+    c = Content.from_markup(shade(line, PRORATED_GLYPH, FAINT))
+    assert c.plain == line, "markup must not change a single printed cell"
+    spans = [(s.start, s.end, s.style) for s in c.spans]
+    assert len(spans) == 2, f"both runs dim, not just the first: {spans}"
+    # The *last* run specifically: asserting the first is what passed throughout the bug.
+    last = line.rindex(PRORATED_GLYPH)
+    assert any(s <= last < e and st == FAINT for s, e, st in spans), (
+        f"the reserved run at {last} is undimmed: {spans}"
+    )
+
+
 def test_budget_bars_marks_the_prorated_part_of_the_fill():
     line = budget_bars([("subs", 100.0, 200.0)], width=60,
                        prorated={"subs": 50.0})[0]
@@ -493,11 +524,13 @@ def test_ranked_bars_without_prorated_is_exactly_what_it_was():
     assert ranked_bars(items, width=60) == ranked_bars(items, width=60, prorated={})
 
 
-# ── the committed share of a cap ────────────────────────────────────────────
+# ── the reserved share of a cap ─────────────────────────────────────────────
 # A third zone, because the bar's extent is the cap and the cap is two things: what is still
-# discretionary and what an annual item has already committed. `▒` (prorated *spend*) and `▒`
-# (committed *cap*) are different glyphs because a month can carry either, both or neither — one
-# needs a `#N` expense, the other an annual recurring item.
+# discretionary and what an annual item has already committed. Both zones take the *same*
+# glyph since #61, and position carries the rest: a run inside the fill is a share of spend,
+# a run past the dots is a share of the cap. A month can hold either, both or neither — one
+# needs a `#N` expense, the other an annual recurring item — so the two runs are measured
+# separately even though they are marked alike.
 def test_the_committed_share_marks_the_far_end_of_the_cap():
     """Committed sits at the right, where the allowance runs out: "this much is spoken for".
     Spend grows from the left, so the two zones cannot overwrite each other."""
