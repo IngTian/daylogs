@@ -640,3 +640,33 @@ def test_the_all_horizon_reserves_nothing_anywhere(db):
     assert unbounded.total_budget == 1590.0, (
         "the cap total still sums history — 3 x (30 + 500) — because spend does too"
     )
+
+
+def test_editing_a_rolled_budget_line_does_not_change_its_source(db):
+    """`source` is provenance, and losing it costs a permanent double budget.
+
+    `upsert_budget` is add-*or-update* and `source` defaults to `manual`, so every edit of a
+    rolled line carried that default through `ON CONFLICT … source = excluded.source` and
+    flipped `recurring` to `manual`. That cuts the line loose from
+    `_rename_rolled_budgets`, whose WHERE requires `recurring` — so renaming the item leaves
+    the old line behind *and* the next roll writes a new one. Same shape as `active` being
+    absent from `upsert_recurring`'s conflict clause, for the same reason.
+    """
+    upsert_recurring(db, name="Groceries", cost=500.0, cycle="monthly", category="grocery")
+    roll_month_budgets(db, month="2026-11")
+    rid = {r["name"]: r["id"] for r in list_recurring(db)}["Groceries"]
+
+    # Exactly the call `_submit_budget` makes: no `source=`.
+    upsert_budget(db, month="2026-11", name="Groceries", category="grocery", amount=700.0)
+    line = next(r for r in list_budget(db, month="2026-11") if r["name"] == "Groceries")
+    assert (line["amount"], line["source"]) == (700.0, "recurring"), (
+        f"the amount is the edit, the source is not the edit's to change: {dict(line)}"
+    )
+
+    # The consequence, end to end: the rename must carry the line with it.
+    update_recurring(db, rid, name="Food")
+    roll_month_budgets(db, month="2026-11")
+    caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-11")}
+    assert caps == {"Food": 700.0}, (
+        f"a renamed item must not leave a stale line for the roll to double: {caps}"
+    )

@@ -836,7 +836,7 @@ appended prose where it was convenient rather than editing the map.
   is the same nothing as `~` followed by nothing. A test asserted `note == ""` and had frozen
   the wrong representation as expected behaviour, the same shape recorded above for
   `test_fixing_the_category_does_not_loop_forever`; its name was always right.
-  **Four** displayed columns are deliberately not in an edit line, each for its own
+  **Five** displayed columns are deliberately not in an edit line, each for its own
   reason, and they are the whole list — this said "the one displayed column" while naming
   recurring's `on`, which is how a reader was left to rediscover the other three.
   Recurring's `on` is toggled by `o` instead: a boolean's entire edit is a toggle, and as
@@ -850,6 +850,11 @@ appended prose where it was convenient rather than editing the map.
   came out of a `claude -p` estimate, which is a fact about how the row came to exist
   rather than a property of the day, and the digest reads it. An edit may fix the
   description or the number; it may not restate where they came from.
+  And a budget line's `source` is the same kind of fact, which the budget pane made
+  visible and so added to this list. It is not merely descriptive: `_rename_rolled_budgets`
+  filters on `source = 'recurring'`, so a line whose provenance flipped to `manual` stops
+  travelling with its recurring item and the next `r` writes a second line beside it. That
+  is why `source` is absent from `upsert_budget`'s ON CONFLICT clause — see there.
 - **`update_recurring` is keyed by id, and nothing may edit through
   `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
   nothing and INSERTs a second row; both then look active and the next

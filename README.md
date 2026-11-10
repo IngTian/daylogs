@@ -220,8 +220,8 @@ decimal point — `12,40` is rejected with a suggestion rather than quietly beco
 
 ### Editing
 
-`enter` acts on whatever is under the cursor: a weight, food, expense or recurring
-row opens for editing, a category drills in, a group folds.
+`enter` acts on whatever is under the cursor: a weight, food, expense, budget or
+recurring row opens for editing, a category drills in, a group folds.
 
 Editing prefills the same grammar you used for entry. The submitted line is
 authoritative: drop the note words and the note is cleared; submit unchanged and
@@ -229,8 +229,11 @@ the note survives. Food entries always require `=kcal` — dropping it is reject
 rather than silently zeroing the calories. Each line carries exactly the columns
 that row's table shows, so what you can see is what you can edit.
 
-The one exception is a recurring item's `on` column, which `o` toggles on the recurring
-pane rather than putting a field in the line — a boolean's whole edit is a toggle. `r`
+Two columns are exceptions. A recurring item's `on` is toggled by `o` on the recurring
+pane rather than put in the line — a boolean's whole edit is a toggle. And a budget line's
+`source` is provenance, not a field: it says whether the line came from a roll or from you,
+which is what decides whether a later rename carries it along, so an edit may change the
+number but not where the line came from. `r`
 skips a paused item from then on, and a budget line already rolled for this month stays:
 pausing means "not from now on", not "this never happened", so a month you have already
 paid for keeps its number. Re-adding the item with `s` to change its price leaves it

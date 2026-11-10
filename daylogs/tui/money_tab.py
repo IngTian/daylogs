@@ -571,9 +571,18 @@ class MoneyTab(PanelTab):
         """The month's budget lines, one row each — the list behind the categories summary.
 
         `month`, not the span: `budget` rows are per calendar month, and this is the pane
-        you edit, so it shows exactly the rows `b` and `r` write. The header already names
-        the month, which is `_budget_month()` — the right-hand edge of the span on screen,
-        not today's, since `[` walks the anchor back.
+        you edit, so it shows exactly the rows `b` and `r` write — `_budget_month()`, the
+        right-hand edge of the span on screen, not today's, since `[` walks the anchor back.
+
+        **Which is why `month` is a column.** An earlier version justified leaving it out
+        with "the header already names the month", and that is false at any horizon wider
+        than one: at `3m` the header read `600.00 budget` above a single `300.00` row — the
+        other 300.00 is in a month the pane is not listing. A total above a list that does not
+        add up to it is the failure this file records three times, and the fix two commits
+        ago for `reserved` was the same shape. Naming the month on every row is cheaper than
+        either alternative — widening the pane to the span would list the same name once per
+        month with no way to tell which row `enter` edits, and suppressing the pane off a
+        single-month horizon would hide the only surface that can reach these lines.
 
         `source` is displayed because it is load-bearing rather than trivia: `r` skips a
         name that already has a line, so a `recurring` line is one the roll owns and will
@@ -581,9 +590,10 @@ class MoneyTab(PanelTab):
         recurring price silently fail to reach this month, and it is unreadable anywhere
         else in the app.
         """
-        table.add_columns("name", "category", "amount", "source")
+        table.add_columns("month", "name", "category", "amount", "source")
         for r in money.list_budget(self.app.conn, month=self._budget_month()):
             table.add_row(
+                r["month"],
                 Text(r["name"]),
                 Text(r["category"]),
                 fmt(r["amount"]),
@@ -773,15 +783,20 @@ class MoneyTab(PanelTab):
             # row without needing its id. Arming a slot `_take_editing` is never asked for
             # would be dead state of exactly the kind this file keeps finding.
             #
-            # The cost is a **rename**: submit a different name and `upsert_budget` adds a
-            # line rather than renaming this one, the shape CLAUDE.md records for
-            # `upsert_recurring`. Accepted here rather than fixed with an `update_budget`,
-            # because a budget line's name is its link to a recurring item — `r` matches by
-            # name and `_rename_rolled_budgets` exists to keep the two in step — so renaming
-            # one from this pane is not an operation with a clear meaning. It is also now
-            # *visible*, which is what made the old failures bad: both lines are listed and
-            # `x` removes the stale one. If renaming in place is ever wanted, it needs
-            # `update_budget` by id and a decision about that link, not a quiet upsert.
+            # The cost is a **rename**, and it is not the mild one an earlier version of
+            # this comment claimed. "Adds a line rather than renaming this one" holds only
+            # while the new name is free; submit one another line in the month already
+            # holds and `upsert_budget` updates *that* line, leaving the selected row
+            # untouched — so the keypress rewrites a different visible row's amount and
+            # category, and the category's cap moves by the difference between them.
+            # `_submit_budget` pushes the overwritten row's pre-image, so `u` takes it back,
+            # and the toast names the category it actually wrote.
+            #
+            # Still not fixed with an `update_budget` by id, because a budget line's name
+            # is its link to a recurring item — `r` matches by name and
+            # `_rename_rolled_budgets` keeps the two in step — so renaming from this pane
+            # has no clear meaning, and both outcomes are now visible on the pane and
+            # undoable. Doing it properly means deciding what that link should survive.
             self.app.prompt.open("budget", prefill=parse.render_budget(row))
             return
         self._editing = (which, row_id)
@@ -1051,6 +1066,23 @@ class MoneyTab(PanelTab):
         cfg = self.app.cfg
         r = parse_budget(value, known_slugs=money.slugs(cfg))
         month = self._budget_month()
+        # The row this upsert is about to overwrite, if any — read by `(month, name)`
+        # because that is what `upsert_budget` resolves on, so it is the row that will
+        # actually change rather than the one under the cursor. Those differ, and that is
+        # the second reason to read it: submitting a name another line in the month already
+        # holds updates *that* line and leaves the selected one alone. `Rent` 1,400 and
+        # `Storage` 100 on screen, `enter` on Rent, submit `1500 Storage !housing`, and
+        # Storage becomes 1,500 while Rent is untouched — the housing cap goes 1,500 to
+        # 2,900 on one keypress, with the row you were editing unchanged.
+        #
+        # This was also the only Money write path with no pre-image at all, one keypress
+        # away from `x`'s own "deleted · u to undo", while the README promises `u` undoes an
+        # edit. Pushed only when a row existed: an *add* has no pre-image, the same rule
+        # `_submit_expense` follows, and `u` on a fresh line would otherwise resurrect
+        # nothing and consume a turn.
+        before = self.app.conn.execute(
+            "SELECT * FROM budget WHERE month = ? AND name = ?", (month, r.name)
+        ).fetchone()
         money.upsert_budget(
             self.app.conn,
             month=month,
@@ -1059,6 +1091,8 @@ class MoneyTab(PanelTab):
             amount=r.amount,
             cfg=cfg,
         )
+        if before is not None:
+            self.app.undo_stack.push("budget", dict(before))
         s = self.reload()
         cat = next((c for c in s.by_category if c.category == r.category), None)
         spent = cat.spent if cat else 0.0

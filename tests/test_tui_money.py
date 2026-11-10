@@ -1475,3 +1475,79 @@ async def test_a_pane_with_no_row_table_refuses_instead_of_guessing(make_app, db
     assert set(PANES) - {"categories"} == set(_TABLE_OF), (
         f"every pane with rows needs a table: {PANES} vs {sorted(_TABLE_OF)}"
     )
+
+
+async def test_editing_a_budget_line_is_undoable(make_app, db, type_into):
+    """`_submit_budget` was the only Money write path with no pre-image, one keypress away
+    from `x`'s own "deleted · u to undo" and against the README's promise that `u` undoes an
+    edit."""
+    upsert_budget(db, month="2026-09", name="Groceries", category="grocery", amount=500.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        app.prompt.value = ""
+        await type_into(pilot, "700 Groceries !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert [r["amount"] for r in list_budget(db, month="2026-09")] == [700.0]
+        await pilot.press("u")
+        await pilot.pause()
+    assert [r["amount"] for r in list_budget(db, month="2026-09")] == [500.0], "u must undo"
+
+
+async def test_a_budget_edit_naming_another_line_is_undoable(make_app, db, type_into):
+    """The rename case, which does not do what it looks like: submitting a name another
+    line in the month already holds updates *that* line and leaves the selected one alone.
+
+    Not prevented — a budget line's name is its link to a recurring item, so renaming from
+    this pane has no clear meaning — but it must be visible and recoverable. The pre-image
+    is read by `(month, name)`, which is what `upsert_budget` resolves on, so it is the row
+    that actually changes rather than the row under the cursor.
+    """
+    upsert_budget(db, month="2026-09", name="Rent", category="housing", amount=1400.0)
+    upsert_budget(db, month="2026-09", name="Storage", category="housing", amount=100.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("enter")          # cursor on Rent (ordered by category, name)
+        await pilot.pause()
+        assert "Rent" in app.prompt.value, f"armed the wrong line: {app.prompt.value!r}"
+        app.prompt.value = ""
+        await type_into(pilot, "1500 Storage !housing")
+        await pilot.press("enter")
+        await pilot.pause()
+        caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+        assert caps == {"Rent": 1400.0, "Storage": 1500.0}, (
+            f"the submitted name is what upsert_budget resolves on: {caps}"
+        )
+        await pilot.press("u")
+        await pilot.pause()
+    back = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert back == {"Rent": 1400.0, "Storage": 100.0}, (
+        f"u must restore the row that actually changed, not the selected one: {back}"
+    )
+
+
+async def test_the_budget_pane_names_the_month_of_every_line(make_app, db):
+    """The pane lists one month while the header and both panels sum `span.months()`, so at
+    a horizon wider than one the header's total sits above rows that cannot add up to it —
+    `3m` read `600.00 budget` over a single `300.00` row. The month on each row is what
+    makes the two readings legible instead of contradictory."""
+    upsert_budget(db, month="2026-08", name="Rent", category="housing", amount=300.0)
+    upsert_budget(db, month="2026-09", name="Rent", category="housing", amount=300.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        table = app.query_one("#money-table")
+        shown = [str(c) for key in table.rows for c in table.get_row(key)]
+        assert "2026-09" in shown, f"the month on screen has to be named: {shown}"
+        assert "2026-08" not in shown, "and only the month on screen is listed"
+        await pilot.press("[")              # walk the anchor back a month
+        await pilot.pause()
+        walked = [str(c) for key in table.rows for c in table.get_row(key)]
+    assert "2026-08" in walked and "2026-09" not in walked, (
+        f"`[` moves the pane with the anchor, and the rows say so: {walked}"
+    )
