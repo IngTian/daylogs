@@ -356,6 +356,21 @@ def upsert_budget(
     `SELECT *`, so `budget.csv` keeps the same (always-empty) field and is byte-identical.
     Contrast `budget.source`, which looks equally decorative and is read by
     `_rename_rolled_budgets`' `WHERE … AND source = 'recurring'`.
+
+    **`source` is absent from the ON CONFLICT clause, for the reason `active` is absent from
+    `upsert_recurring`'s**: this function is add-*or-update*, the editing grammar cannot
+    express the flag, and `source` defaults to `manual` — so every edit of a rolled line
+    carried that default and flipped `recurring` → `manual`. That is not cosmetic. It cuts
+    the line loose from `_rename_rolled_budgets`, whose WHERE requires `recurring`, so
+    renaming the item afterwards leaves the old line behind *and* the next `r` writes a new
+    one: a permanent double budget for one item. Reproduced end to end — a 500/mo
+    `Groceries` edited to 700, the item renamed to `Food`, one roll, and the category now
+    carries the orphaned 700 line *and* a fresh 500 one, forever. The budget pane made
+    that reachable on every line; `b` on the categories pane had it all along, for one
+    line per category.
+    A caller that genuinely means to change the provenance passes `source=` on an insert.
+    Nothing does, and nothing should: provenance is a fact about how the row came to exist,
+    the same reason food's and activity's `src` is not an editable field.
     """
     name = name.strip()
     if not name:
@@ -372,8 +387,7 @@ def upsert_budget(
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(month, name) DO UPDATE SET
           category = excluded.category,
-          amount = excluded.amount,
-          source = excluded.source
+          amount = excluded.amount
         """,
         (month, name, category, float(amount), source),
     )
@@ -390,6 +404,24 @@ def list_budget(conn, *, month: str) -> list[sqlite3.Row]:
             (check_month(month),),
         )
     )
+
+
+def delete_budget(conn, id: int) -> dict | None:
+    """Remove one budget line, returning its pre-image for the undo stack.
+
+    There was no way to delete a budget line at all until the budget pane existed — the
+    only `DELETE FROM budget` in this module is `_rename_rolled_budgets`' cleanup, which is
+    keyed on `source = 'recurring'` and belongs to a *recurring item* being renamed or
+    removed. So a line written for a category you stopped using, or a `b` that created a
+    line under the wrong name, stayed on the cap forever.
+
+    Hard delete plus the session undo ring, like every other row here. The pre-image can
+    fail to re-insert, because `budget` is `UNIQUE(month, name)` and a new line may have
+    taken the freed pair in between — that is the same shape as `recurring.name` and is
+    already handled where it has to be: a failed undo stays parked on its entry rather than
+    consuming it.
+    """
+    return _delete(conn, "budget", id)
 
 
 def pending_roll(conn, *, month: str) -> tuple[int, float]:

@@ -26,6 +26,29 @@ async def go_money(pilot, app):
     return app.query_one("#money")
 
 
+async def go_pane(pilot, app, pane):
+    """Walk `tab` until the Money tab is showing `pane`, and hand back the widget.
+
+    Navigate by *name*, never by counting presses. Tests used to press `tab` once to mean
+    "expenses", which encoded the pane's position — so inserting `budget` after
+    `categories` broke sixteen of them at once, all for the same reason and none of them
+    about the behaviour under test. `PANES` is the only thing that should know the order.
+
+    Raises rather than looping forever if the pane never arrives, so a typo'd name fails
+    loudly instead of hanging the suite.
+    """
+    from daylogs.moneyview import PANES
+
+    await go_money(pilot, app)
+    tab = app.query_one("#money")
+    for _ in range(len(PANES)):
+        if tab.view.pane == pane:
+            return tab
+        await pilot.press("tab")
+        await pilot.pause()
+    raise AssertionError(f"never reached {pane!r}; PANES is {PANES}")
+
+
 async def go_body(pilot, app):
     """Switch to the Body tab and hand back the widget."""
     await pilot.press("2")

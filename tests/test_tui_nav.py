@@ -1,7 +1,7 @@
 import datetime as dt
 from zoneinfo import ZoneInfo
 
-from helpers import all_expenses, go_body, go_day, go_money
+from helpers import all_expenses, go_body, go_day, go_money, go_pane
 
 from daylogs.summary import upsert_report
 
@@ -127,7 +127,7 @@ async def test_tab_cycles_money_panes_and_shift_tab_reverses(make_app):
         money = app.query_one("#money")
         assert money.view.pane == "categories"
         await pilot.press("tab")
-        assert money.view.pane == "expenses"
+        assert money.view.pane == "budget", "budget sits straight after categories"
         await pilot.press("shift+tab")
         assert money.view.pane == "categories"
 
@@ -596,10 +596,7 @@ async def test_arrows_still_walk_when_a_row_is_wider_than_the_table(make_app, db
                     date="2026-08-27")
     app = make_app(now=lambda: NOW.replace(tzinfo=None))
     async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.press("3")
-        await pilot.pause()
-        await pilot.press("tab")            # categories -> the expense list
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         assert app.query_one("#money").view.pane == "expenses", "not on the expense list"
         await pilot.press("left")
         await pilot.pause()

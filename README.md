@@ -155,11 +155,11 @@ figures above them are always today's.
 | Key | Does |
 |---|---|
 | `e` | log an expense |
-| `b` | set a budget line — prefilled from the selected category |
+| `b` | set a budget line — prefilled from the selected category, or a fresh one on the budget pane |
 | `s` | add or update a recurring item |
 | `o` | pause or resume the selected recurring item |
 | `n` | add a category to `config.toml` |
-| `r` | roll active recurring items into the month's budget |
+| `r` | roll active recurring items into the month's budget — it skips a name that already has a line, so changing a recurring price does **not** reach a month already rolled; edit that line on the budget pane |
 | `d` `c` `k` | sort by date / cost / category — press again to flip direction |
 | `/` | filter by text |
 | `G` | group the expense list by category |
@@ -220,8 +220,8 @@ decimal point — `12,40` is rejected with a suggestion rather than quietly beco
 
 ### Editing
 
-`enter` acts on whatever is under the cursor: a weight, food, expense or recurring
-row opens for editing, a category drills in, a group folds.
+`enter` acts on whatever is under the cursor: a weight, food, expense, budget or
+recurring row opens for editing, a category drills in, a group folds.
 
 Editing prefills the same grammar you used for entry. The submitted line is
 authoritative: drop the note words and the note is cleared; submit unchanged and
@@ -229,8 +229,11 @@ the note survives. Food entries always require `=kcal` — dropping it is reject
 rather than silently zeroing the calories. Each line carries exactly the columns
 that row's table shows, so what you can see is what you can edit.
 
-The one exception is a recurring item's `on` column, which `o` toggles on the recurring
-pane rather than putting a field in the line — a boolean's whole edit is a toggle. `r`
+Two columns are exceptions. A recurring item's `on` is toggled by `o` on the recurring
+pane rather than put in the line — a boolean's whole edit is a toggle. And a budget line's
+`source` is provenance, not a field: it says whether the line came from a roll or from you,
+which is what decides whether a later rename carries it along, so an edit may change the
+number but not where the line came from. `r`
 skips a paused item from then on, and a budget line already rolled for this month stays:
 pausing means "not from now on", not "this never happened", so a month you have already
 paid for keeps its number. Re-adding the item with `s` to change its price leaves it
@@ -377,6 +380,22 @@ glyph is dimmed and it is a glyph rather than a colour, so it survives a termina
 none, and the panel names it only when one is drawn. The categories pane shows the
 reserved figure with its share of the cap, since an amount alone does not say whether a
 cap is mostly spoken for or barely touched.
+
+`tab` walks four panes, and each answers a different question:
+
+| Pane | Answers |
+|---|---|
+| **categories** | am I inside the cap — budgeted against spent, one row per category |
+| **budget** | what *is* the cap this month — one row per budget line, editable |
+| **expenses** | what did I buy |
+| **recurring** | what should roll into next month |
+
+`budget` sits next to `categories` because it is the list behind that summary: a category
+can hold several lines (`budget` is unique on month *and name*, so `Rent` and `Storage` can
+both be `housing`), and the summary sums them. That pane is where you change a number for
+**this month only** — `enter` edits the line under the cursor, `x` deletes it, `b` adds one.
+Changing a price on **recurring** changes what future rolls write, and `r` will not revisit
+a month that already has a line under that name.
 
 ![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/money.png)
 

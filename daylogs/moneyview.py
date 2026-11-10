@@ -17,7 +17,12 @@ from dataclasses import dataclass, field
 from daylogs import horizon as hz
 
 SORT_FIELDS = ("date", "amount", "category")
-PANES = ("categories", "expenses", "recurring")
+# `budget` sits straight after `categories` because it is the list behind that summary:
+# `tab` goes total, then its parts, then what actually happened, then the templates. It is
+# also the pane that had been missing — `budget` was the only data table with no view of
+# its own, so half the month's lines could not be edited (`b` reaches one per category) and
+# none could be deleted at all.
+PANES = ("categories", "budget", "expenses", "recurring")
 
 
 class ViewError(ValueError):
