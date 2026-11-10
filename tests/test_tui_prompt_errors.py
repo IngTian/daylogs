@@ -1,6 +1,6 @@
 import datetime as dt
 
-from helpers import all_expenses, assert_armed, go_body, go_money
+from helpers import all_expenses, assert_armed, go_body, go_pane
 
 from daylogs.body import add_food, list_food, list_weight
 from daylogs.money import list_recurring, upsert_recurring
@@ -233,10 +233,7 @@ async def test_a_rejected_rename_retries_through_the_by_id_edit_path(
     upsert_recurring(db, name="Gym", category="other", cost=40, cycle="monthly")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")            # -> recurring pane
-        await pilot.pause()
+        await go_pane(pilot, app, "recurring")
         # The pane sorts by cost, so Rent (750) is row 0 — step onto Gym, whose rename
         # genuinely collides.
         await pilot.press("down")
@@ -274,10 +271,7 @@ async def test_escaping_a_rejected_edit_still_disarms_it(make_app, db, type_into
     upsert_recurring(db, name="Original", cost=20, cycle="monthly", category="subscriptions")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "recurring")
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "money")

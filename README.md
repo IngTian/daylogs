@@ -155,11 +155,11 @@ figures above them are always today's.
 | Key | Does |
 |---|---|
 | `e` | log an expense |
-| `b` | set a budget line — prefilled from the selected category |
+| `b` | set a budget line — prefilled from the selected category, or a fresh one on the budget pane |
 | `s` | add or update a recurring item |
 | `o` | pause or resume the selected recurring item |
 | `n` | add a category to `config.toml` |
-| `r` | roll active recurring items into the month's budget |
+| `r` | roll active recurring items into the month's budget — it skips a name that already has a line, so changing a recurring price does **not** reach a month already rolled; edit that line on the budget pane |
 | `d` `c` `k` | sort by date / cost / category — press again to flip direction |
 | `/` | filter by text |
 | `G` | group the expense list by category |
@@ -377,6 +377,22 @@ glyph is dimmed and it is a glyph rather than a colour, so it survives a termina
 none, and the panel names it only when one is drawn. The categories pane shows the
 reserved figure with its share of the cap, since an amount alone does not say whether a
 cap is mostly spoken for or barely touched.
+
+`tab` walks four panes, and each answers a different question:
+
+| Pane | Answers |
+|---|---|
+| **categories** | am I inside the cap — budgeted against spent, one row per category |
+| **budget** | what *is* the cap this month — one row per budget line, editable |
+| **expenses** | what did I buy |
+| **recurring** | what should roll into next month |
+
+`budget` sits next to `categories` because it is the list behind that summary: a category
+can hold several lines (`budget` is unique on month *and name*, so `Rent` and `Storage` can
+both be `housing`), and the summary sums them. That pane is where you change a number for
+**this month only** — `enter` edits the line under the cursor, `x` deletes it, `b` adds one.
+Changing a price on **recurring** changes what future rolls write, and `r` will not revisit
+a month that already has a line under that name.
 
 ![The Money tab: budget-versus-spent bars beside a ranked share list](https://raw.githubusercontent.com/IngTian/daylogs/main/assets/money.png)
 

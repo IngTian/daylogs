@@ -29,7 +29,8 @@ daylogs/
   complete.py tab completion for `!` and `#` vocabularies (no Textual import)
   parse.py    pure grammar parsers on top of sigil.py, and the shared amount/limit rules
   horizon.py  the one time-window concept: Span, Axis, resolve_goto
-  moneyview.py  all Money tab state as one value with named transitions
+  moneyview.py  all Money tab state as one value with named transitions;
+                PANES = categories · budget · expenses · recurring
   body.py     weight, food, activity; trend windows; Mifflin-St Jeor BMR,
               activity factor -> TDEE ("burn"), BMI, per-day net series, restamp
   money.py    expenses, recurring, budgets, summarize_span
@@ -91,6 +92,39 @@ appended prose where it was convenient rather than editing the map.
   nothing. Pressing `1` did not clear it — that calls `focus_default` — so it healed only
   after a `2`/`3`, which is why every test in `test_tui_nav.py` missed it: they all press a
   digit first. Day now focuses `#summary-scroll`, which is also what pages the read.
+- **Four panes, and `budget` is the list behind `categories`.** `PANES` is the only place
+  the order lives, and `tab` walks it: the summary, then the lines that make it up, then
+  what happened, then the templates. `budget` was added last and was overdue — it is the
+  only data table that had no view, so `b` on the categories pane reached
+  `money.budget_line` (`ORDER BY id DESC LIMIT 1`) and a category holding several lines had
+  all but one **uneditable**, while *nothing anywhere* could delete a budget line: the only
+  `DELETE FROM budget` is `_rename_rolled_budgets`' `source='recurring'` cleanup, which
+  belongs to a recurring item being renamed or removed. Measured on real data: 18 lines over
+  9 categories, 9 of them unreachable and 18 undeletable. The owner hit it as "I changed
+  grocery to 700 and the roll still shows 500" — he had changed the *recurring item*, and
+  the rolled line `b` could not reach was the one still saying 500.
+  `enter` edits the selected line and `b` adds one, so each key keeps one meaning across
+  every pane; `_budget_prefill` already returned `""` off the categories pane, so "add"
+  falls out rather than needing a branch.
+  **`_TABLE_OF` replaced a two-way ternary at three call sites, and that was the real
+  hazard.** `"expense" if pane == "expenses" else "recurring"` maps *every* other pane to
+  recurring, so `enter` on a budget row would have selected from `recurring` by the budget
+  row's id and armed an edit against whatever matched. `categories` is deliberately absent
+  from the mapping, which is what makes `.get` the right lookup: a pane with no row table
+  returns None and the key refuses instead of guessing.
+  The budget pane does **not** arm `_editing`, because `_submit_budget` writes through
+  `upsert_budget`, which resolves on `(month, name)` and so updates the selected row without
+  its id — arming a slot `_take_editing` is never asked for would be dead state. The cost is
+  that a **rename** adds a line instead of renaming one, the `upsert_recurring` shape
+  recorded below. Accepted rather than fixed: a budget line's name is its link to a recurring
+  item (`r` matches by name, `_rename_rolled_budgets` keeps them in step), so renaming from
+  this pane has no clear meaning — and it is now *visible*, which is what made the old
+  failures bad. Renaming in place needs `update_budget` by id and a decision about that link.
+  **Tests navigate panes by name, never by counting `tab`.** `helpers.go_pane` presses until
+  `view.pane` matches. Inserting this pane broke sixteen tests at once, every one of them
+  because it pressed `tab` once to mean "expenses" — none about the behaviour under test.
+  `test_tab_cycles_sub_panes` is the single place positions belong, since it is what pins
+  `PANES` against what the key does.
 - **`MoneyView` is the only Money tab state.** Horizon, pane, sort, filters and
   grouping travel as one value with named transitions, because as separate flags
   they are sixteen untested combinations. `anchor` is a **date** (the right-hand

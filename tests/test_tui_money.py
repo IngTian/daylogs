@@ -1,7 +1,7 @@
 import datetime as dt
 
 import pytest
-from helpers import all_expenses, assert_armed, go_money
+from helpers import all_expenses, assert_armed, go_money, go_pane
 
 from daylogs.money import (
     add_expense,
@@ -246,13 +246,14 @@ async def test_tab_cycles_sub_panes(make_app):
     app = make_app()
     async with app.run_test() as pilot:
         money_tab = await go_money(pilot, app)
+        # The one place pane *positions* belong: this is what pins `PANES` against what the
+        # key actually does. Every other test navigates by name through `go_pane`, because
+        # sixteen of them broke at once when `budget` was inserted — all for the same
+        # reason, none of them about the behaviour under test.
         assert money_tab.view.pane == "categories"
-        await pilot.press("tab")
-        assert money_tab.view.pane == "expenses"
-        await pilot.press("tab")
-        assert money_tab.view.pane == "recurring"
-        await pilot.press("tab")
-        assert money_tab.view.pane == "categories"
+        for expected in ("budget", "expenses", "recurring", "categories"):
+            await pilot.press("tab")
+            assert money_tab.view.pane == expected, f"tab should reach {expected}"
 
 
 async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
@@ -267,9 +268,7 @@ async def test_x_deletes_the_selected_expense_and_u_restores_it(make_app, db):
         db, amount=12.40, description="lunch", category="restaurant", date=today
     )
     async with app.run_test() as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("x")
         await pilot.press("y")
         await pilot.pause()
@@ -562,8 +561,7 @@ async def test_enter_on_a_group_header_still_folds_it(make_app, db):
     add_expense(db, amount=12.0, description="lunch", category="restaurant", date="2026-08-04")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        money_tab = await go_money(pilot, app)
-        await pilot.press("tab")            # -> expenses pane
+        money_tab = await go_pane(pilot, app, "expenses")
         await pilot.press("G")              # group it
         await pilot.pause()
         await pilot.press("enter")
@@ -579,9 +577,7 @@ async def test_enter_on_an_expense_row_edits_it_in_place(make_app, db, type_into
     original = all_expenses(db)[0]["id"]
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")            # -> expenses pane
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.label == "expense"
@@ -608,8 +604,7 @@ async def test_editing_an_expense_preserves_created_at(make_app, db, type_into):
     before = db.execute("SELECT created_at FROM expense").fetchone()["created_at"]
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -624,8 +619,7 @@ async def test_undoing_an_expense_edit_restores_it(make_app, db, type_into):
     add_expense(db, amount=12.0, description="lunch", category="restaurant", date="2026-08-04")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -650,10 +644,7 @@ async def test_enter_on_a_recurring_row_renames_without_duplicating(make_app, db
     upsert_recurring(db, name="streaming", category="subscriptions", cost=20, cycle="monthly")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")            # -> recurring pane
-        await pilot.pause()
+        await go_pane(pilot, app, "recurring")
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.label == "recurring"
@@ -673,10 +664,7 @@ async def test_a_colliding_recurring_rename_is_rejected_cleanly(make_app, db, ty
     upsert_recurring(db, name="Gym", category="other", cost=40, cycle="monthly")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "recurring")
         # The pane sorts by cost, so Rent (750) is row 0 — step onto Gym, whose
         # rename genuinely collides.
         await pilot.press("down")
@@ -716,9 +704,7 @@ async def test_a_failed_undo_does_not_let_the_next_u_reach_past_it(make_app, db,
     said = []
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")             # -> expenses pane
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("x")               # delete the lunch: the older undo entry
         await pilot.press("y")
         await pilot.pause()
@@ -757,10 +743,7 @@ async def test_the_pre_image_a_failed_undo_kept_still_applies(make_app, db, type
     upsert_recurring(db, name="streaming", category="subscriptions", cost=20, cycle="monthly")
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.press("tab")             # -> recurring pane
-        await pilot.pause()
+        await go_pane(pilot, app, "recurring")
         await pilot.press("enter")
         await pilot.pause()
         app.prompt.value = ""
@@ -817,8 +800,7 @@ async def test_abandoning_a_money_edit_does_not_corrupt_the_next_entry(
     add_expense(db, amount=12.0, description="original", category="restaurant", date="2026-08-28")
     app = make_app(now=lambda: dt.datetime(2026, 8, 28, 9, 0))
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "money")
@@ -851,8 +833,7 @@ async def test_editing_an_expense_can_clear_its_note(make_app, db, type_into):
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "money")
@@ -884,8 +865,7 @@ async def test_editing_an_expense_with_unchanged_prefill_preserves_note(make_app
     now = lambda: dt.datetime(2026, 8, 28, 9, 0)  # noqa: E731
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         assert_armed(app, "money")
@@ -942,10 +922,8 @@ async def test_a_backdated_expense_lands_inside_the_visible_range(make_app, db, 
     said = []
     app = make_app(now=now)
     async with app.run_test(size=(120, 34)) as pilot:
-        tab = await go_money(pilot, app)
+        tab = await go_pane(pilot, app, "expenses")
         app.notify = lambda msg, **kw: said.append(str(msg))
-        await pilot.press("tab")            # -> expenses pane
-        await pilot.pause()
         await pilot.press("e")
         await type_into(pilot, "40.00 groceries !grocery @2026-08-30")
         await pilot.press("enter")
@@ -1242,9 +1220,7 @@ async def test_editing_an_expense_can_add_a_prepaid_marker(make_app, db, type_in
     add_expense(db, amount=90.0, description="boots", category="other", date="2026-09-04")
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")
         await pilot.pause()
         assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
@@ -1270,9 +1246,7 @@ async def test_editing_an_expense_can_clear_a_prepaid_marker(make_app, db, type_
                 date="2026-09-04", prepaid_months=12)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         # No `down` needed: `_skip_inert_rows` leaves the cursor on the first actionable
         # row, past the pinned `⇢` share this `#12` charge produces. The `prompt.is_open`
         # assertion below is what keeps that honest — an earlier draft of this test pressed
@@ -1303,9 +1277,7 @@ async def test_an_edit_that_does_not_mention_the_marker_keeps_the_rest(make_app,
                 date="2026-09-04", prepaid_months=12, note="visa")
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("enter")          # `_skip_inert_rows` already skipped the share
         await pilot.pause()
         assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
@@ -1339,9 +1311,7 @@ async def test_arriving_on_the_expenses_pane_skips_the_pinned_share_rows(
                 date="2026-09-04", prepaid_months=12)
     app = make_app()
     async with app.run_test(size=(120, 34)) as pilot:
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         cells = await _expense_cells(pilot, app, grouped=False)
         assert any("⇢" in c for c in cells), (
             f"fixture must actually pin a share, or this test proves nothing: {cells}"
@@ -1366,9 +1336,7 @@ async def test_enter_on_a_pinned_share_row_says_why_instead_of_nothing(
     notes = []
     async with app.run_test(size=(120, 34)) as pilot:
         app.notify = lambda msg, **kw: notes.append(str(msg))  # type: ignore[method-assign]
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("up")             # back onto the pinned share
         await pilot.pause()
         notes.clear()
@@ -1392,9 +1360,7 @@ async def test_delete_on_a_pinned_share_row_does_not_blame_a_group_header(
     notes = []
     async with app.run_test(size=(120, 34)) as pilot:
         app.notify = lambda msg, **kw: notes.append(str(msg))  # type: ignore[method-assign]
-        await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        await go_pane(pilot, app, "expenses")
         await pilot.press("up")
         await pilot.pause()
         notes.clear()
@@ -1403,4 +1369,109 @@ async def test_delete_on_a_pinned_share_row_does_not_blame_a_group_header(
     assert any("not a payment" in n for n in notes), f"wrong or missing message: {notes}"
     assert not any("group header" in n for n in notes), (
         f"there are no group headers on this pane: {notes}"
+    )
+
+
+# ── the budget pane ─────────────────────────────────────────────────────────
+# `budget` was the only data table with no view of its own. `b` on the categories pane
+# reaches `money.budget_line`, which is `ORDER BY id DESC LIMIT 1` — so a category holding
+# several lines had all but one permanently uneditable, and nothing anywhere could delete a
+# budget line. Both are reachable on real data: a grocery category with a rolled
+# `Groceries` line plus an annual `Minoxidil` share lets `b` edit only the latter.
+async def test_the_budget_pane_lists_every_line_for_the_month(make_app, db):
+    """Including the ones `b` cannot reach, which is the reason the pane exists."""
+    upsert_budget(db, month="2026-09", name="Groceries", category="grocery", amount=500.0)
+    upsert_budget(db, month="2026-09", name="Minoxidil", category="grocery", amount=28.33)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        table = app.query_one("#money-table")
+        shown = [str(c) for key in table.rows for c in table.get_row(key)]
+    assert "Groceries" in shown and "Minoxidil" in shown, (
+        f"both lines of one category have to be listed: {shown}"
+    )
+    assert "500.00" in shown and "28.33" in shown
+    # `source` is on the pane because it is load-bearing, not trivia: `r` skips a name that
+    # already has a line, so it says which lines the roll owns and will not revisit.
+    assert "manual" in shown
+
+
+async def test_enter_on_a_budget_line_edits_that_line_not_the_newest(make_app, db, type_into):
+    """The defect in one sentence. `b` on grocery prefills whichever line has the highest
+    id, so the rolled `Groceries` line was unreachable while `Minoxidil` answered for it."""
+    upsert_budget(db, month="2026-09", name="Groceries", category="grocery", amount=500.0)
+    upsert_budget(db, month="2026-09", name="Minoxidil", category="grocery", amount=28.33)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("enter")          # cursor is on the first row: Groceries
+        await pilot.pause()
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        assert "Groceries" in app.prompt.value, (
+            f"armed the wrong line — this is the bug: {app.prompt.value!r}"
+        )
+        app.prompt.value = ""
+        await type_into(pilot, "700 Groceries !grocery")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert rows == {"Groceries": 700.0, "Minoxidil": 28.33}, (
+        f"the edit had to land on Groceries and leave Minoxidil alone: {rows}"
+    )
+
+
+async def test_x_deletes_a_budget_line_and_u_restores_it(make_app, db):
+    """There was no way to delete a budget line from anywhere in the app — the only
+    `DELETE FROM budget` is the `source='recurring'` cleanup that belongs to a recurring
+    item being renamed or removed."""
+    upsert_budget(db, month="2026-09", name="Groceries", category="grocery", amount=500.0)
+    upsert_budget(db, month="2026-09", name="Stale", category="grocery", amount=12.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        table = app.query_one("#money-table")
+        table.move_cursor(row=1)           # Stale — list_budget orders by category, name
+        await pilot.pause()
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert [r["name"] for r in list_budget(db, month="2026-09")] == ["Groceries"]
+        await pilot.press("u")
+        await pilot.pause()
+    back = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert back == {"Groceries": 500.0, "Stale": 12.0}, f"u must restore the line: {back}"
+
+
+async def test_b_on_the_budget_pane_adds_rather_than_editing(make_app, db, type_into):
+    """`enter` is the editor on every pane, so `b` keeps one meaning: add a line. It is
+    also the only way to create a line whose name differs from an existing one."""
+    upsert_budget(db, month="2026-09", name="Groceries", category="grocery", amount=500.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("b")
+        await pilot.pause()
+        assert app.prompt.is_open and app.prompt.label == "budget"
+        assert app.prompt.value == "", (
+            f"b on this pane adds, so it must not prefill a line: {app.prompt.value!r}"
+        )
+        await type_into(pilot, "40 Haircut !entertainment")
+        await pilot.press("enter")
+        await pilot.pause()
+    rows = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert rows == {"Groceries": 500.0, "Haircut": 40.0}
+
+
+async def test_a_pane_with_no_row_table_refuses_instead_of_guessing(make_app, db):
+    """`enter`/`x` used to pick a table with `"expense" if pane == "expenses" else
+    "recurring"`, which maps *every* other pane to recurring — so a new pane would have
+    had `enter` select from `recurring` by the budget row's id and arm an edit against it.
+    One mapping, and `categories` is absent from it on purpose."""
+    from daylogs.moneyview import PANES
+    from daylogs.tui.money_tab import _TABLE_OF
+
+    assert "categories" not in _TABLE_OF, "derived rows have no table to edit"
+    assert set(PANES) - {"categories"} == set(_TABLE_OF), (
+        f"every pane with rows needs a table: {PANES} vs {sorted(_TABLE_OF)}"
     )

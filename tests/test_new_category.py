@@ -170,7 +170,7 @@ def test_a_quote_in_the_display_name_does_not_break_the_file(tmp_path):
 
 import datetime as dt  # noqa: E402
 
-from helpers import all_expenses, go_money  # noqa: E402
+from helpers import all_expenses, go_money, go_pane  # noqa: E402
 
 from daylogs.money import add_expense, list_budget, list_recurring, upsert_budget  # noqa: E402
 
@@ -308,9 +308,7 @@ async def test_b_is_blank_on_the_expenses_pane(make_app, db):
     add_expense(db, amount=12.0, description="milk", category="grocery", date="2026-08-04")
     app = make_app(now=lambda: NOW)
     async with app.run_test(size=(120, 34)) as pilot:
-        money_tab = await go_money(pilot, app)
-        await pilot.press("tab")
-        await pilot.pause()
+        money_tab = await go_pane(pilot, app, "expenses")
         assert money_tab.view.pane == "expenses"
         await pilot.press("b")
         await pilot.pause()
@@ -365,8 +363,7 @@ async def test_b_is_blank_on_a_grouped_expense_header_too(make_app, db):
     add_expense(db, amount=12.0, description="milk", category="grocery", date="2026-08-04")
     app = make_app(now=lambda: NOW)
     async with app.run_test(size=(120, 34)) as pilot:
-        money_tab = await go_money(pilot, app)
-        await pilot.press("tab")
+        money_tab = await go_pane(pilot, app, "expenses")
         await pilot.press("G")
         await pilot.pause()
         assert (money_tab.view.pane, money_tab.view.grouped) == ("expenses", True)

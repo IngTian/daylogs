@@ -392,6 +392,24 @@ def list_budget(conn, *, month: str) -> list[sqlite3.Row]:
     )
 
 
+def delete_budget(conn, id: int) -> dict | None:
+    """Remove one budget line, returning its pre-image for the undo stack.
+
+    There was no way to delete a budget line at all until the budget pane existed — the
+    only `DELETE FROM budget` in this module is `_rename_rolled_budgets`' cleanup, which is
+    keyed on `source = 'recurring'` and belongs to a *recurring item* being renamed or
+    removed. So a line written for a category you stopped using, or a `b` that created a
+    line under the wrong name, stayed on the cap forever.
+
+    Hard delete plus the session undo ring, like every other row here. The pre-image can
+    fail to re-insert, because `budget` is `UNIQUE(month, name)` and a new line may have
+    taken the freed pair in between — that is the same shape as `recurring.name` and is
+    already handled where it has to be: a failed undo stays parked on its entry rather than
+    consuming it.
+    """
+    return _delete(conn, "budget", id)
+
+
 def pending_roll(conn, *, month: str) -> tuple[int, float]:
     """(count, monthly total) that `roll_month_budgets` would add to `month`.
 
