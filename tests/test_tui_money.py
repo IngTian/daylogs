@@ -1551,3 +1551,31 @@ async def test_the_budget_pane_names_the_month_of_every_line(make_app, db):
     assert "2026-08" in walked and "2026-09" not in walked, (
         f"`[` moves the pane with the anchor, and the rows say so: {walked}"
     )
+
+
+async def test_a_cap_committed_past_what_is_left_is_not_shown_as_free(make_app, db):
+    """`over` is `remaining < 0`, which does not cover a cap committed *past* what is left:
+    remaining 10.00 against 22.50 reserved rendered `-12.50 free` in the GOOD colour — a
+    negative number in green, claiming the one thing it disproves.
+
+    Clamped at zero and marked as an overrun instead. Nothing being free is the true
+    reading, and how far past is already the `reserved` figure beside it.
+    """
+    from daylogs.money import roll_month_budgets, upsert_recurring
+
+    # cap 30 = a 360/yr annual share plus a 20/mo monthly item, with 20 logged:
+    # remaining 10.00, reserved 30.00 -> the subtraction goes negative.
+    upsert_recurring(db, name="Yearly", cost=360.0, cycle="annually", category="subscriptions")
+    roll_month_budgets(db, month="2026-09")
+    add_expense(db, amount=20.0, description="app", category="subscriptions",
+                date="2026-09-02")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_money(pilot, app)
+        head = str(app.query_one("#money-head").content)
+    assert "-" not in head.split("free")[0].split("spent")[-1], (
+        f"a negative figure must not be offered as free: {head}"
+    )
+    assert "0.00 free" in head, f"nothing is free, and that is what it should say: {head}"
+    assert "30.00 reserved" in head, f"how far past is the reserved figure: {head}"
+    assert "⚠" in head, "colour is never the only signal"
