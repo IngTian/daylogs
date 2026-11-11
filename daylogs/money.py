@@ -406,6 +406,68 @@ def list_budget(conn, *, month: str) -> list[sqlite3.Row]:
     )
 
 
+def update_budget(conn, id: int, cfg=None, **fields) -> bool:
+    """Edit one budget line **by id**, so a rename moves the row you selected.
+
+    `upsert_budget` resolves on `(month, name)`, which is right for add-or-update and wrong
+    for a rename: submitting a new name added a line, and submitting a name another line in
+    the month already held updated *that* line and left the selected one alone. Same shape
+    as `upsert_recurring` versus `update_recurring`, and the same resolution — the editing
+    path goes by id.
+
+    **`source` is not editable**, for the reason it is absent from `upsert_budget`'s ON
+    CONFLICT clause: provenance says whether the roll owns this line, and
+    `_rename_rolled_budgets` filters on it. An edit may change the number, the category and
+    the name; it may not restate where the line came from.
+
+    A rename is refused on a `source='recurring'` line, and that is the whole reason this
+    function can exist without a decision about the name↔item link. A rolled line's name
+    *is* its link: `roll_month_budgets` matches by name and `_rename_rolled_budgets` carries
+    the line when the item is renamed. Renaming it here would break the match silently, so
+    the next roll would add a second line for the same subscription — exactly the defect
+    `_rename_rolled_budgets` was written to stop. The caller is told to rename the item
+    instead, which carries this line with it.
+
+    The amount, category and month of a rolled line stay freely editable: those are this
+    month's numbers, and overriding them is what the pane is for.
+    """
+    fields = {k: v for k, v in fields.items() if v is not None}
+    allowed = {"name", "category", "amount"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise MoneyError(f"cannot update {sorted(unknown)} on budget")
+    if not fields:
+        return False
+    before = conn.execute("SELECT * FROM budget WHERE id = ?", (int(id),)).fetchone()
+    if before is None:
+        return False
+    if "name" in fields:
+        fields["name"] = fields["name"].strip()
+        if not fields["name"]:
+            raise MoneyError("budget line needs a name")
+        if fields["name"] != before["name"]:
+            if before["source"] == "recurring":
+                raise MoneyError(
+                    f"{before['name']!r} is a rolled line, so its name belongs to the"
+                    " recurring item — rename the item with s and this line follows"
+                )
+            clash = conn.execute(
+                "SELECT 1 FROM budget WHERE month = ? AND name = ? AND id != ?",
+                (before["month"], fields["name"], int(id)),
+            ).fetchone()
+            if clash is not None:
+                raise MoneyError(
+                    f"{before['month']} already has a line called {fields['name']!r}"
+                )
+    if "category" in fields:
+        check_category(fields["category"], cfg)
+    if "amount" in fields and float(fields["amount"]) < 0:
+        raise MoneyError("budget amount must be >= 0")
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    cur = conn.execute(f"UPDATE budget SET {sets} WHERE id = ?", (*fields.values(), int(id)))
+    return cur.rowcount > 0
+
+
 def delete_budget(conn, id: int) -> dict | None:
     """Remove one budget line, returning its pre-image for the undo stack.
 

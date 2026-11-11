@@ -493,3 +493,37 @@ async def test_body_and_money_keep_their_sub_view_and_horizon_keys(make_app):
             keys = plain("\n".join(str(app.query_one("#keyfooter").content).split("\n")[1:]))
             assert "next view" in keys
             assert "zoom in" in keys
+
+
+# ── the `?` overlay says when there is more below ───────────────────────────
+# Measured: the four groups are 17 / 15 / 14 / 5 rows, 51 in total, and every contiguous
+# two-column split was enumerated — the one in use is already the best at a 32-row tallest
+# column. So 51 rows cannot fit a 24-row terminal under any arrangement, and the defect is
+# not the layout: at 80x24 the body shows 16 of 53 rows with nothing saying the rest exist.
+async def test_the_help_overlay_says_when_it_scrolls(make_app):
+    app = make_app()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.press("?")
+        await pilot.pause()
+        await pilot.pause()
+        body = app.screen.query_one("#help-body")
+        foot = str(app.screen.query_one("#help-foot").content)
+    assert body.max_scroll_y > 0, (
+        f"this fixture needs the overlay to scroll, or it proves nothing: {body.max_scroll_y}"
+    )
+    assert "esc or ? to close" in foot, "the way out stays first"
+    assert "for the rest" in foot, f"nothing said the other rows exist: {foot!r}"
+
+
+async def test_the_help_overlay_stays_quiet_when_it_all_fits(make_app):
+    """A terminal tall enough gets no hint it does not need. Read from the widget's own
+    `max_scroll_y` rather than a row count, so it cannot drift from what is on screen."""
+    app = make_app()
+    async with app.run_test(size=(120, 50)) as pilot:
+        await pilot.press("?")
+        await pilot.pause()
+        await pilot.pause()
+        body = app.screen.query_one("#help-body")
+        foot = str(app.screen.query_one("#help-foot").content)
+    assert body.max_scroll_y == 0, f"this fixture needs it to fit: {body.max_scroll_y}"
+    assert foot == "esc or ? to close", f"no hint when there is nothing below: {foot!r}"
