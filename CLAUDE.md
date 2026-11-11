@@ -894,8 +894,24 @@ appended prose where it was convenient rather than editing the map.
   a deleted item's line, and the reason there is no un-roll.
 - **Undo is an upsert on the primary key**, so one statement means "restore this row
   to these values" — covering a delete (row gone → insert) and an edit (row present
-  → update) without the stack needing to know which. A plain INSERT raised on an
-  edit's pre-image.
+  → update). A plain INSERT raised on an edit's pre-image.
+  **But the stack does have to know which, and this bullet used to say it did not.**
+  SQLite hands out `max(rowid)+1` rather than a counter, so deleting the newest row frees
+  its id and the next insert takes it — two keypresses. The upsert then updated a row the
+  user had just created, *destroying* it, and the toast still said "restored". Reproduced:
+  two expenses, delete the second, add a third which gets id 2, press `u`, and the third is
+  gone with the second in its place. So a `deleted` pre-image is applied only to a **free**
+  id, and `UndoStack` entries carry that flag — nothing in the row could supply it, since
+  only `expense` has `created_at` and the other six tables have no field meaning "this is
+  still my row". `deleted` defaults False so the seven edit sites stay unchanged and the two
+  delete sites say so, which is the right way round: the dangerous apply is the delete's.
+  Refused rather than resolved, for the reason below: restoring the old row means deleting
+  the new one, which is not an undo.
+  One residual, stated rather than claimed away: an *edit* entry reached after its row was
+  deleted and the id reused would still update the stranger. That needs a `u` pressed past
+  the delete's own entry — which the stack hands back first, and which restores the id to
+  its original row — so it is far narrower, and closing it needs an identity column on all
+  seven tables.
   That covers the only conflict the stack itself causes; it does **not** cover another
   unique index refusing the row. `recurring.name` is one — rename an item, let a new item
   take the freed name, and the pre-image collides — and resolving *that* would mean

@@ -668,7 +668,7 @@ class BodyTab(PanelTab):
         row = fn(self.app.conn, row_id)
         if row is None:
             return
-        self.app.undo_stack.push(table, row)
+        self.app.undo_stack.push(table, row, deleted=True)
         self.app.notify("deleted · u to undo", timeout=4)
         self.reload()
 
