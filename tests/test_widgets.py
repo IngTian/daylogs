@@ -653,3 +653,47 @@ def test_the_guard_does_not_fire_when_something_else_separates_them():
     # and with no prorated spend at all there is only one run, so nothing to separate
     one = budget_bars([("x", 50.0, 100.0)], width=52, reserved={"x": 30.0})[0][14:28]
     assert one.count("▒") == 4, f"the reserved run keeps its full width: {one!r}"
+
+
+def test_the_guard_only_fires_when_the_whole_fill_is_mosaic():
+    """It costs a reserved cell, so it may only fire when it has to.
+
+    The old condition was `pro and lock == free`, which ignores whether anything separates
+    the two runs. Swept all 680 `(filled, pro, lock)` shapes at this bar width: it fired on
+    78 where a solid `█` run was already the boundary, each time understating the
+    commitment by a cell. The narrow form misses none of the real cases.
+    """
+    # one solid cell between the runs: nothing to do, so the reservation keeps its width
+    kept = budget_bars(
+        [("x", 50.0, 100.0)], width=52, prorated={"x": 20.0}, reserved={"x": 50.0}
+    )[0][14:28]
+    assert "█" in kept, f"this fixture needs a solid cell between the runs: {kept!r}"
+    assert kept.count(_EMPTY) == 0 and kept.endswith(PRORATED_GLYPH), kept
+    assert kept.count(PRORATED_GLYPH) == 10, (
+        f"the guard stole a cell a solid run was already separating: {kept!r}"
+    )
+
+    # the case it exists for: the whole fill is mosaic and the reservation eats every dot
+    merged = budget_bars(
+        [("x", 50.0, 100.0)], width=52, prorated={"x": 50.0}, reserved={"x": 50.0}
+    )[0][14:28]
+    assert _EMPTY in merged, (
+        f"with no solid run the guard must give a cell back so the runs read apart: {merged!r}"
+    )
+
+
+def test_the_guard_never_emits_an_over_wide_bar():
+    """The `lock` truthiness check is load-bearing, not defensive padding: dropping it lets
+    filled=pro=width with lock=free=0 set `lock` to -1, which emits a bar one cell too long
+    and shifts every amount column right. Reachable when a `#N` share is a category's only
+    charge, exceeds its cap, and the category has no annual item."""
+    rows = budget_bars(
+        [("x", 200.0, 100.0)], width=52, prorated={"x": 200.0}, reserved={}
+    )
+    bar = rows[0][14:]
+    assert bar.startswith(PRORATED_GLYPH * 14), f"a fully-mosaic over-budget fill: {bar!r}"
+    widths = {len(r) for r in budget_bars(
+        [("x", 200.0, 100.0), ("y", 10.0, 100.0)], width=52,
+        prorated={"x": 200.0}, reserved={"y": 50.0},
+    )}
+    assert len(widths) == 1, f"rows must stay a uniform width: {widths}"

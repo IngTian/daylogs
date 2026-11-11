@@ -113,7 +113,7 @@ HINTS: tuple[Hint, ...] = (
     # touches nothing else. Clearing the filter is the *tab's* `esc` (`MoneyView.back`), so
     # from in here it is two presses. Submitting an emptied line does not clear it either —
     # the app reads an empty value as a cancel.
-    Hint("filter", "coffee", "text to match in a description · esc cancels · esc again clears"),
+    Hint("filter", "coffee", "text to match in a row · esc cancels · esc again clears"),
     # ── app ──────────────────────────────────────────────────────────────
     # A bare month resolves to its **last day** (`horizon.resolve_goto`, one rule for all
     # three tabs). "The whole month" is only what that means where a horizon then widens it
