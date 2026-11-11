@@ -258,8 +258,18 @@ class MoneyTab(PanelTab):
             # in twelve is noise, and past the cap nothing is free either way, so the overrun
             # is the whole story.
             if s.total_reserved > 0 and not over:
+                # `over` is `remaining < 0`, which does not cover a cap committed *past*
+                # what is left: remaining 10.00 against 22.50 reserved rendered
+                # `-12.50 free` in the GOOD colour — a negative figure in green, claiming
+                # the one thing it disproves. Clamped at zero and marked as an overrun
+                # instead, because nothing being free is the true reading and the amount by
+                # which it is over-committed is already the `reserved` figure beside it.
+                # `⚠` because colour is never the only signal, the same way an over-budget
+                # row carries it.
+                free = s.remaining - s.total_reserved
                 remaining = (
-                    mark(f"{fmt(s.remaining - s.total_reserved)} free", GOOD)
+                    mark(f"{fmt(max(free, 0.0))} free", GOOD if free >= 0 else WARN)
+                    + (mark(" ⚠", WARN) if free < 0 else "")
                     + mark(f" · {fmt(s.total_reserved)} reserved", FAINT)
                 )
             head = (

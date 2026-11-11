@@ -442,7 +442,17 @@ def roll_month_budgets(conn, *, month: str, cfg=None) -> int:
     """Create a budget line for each active recurring item that has no line in
     `month` yet, and return how many were created. Never overwrites an
     existing line — if you hand-set a number for a subscription this month,
-    the roll leaves it alone."""
+    the roll leaves it alone.
+
+    **Which also means a changed recurring price takes effect next month, not this one**,
+    and that is the owner's decision rather than a side effect to be fixed. He raised it as
+    a question — "I changed grocery to 700 and the roll still shows 500" — and answered it
+    himself once the two concepts were distinct: a recurring item is the template for
+    *future* months, so editing it should not reach back into a month whose number you may
+    already have spent against. The budget pane is where this month changes.
+    Re-syncing `source='recurring'` lines on every roll was the considered alternative and
+    is **not** wanted: it would make `r` quietly rewrite a figure the month has already
+    been measured against. Do not add it without asking him again."""
     check_month(month)
     existing = {r["name"] for r in list_budget(conn, month=month)}
     created = 0
