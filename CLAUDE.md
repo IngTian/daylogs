@@ -62,6 +62,15 @@ appended prose where it was convenient rather than editing the map.
 
 ## Invariants
 
+**Grouped only — every bullet below is byte-identical to the one it replaced.** This is
+by far the longest part of the file, and a reader arriving with a question needs
+somewhere to land rather than a scroll. The sections are themes, not precedence: a rule
+does not matter less for being further down. If you add one, put it under the heading it
+belongs to rather than at the end, which is how this section reached fifty-nine
+top-level bullets in the first place.
+
+### Keys, prompts and the footer
+
 - **`daylogs/tui/keymap.py` is the only place keys are declared.** The bindings,
   the contextual footer, and the `?` overlay are all generated from `KEYMAP`.
   Never hand-write a key hint — that is how a footer starts describing keys that
@@ -92,6 +101,35 @@ appended prose where it was convenient rather than editing the map.
   nothing. Pressing `1` did not clear it — that calls `focus_default` — so it healed only
   after a `2`/`3`, which is why every test in `test_tui_nav.py` missed it: they all press a
   digit first. Day now focuses `#summary-scroll`, which is also what pages the read.
+- **The footer is four rows and generated from `KINDS`.** Row 1 is the tab's state, then
+  one row per group: write+danger / view / nav. It was two rows, with the three groups
+  sharing row 2 separated by three spaces — the grouping existed but you had to find it
+  inside the line, and on Body that line was **189 cells**, which is the wall the grouping
+  was meant to prevent. Fixed at four rather than `auto`: a height that follows the active
+  scope reflows the table above it on every tab switch, and a frame that holds still is
+  worth more than the row a short scope would save.
+  **Shedding is per line now.** Each group drops hints from its own tail until that line
+  fits, because separate lines no longer compete for width — and the old flat rule broke
+  the moment they were split, since it shed from the end of the whole key list, so an
+  over-wide *first* group could not shrink until every later group was empty. Measured:
+  Money at 40 columns rendered a 48-cell write row above an empty nav row. If even the
+  pinned keys do not fit, the line is dropped rather than overflowed, because a line wider
+  than the terminal folds and silently steals a row from the table. Stacking also *sheds
+  less*: at 120 columns Body used to drop six hints and now drops none.
+  It still drops any key the active scope has no handler for, asking the app's own resolver
+  so the footer and the dispatcher cannot disagree.
+- **Every prompt declares a hint in `daylogs/tui/hints.py`**, and a test greps the
+  `prompt.open("…")` call sites to fail when one doesn't. `profile` shipped with a
+  working grammar and no way to discover it because the label *was* the placeholder,
+  so it vanished on the first keystroke and there was nowhere to put an example. The
+  three slots are now: border title = label, placeholder = a copyable example
+  (parsed by a test, so it must be valid), border subtitle = the grammar. An error
+  takes the subtitle, not the title — the label stays useful while you read it.
+- **A prompt's sigils are data on its `Hint`.** Vocabularies resolve at call time
+  because `config.toml` can add categories, so a frozen literal would go stale.
+
+### Tabs, panes and layout
+
 - **Four panes, and `budget` is the list behind `categories`.** `PANES` is the only place
   the order lives, and `tab` walks it: the summary, then the lines that make it up, then
   what happened, then the templates. `budget` was added last and was overdue — it is the
@@ -151,6 +189,125 @@ appended prose where it was convenient rather than editing the map.
   `HORIZONS`, so a future horizon that broke that property would fail rather than strand
   rows. It moves only when the date is genuinely outside the span, or an August row would
   drag a YTD view off September for no reason; `t` is the one keypress home.
+- **A prompt belongs to the tab that opened it, not the tab on screen.**
+  `InlinePrompt.owner` is a scope id, defaulting to the active one. Two prompts are opened
+  by a *worker* rather than a keypress — `confirm food` and `confirm activity`, arriving up
+  to a minute later — and the popup exists precisely so you can look at another tab while
+  you wait. Routed by the active tab, the answer went to a tab with no branch for that
+  label and no `else`: `enter` closed the prompt and wrote **nothing**, with no toast and no
+  way back, since `show_scope` refuses to switch while a prompt is open. A logged activity
+  vanishing is what the NULL-factor invariant exists to prevent, and this lost it on the
+  success path. The two async call sites pass `owner=self.id`; a keypress-opened prompt
+  cannot be mis-routed, because the tab cannot change while it is open. The *answer* routes
+  by owner and *focus* goes to the active tab — focusing a hidden tab's table is not a
+  thing.
+  **And it must not inherit the edit it landed on.** `action_dispatch` refuses every
+  keypress while a prompt is open, so no *key* can open a second one — but these two arrive
+  from a worker and `prompt.open` has no `is_open` check, so landing on an open edit prompt
+  it overwrote the label, value and owner while `_editing` stayed armed underneath. The
+  confirm itself was safe, which is what made this hard to see: `_submit_confirmed_food` and
+  `_submit_confirmed_activity` write their row directly and never ask `_take_editing`. The
+  damage landed on the **next ordinary entry**, which does. Reproduced: edit a 300 kcal
+  `oatmeal` row, let a `pizza` estimate land on top, accept it, then log `salad =250` — the
+  day holds pizza and salad with **oatmeal gone**, because the salad became an edit of it.
+  One row destroyed, one never inserted, the day's intake wrong, no toast about any of it.
+  `_disarm_for_confirm` clears **only** `_editing`, never `cancel_editing`: that also drops
+  `_pending`/`_pending_photo`/`_pending_activity`, which both callers set immediately
+  before, so it would lose the estimate being confirmed and leave an inbox file offered
+  forever. Unconditional rather than gated on `is_open`, because a worker's confirm is a
+  fresh write in every case.
+  It is called *beside* the two call sites rather than wrapping them: `hints.labels_in_source`
+  greps the open-a-prompt literals to prove every prompt has a hint, and a wrapper hid both
+  labels — the grep failed on the first run, which is the tripwire earning its keep. Writing
+  the pattern into the explaining docstring then made the grep match *that*, reporting a
+  prompt named by nothing but a sentence; the same self-match `tests/test_harness.py` records
+  about its own prose.
+- **Work in flight is announced by the popup, app-level, and nowhere else.** A
+  `claude -p` call runs for seconds to a minute, so the indicator has to outlive a
+  toast — that part was already true as a `"   estimating…"` suffix on the FOOD header
+  and `"   generating…"` on SUMMARY. What was wrong is that both lived on the tab that
+  started the work: pressing `3` erased every trace of a running estimate and the answer
+  arrived later as a prompt with no explanation. `app.begin_work(key, label, timeout)` /
+  `end_work(key)` is the only way to say it now, and a tab that grows a second indicator
+  is reintroducing the bug. Keyed, not a boolean: a food estimate, an activity inference
+  and the daily read can all be in flight at once, and the first two have separate worker
+  groups on purpose. Elapsed is shown against the call's own budget (`18s / 60s`) because
+  with animations off a static word cannot say "still alive"; the timer exists only while
+  a job does. It lives in `#bottom` with the prompt and the footer rather than floating,
+  so it pushes content up instead of covering the row you are reading, and costs no rows
+  when hidden. `summary.generate` takes `on_attempt` because each retry gets the *whole*
+  timeout, so the clock has to restart per attempt or the second attempt reads "200s / 120s"
+  — larger than the budget it is shown against.
+- **`T` previews; it does not ask you to name a theme.** The picker applies each theme
+  on `←`/`→`, `enter` keeps it, `esc` restores whatever was in effect when it opened. It
+  replaced a text prompt whose recorded justification was that cycling 21 themes "would
+  take up to 21 presses to get back to one you liked" — which assumed you know the name
+  you want, when the whole difficulty is that a name tells you nothing about how it looks
+  against charts and bars that are deliberately *not* themed. `esc` is the one-keypress
+  answer to that objection. It is a focused widget in the bottom container and **not** a
+  `ModalScreen`, because a modal covers the interface being previewed; tabs stay reachable
+  by digit and focus returns to the picker, since the charts and the summary are where the
+  difference shows. `←`/`→` are claimed in `on_key` with `stop()` + `prevent_default()`,
+  the same route `InlinePrompt` takes for `escape` — which is *why* those keys are
+  deliberately not priority bindings. `themes.check` went with the prompt: every name the
+  picker can produce came out of `names()`, and a validator with no caller rots.
+  Because its exit runs from `on_key`, it has to be **told** when something else takes the
+  keyboard: `InlinePrompt.open` calls `picker.cancel()`. Otherwise any write key left it
+  displayed but deaf — `esc` no longer restoring the theme its own subtitle named, the next
+  digit press re-stealing focus from the table, and an `enter` aimed at a row writing the
+  preview to `config.toml`. `cancel` posts no `Cancelled` message on purpose: that is what
+  returns focus to the tab, and the prompt that just took focus must keep it. A second `T`
+  mid-preview is a no-op, because `open` re-anchors what `esc` restores and reopening threw
+  away the one-keypress way back.
+  The README's picker box is **generated, not drawn** — a test pins it to `themes.strip`.
+  Hand-drawn art of a live widget is what `tools/screenshots.py` exists to prevent, and the
+  first version of that box had a border one column short of its sides, a truncated name
+  `strip` cannot emit, and a neighbourhood of the list the cursor does not produce.
+- **No widget carries a width the terminal has to be wide enough for.** The `?` overlay
+  was `width: 92`, and a fixed width is still *laid out* at 92 on a narrower screen rather
+  than shrinking: at 60 columns its right-hand column sat at x=46..89, so half the keys
+  were clipped off the edge with nothing on screen to say so — on the one screen the
+  README promises cannot be out of date, while the footer advertises `?` at every width.
+  It is `width: 1fr; max-width: 92` now, and under `-narrow` the two key lists stack
+  exactly as `.panel-row` does and for the same reason: a 32-cell line does not fit in
+  half of a 60-column box, and a truncated label cannot be read at all while a scrolled
+  one is only further down. Geometry is what the tests assert, because a clipped widget
+  still reports its full content — which is why the tests reading `.content` sat beside
+  this defect for a release.
+- **Panel content sizes itself from the panel**, via `content_size.width`. A
+  hardcoded width wider than the panel wraps every row and doubles its height.
+  `content_size` is 0 during `on_mount`, so the app re-renders once via
+  `call_after_refresh`, and each widget handles its own `on_resize` — `Resize` is
+  delivered to widgets, **not** to the App, so an App-level handler never fires.
+  `PanelTab.on_resize` reloads **only on a width change, and only if the last build
+  measured rather than guessed**. The width half is the entire reason the handler exists: a
+  height change rebuilds nothing, and rebuilding anyway calls `_fill_table`, whose
+  `table.clear(columns=True)` resets the DataTable cursor to row 0. The `_used_fallback`
+  half is why a width alone is not enough — `refresh_tabs()` (`u`, `h`, `n`) builds the
+  off-screen tabs before they are laid out, so `panel_width` measures 0 and takes the
+  46-column `_FALLBACK`; the Resize that would fix it arrives at the same *tab* width, and a
+  width-only guard dropped it. The flag is cleared *before* the reload so `panel_width` can
+  set it again for that build.
+  **`show_scope` defers its reload with `call_after_refresh` for the same reason, and does
+  not rely on the guard to save it.** Reloading a pane that has not been laid out yet drew
+  every visit after the first at 46 columns inside a 96-column panel; correcting that from
+  the following `Resize` is a *race* — it held locally and failed on CI, where the event is
+  often not delivered before the next thing happens, so one test passed on one PR and failed
+  on the next with identical code. A Textual callback fires deterministically; a terminal
+  event does not. There is a test asserting the return visit is correct with every `Resize`
+  dropped, because "it works when the event arrives" is what was not good enough.
+  Everything in the bottom container shortens the tab by appearing — the prompt (recorded
+  as a known wart for a while), the in-progress popup, the theme picker — so without the
+  guard, starting a photo estimate threw away the food row you had selected. Test it by
+  calling `on_resize` with a synthetic `Resize`, not through `pilot.resize_terminal`:
+  `pause()` returns before the event is delivered under the suite's 2 ms idle granularity,
+  so the end-to-end version passed locally with the guard removed and failed on CI.
+- **No business logic in `daylogs/tui/`.** Tabs render and handle keys.
+  Arithmetic belongs in `body.py` / `money.py` / `summary.py`, with tests
+  there. A tab that grows a calculation is a bug worth rejecting.
+
+### Weight, food and the day's energy
+
 - **Two named weight concepts, and they are not interchangeable.** `latest_weight` is
   "what do I weigh now" — the WEIGHT header's headline, which states the reading's clock
   time so it reads as a reading rather than as *the* number, and the BMI beside it.
@@ -162,25 +319,6 @@ appended prose where it was convenient rather than editing the map.
   states `weight_kg` is the morning weigh-in "before any of the food listed" while being
   handed the mid-morning one. `next_morning_kg` was mislabelled the same way. The
   headline and the trend therefore disagree on a twice-weighed day, on purpose.
-- **A chart's y-extent describes the window, not the points it drew.** `frame_chart`
-  takes `low`/`high` for the weight chart, which plots one point per day while the window
-  may hold several readings per day — fitting to the drawn points labelled the top of a
-  week as 81.85 with an 82.65 inside it, the same defect as v1 labelling min/max of the
-  last 30 entries as though they were the window. The line then does not touch the panel
-  edges, which is the honest picture: the value defining the edge is not on screen.
-- **One timezone, and `fmt` takes it as an argument.** `cfg.timezone` defaults to the
-  *machine's* zone (`config.system_timezone`, from `TZ` then the `/etc/localtime`
-  symlink, else UTC) and is always a real IANA name, so every reader can do
-  `ZoneInfo(cfg.timezone)` with no None branch. It used to default to the literal
-  `"America/Toronto"` while `fmt.hhmm` read the machine — so on any other machine an
-  edit's prefill round-trip moved the row by the offset, reachable from a plain `enter`
-  on a food row. `fmt.hhmm`/`fmt.wall` and `body.restamp` therefore **require** the
-  zone: a default is precisely how that hid, because every call site looked right. A
-  zone *name*, not a tzinfo, because DST has to resolve per timestamp — a captured
-  offset renders a January reading with August's rules.
-  `date` stays authoritative over `ate_at` when the two disagree after a zone change
-  (Aug 27 in Toronto is Aug 28 in Kiritimati), so the render is asserted to be *stable*
-  rather than instant-preserving: it settles once instead of creeping on every edit.
 - **An unlogged day is not a missing day — it is an ordinary one.** You log a day when it was
   *out of the ordinary*; a day with no activity row takes the profile baseline, which is
   what the owner confirmed he relies on. So there is no partial-logging machinery and no
@@ -277,11 +415,6 @@ appended prose where it was convenient rather than editing the map.
   whole month. `body.net_series_between` pairs each day's intake with that day's own
   burn and skips days that lack either — a day before the first weigh-in has no BMR
   to scale, and showing its intake as net reads as an enormous surplus.
-- **`horizon.py` is the single time-window concept**, shared by the Body chart and
-  the Money tab. Never add a second one: v2 had chart windows on Body and ranges
-  on Money, so `+` meant different things per tab and neither offered MTD or YTD.
-  Spend filters by **date**, not by month — filtering by month made a one-week
-  horizon silently cover the whole month.
 - **On Body the window governs all three tables, not just the chart.** `+`/`-` moved the
   chart and the weight table and did nothing at all to the food and activity tables — one
   row at `1d` and the same one row at `all` — while the chart above the food table went on
@@ -314,78 +447,9 @@ appended prose where it was convenient rather than editing the map.
   baselines. The no-factor guidance moved to the panel with it, beside the resting-BMR
   number it explains — the panel showed that fallback with no word about it, because the
   words were in a header that now describes a window.
-- **A dated series is plotted against its dates, never its index.** `horizon.axis`
-  resolves the plot extent and `braille_line(positions=…)` places each point.
-  Index spacing rescales the x-axis to the *sample count*, so two weigh-ins a day
-  apart drew a smooth month-long climb across a month-wide panel. Tick labels come
-  from the axis too — from the data they printed "Aug 27 / Aug 28 / Aug 28".
-- **Escape anything non-literal before it reaches markup**, with `widgets.esc`.
-  Textual's content markup wants a **backslash**; `rich.markup.escape` is the wrong
-  tool because it leaves a bare `[` alone, and `[` is itself a key — its footer
-  hint rendered as `[[/] prev`. Filter text is user input and needs this too.
-- **Colour is emphasis, never the only signal.** `widgets.GOOD/BAD/WARN` are
-  palette hues, not the ANSI names — bare `red`/`green` resolve to `#ff0000` and
-  `#008000`, harsh and near-unreadable on this background. An overrun still carries
-  `⚠`, a weight change still carries its arrow. Weight colour assumes down-is-good
-  because there is no goal weight to compare against.
-- **Markup goes on *after* width arithmetic.** The bar builders return plain text
-  and callers colour whole finished lines; colouring first makes `len()` count
-  colour codes and silently sheds real content. DataTable cells use `rich.Text`,
-  not markup, because the table measures columns from the cell's own render.
-  **`widgets.shade` is the one exception, and only because it changes nothing that is
-  printed.** A bar whose *segments* mean different things needs part of one line styled, so
-  `shade` substitutes markup around an already-measured run — `Content.from_markup(out).plain`
-  is asserted byte-identical to the input, which is what keeps the builders' arithmetic
-  correct. Textual's markup **nests**, so this composes with the `mark()` the caller wraps
-  around the whole row: a budget line ends up with its status colour over the full line and
-  `dim` over the glyph run inside it, verified as two spans rather than assumed. It styles
-  **every** contiguous run, because `budget_bars` emits two of them: collapsing the two
-  proration shades into one glyph (#61) also collapsed `shade(shade(…))` into one call, and
-  since `shade` then handled only the first run the reserved zone silently went back to full
-  strength in the row's status colour while the prorated-spend zone stayed dim. The two-run
-  dim was live for an hour in 0.6.0 and nothing asked for it back — the commit message's
-  "the work the second shade was doing" meant the second *grey*, not the second call. The
-  runs still cannot merge: `budget_bars` keeps a free cell between them. Do not reach for it
-  to colour anything the builders did not mark with a glyph of its own.
-- **The TREND panel plots one series at a time, and only weight fits its own range.**
-  `c` cycles weight · intake · net over the window `+`/`-` already control; the two are
-  independent, so zooming must not reset the series. Weight is self-fitted because
-  anchored at zero a 70–75 kg band is a flat line at the top of the panel; both calorie
-  series pass `include_zero`, because a magnitude fitted to its own minimum reads as a
-  climb from nothing and a *signed* net fitted to itself draws the same line whether it
-  is a deficit or a surplus. The zero marker is a `┼` on the y-axis, never braille dots
-  — dots among the data are indistinguishable from data — and it appears only when zero
-  falls strictly inside the extent, because otherwise the extent label already says
-  `0`.
-- **A sparkline of a magnitude scales `from_zero`.** Fitting to the series' own
-  min made six months of level rent land on the lowest glyph, so the
-  second-largest spend category rendered as an empty floor. Weight, which only
-  means anything relative to itself, keeps min–max.
-- **The footer is four rows and generated from `KINDS`.** Row 1 is the tab's state, then
-  one row per group: write+danger / view / nav. It was two rows, with the three groups
-  sharing row 2 separated by three spaces — the grouping existed but you had to find it
-  inside the line, and on Body that line was **189 cells**, which is the wall the grouping
-  was meant to prevent. Fixed at four rather than `auto`: a height that follows the active
-  scope reflows the table above it on every tab switch, and a frame that holds still is
-  worth more than the row a short scope would save.
-  **Shedding is per line now.** Each group drops hints from its own tail until that line
-  fits, because separate lines no longer compete for width — and the old flat rule broke
-  the moment they were split, since it shed from the end of the whole key list, so an
-  over-wide *first* group could not shrink until every later group was empty. Measured:
-  Money at 40 columns rendered a 48-cell write row above an empty nav row. If even the
-  pinned keys do not fit, the line is dropped rather than overflowed, because a line wider
-  than the terminal folds and silently steals a row from the table. Stacking also *sheds
-  less*: at 120 columns Body used to drop six hints and now drops none.
-  It still drops any key the active scope has no handler for, asking the app's own resolver
-  so the footer and the dispatcher cannot disagree.
-- **`config.toml` is written by two functions that write to opposite ends, on
-  purpose.** `update_config` inserts scalars **before the first table header**;
-  `add_category` appends a `[[category]]` block **after everything**. TOML's scoping
-  is positional and both failures are silent, because the file still parses either
-  way: a scalar after `[[category]]` is a field of that table and is simply never read
-  again, and a table header among the scalars swallows every scalar below it. Both
-  edit the file as text so a hand-written comment survives. Neither is the general
-  case of the other — don't unify them.
+
+### Money: budgets, recurring items and proration
+
 - **`b` prefills from the selected category, and only on the categories pane.** Editing
   a budget otherwise meant reading the amount off the pane and retyping the line;
   `upsert_budget` is keyed on `(month, name)`, so a changed number always replaced the
@@ -586,83 +650,103 @@ appended prose where it was convenient rather than editing the map.
   than `incurred`, because a refund that exactly cancels a reserved share incurs 0.00 and
   still had both things happen: it belongs on screen at 0.00, not dropped as though the
   month were empty.
-
-- **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
-  `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by
-  `PRAGMA table_info` so it is idempotent. Still not a migration framework, and it must stay
-  a list rather than grow into one: the columns are nullable with no default, which is what
-  makes the ALTER cheap and leaves old rows meaningful (NULL = "an ordinary expense"). A
-  change that needs to *rewrite* rows is where this stops being enough, and that is a
-  decision to take deliberately rather than by appending here.
-  **The version stamp only ever moves forward, and a newer database is logged, not ignored.**
-  `ensure_schema` writes `PRAGMA user_version` only when `SCHEMA_VERSION` is higher, because
-  iCloud syncs one file between installs and the daily `day` is a separate `uv tool install`
-  that can lag this checkout — so this function does run against databases newer than itself,
-  and a bare assignment moved the stamp *down*. Be precise about what that buys: it cannot
-  repair the past, since an older release runs its own bare-assignment copy; it guarantees
-  only that no future version lies about a file it did not write. The `current >
-  SCHEMA_VERSION` branch warns rather than proceeding silently, because nothing else reads
-  the pragma: `_DDL` is `IF NOT EXISTS` and `_ADD_COLUMNS` is additive, so an older reader
-  would otherwise no-op every statement and then read and write a schema it does not know.
-  Don't collapse it back to the one-liner; `test_the_version_stamp_only_ever_moves_forward`
-  is the tripwire.
-  **There is no `PRAGMA foreign_keys=ON`, because there are no foreign keys.**
-  `PRAGMA foreign_key_list` returns nothing for all seven tables, and `categories.py` names
-  "a table, three foreign keys and a service" as the design this app rejected. The pragma's
-  other effects govern `ALTER TABLE RENAME` and `DROP TABLE`, neither of which this codebase
-  issues. It read as a safety measure while enforcing nothing, under a test asserting the
-  pragma was merely *set*. `test_the_schema_declares_no_foreign_keys` replaces it and
-  deliberately does not observe the pragma: if a table ever grows a `REFERENCES` clause that
-  test fails, and the right response is to decide whether the constraint should be enforced
-  at runtime — SQLite defaults the pragma OFF per connection, so a declared-but-unenforced
-  foreign key accumulates orphans silently. Relaxing the assertion is the wrong response.
 - **An empty state names the fix.** A month nobody rolled has no budget rows, and
   "0.00 budget / 1,234.00 over" is true, useless, and reads as stale data. It says
   what `r` would do instead. `money.pending_roll` must agree with
   `roll_month_budgets` or the header promises what the key won't deliver.
-- **No widget carries a width the terminal has to be wide enough for.** The `?` overlay
-  was `width: 92`, and a fixed width is still *laid out* at 92 on a narrower screen rather
-  than shrinking: at 60 columns its right-hand column sat at x=46..89, so half the keys
-  were clipped off the edge with nothing on screen to say so — on the one screen the
-  README promises cannot be out of date, while the footer advertises `?` at every width.
-  It is `width: 1fr; max-width: 92` now, and under `-narrow` the two key lists stack
-  exactly as `.panel-row` does and for the same reason: a 32-cell line does not fit in
-  half of a 60-column box, and a truncated label cannot be read at all while a scrolled
-  one is only further down. Geometry is what the tests assert, because a clipped widget
-  still reports its full content — which is why the tests reading `.content` sat beside
-  this defect for a release.
-- **Panel content sizes itself from the panel**, via `content_size.width`. A
-  hardcoded width wider than the panel wraps every row and doubles its height.
-  `content_size` is 0 during `on_mount`, so the app re-renders once via
-  `call_after_refresh`, and each widget handles its own `on_resize` — `Resize` is
-  delivered to widgets, **not** to the App, so an App-level handler never fires.
-  `PanelTab.on_resize` reloads **only on a width change, and only if the last build
-  measured rather than guessed**. The width half is the entire reason the handler exists: a
-  height change rebuilds nothing, and rebuilding anyway calls `_fill_table`, whose
-  `table.clear(columns=True)` resets the DataTable cursor to row 0. The `_used_fallback`
-  half is why a width alone is not enough — `refresh_tabs()` (`u`, `h`, `n`) builds the
-  off-screen tabs before they are laid out, so `panel_width` measures 0 and takes the
-  46-column `_FALLBACK`; the Resize that would fix it arrives at the same *tab* width, and a
-  width-only guard dropped it. The flag is cleared *before* the reload so `panel_width` can
-  set it again for that build.
-  **`show_scope` defers its reload with `call_after_refresh` for the same reason, and does
-  not rely on the guard to save it.** Reloading a pane that has not been laid out yet drew
-  every visit after the first at 46 columns inside a 96-column panel; correcting that from
-  the following `Resize` is a *race* — it held locally and failed on CI, where the event is
-  often not delivered before the next thing happens, so one test passed on one PR and failed
-  on the next with identical code. A Textual callback fires deterministically; a terminal
-  event does not. There is a test asserting the return visit is correct with every `Resize`
-  dropped, because "it works when the event arrives" is what was not good enough.
-  Everything in the bottom container shortens the tab by appearing — the prompt (recorded
-  as a known wart for a while), the in-progress popup, the theme picker — so without the
-  guard, starting a photo estimate threw away the food row you had selected. Test it by
-  calling `on_resize` with a synthetic `Resize`, not through `pilot.resize_terminal`:
-  `pause()` returns before the event is delivered under the suite's 2 ms idle granularity,
-  so the end-to-end version passed locally with the guard removed and failed on CI.
-- **The summary renders through Textual's `Markdown` widget.** Feed it markdown,
-  not Rich markup; the prompt is instructed to emit plain markdown and no LaTeX,
-  which no terminal renders. `markup.py` only converts legacy `<num>`/`<warn>`
-  tags in reports already stored.
+- **`update_recurring` is keyed by id, and nothing may edit through
+  `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
+  nothing and INSERTs a second row; both then look active and the next
+  `roll_month_budgets` writes two budget lines for one subscription. `monthly_cost`
+  is a stored derived column and is recomputed whenever cost or cycle moves.
+  `active` is absent from the ON CONFLICT clause for the same class of reason:
+  `s` is add-*or-update* and its grammar cannot express the flag, so
+  `active = excluded.active` meant every re-add carried the parameter's `True`
+  default — raising a paused subscription's price un-paused it and the next roll
+  charged for it. `note` is still overwritten there, on purpose: the recurring
+  grammar has no `~note`, so that column is unreachable in both directions and
+  fixing half of it would be pretending.
+- **Pausing means "not from now on", never "this never happened".** A budget line
+  already rolled for the month stays when you pause the item — you may have paid it —
+  and next month's roll simply omits it. Same stance `_rename_rolled_budgets` takes on
+  a deleted item's line, and the reason there is no un-roll.
+
+### Time windows
+
+- **One timezone, and `fmt` takes it as an argument.** `cfg.timezone` defaults to the
+  *machine's* zone (`config.system_timezone`, from `TZ` then the `/etc/localtime`
+  symlink, else UTC) and is always a real IANA name, so every reader can do
+  `ZoneInfo(cfg.timezone)` with no None branch. It used to default to the literal
+  `"America/Toronto"` while `fmt.hhmm` read the machine — so on any other machine an
+  edit's prefill round-trip moved the row by the offset, reachable from a plain `enter`
+  on a food row. `fmt.hhmm`/`fmt.wall` and `body.restamp` therefore **require** the
+  zone: a default is precisely how that hid, because every call site looked right. A
+  zone *name*, not a tzinfo, because DST has to resolve per timestamp — a captured
+  offset renders a January reading with August's rules.
+  `date` stays authoritative over `ate_at` when the two disagree after a zone change
+  (Aug 27 in Toronto is Aug 28 in Kiritimati), so the render is asserted to be *stable*
+  rather than instant-preserving: it settles once instead of creeping on every edit.
+- **`horizon.py` is the single time-window concept**, shared by the Body chart and
+  the Money tab. Never add a second one: v2 had chart windows on Body and ranges
+  on Money, so `+` meant different things per tab and neither offered MTD or YTD.
+  Spend filters by **date**, not by month — filtering by month made a one-week
+  horizon silently cover the whole month.
+- **A dated series is plotted against its dates, never its index.** `horizon.axis`
+  resolves the plot extent and `braille_line(positions=…)` places each point.
+  Index spacing rescales the x-axis to the *sample count*, so two weigh-ins a day
+  apart drew a smooth month-long climb across a month-wide panel. Tick labels come
+  from the axis too — from the data they printed "Aug 27 / Aug 28 / Aug 28".
+
+### Charts, bars and colour
+
+- **A chart's y-extent describes the window, not the points it drew.** `frame_chart`
+  takes `low`/`high` for the weight chart, which plots one point per day while the window
+  may hold several readings per day — fitting to the drawn points labelled the top of a
+  week as 81.85 with an 82.65 inside it, the same defect as v1 labelling min/max of the
+  last 30 entries as though they were the window. The line then does not touch the panel
+  edges, which is the honest picture: the value defining the edge is not on screen.
+- **Escape anything non-literal before it reaches markup**, with `widgets.esc`.
+  Textual's content markup wants a **backslash**; `rich.markup.escape` is the wrong
+  tool because it leaves a bare `[` alone, and `[` is itself a key — its footer
+  hint rendered as `[[/] prev`. Filter text is user input and needs this too.
+- **Colour is emphasis, never the only signal.** `widgets.GOOD/BAD/WARN` are
+  palette hues, not the ANSI names — bare `red`/`green` resolve to `#ff0000` and
+  `#008000`, harsh and near-unreadable on this background. An overrun still carries
+  `⚠`, a weight change still carries its arrow. Weight colour assumes down-is-good
+  because there is no goal weight to compare against.
+- **Markup goes on *after* width arithmetic.** The bar builders return plain text
+  and callers colour whole finished lines; colouring first makes `len()` count
+  colour codes and silently sheds real content. DataTable cells use `rich.Text`,
+  not markup, because the table measures columns from the cell's own render.
+  **`widgets.shade` is the one exception, and only because it changes nothing that is
+  printed.** A bar whose *segments* mean different things needs part of one line styled, so
+  `shade` substitutes markup around an already-measured run — `Content.from_markup(out).plain`
+  is asserted byte-identical to the input, which is what keeps the builders' arithmetic
+  correct. Textual's markup **nests**, so this composes with the `mark()` the caller wraps
+  around the whole row: a budget line ends up with its status colour over the full line and
+  `dim` over the glyph run inside it, verified as two spans rather than assumed. It styles
+  **every** contiguous run, because `budget_bars` emits two of them: collapsing the two
+  proration shades into one glyph (#61) also collapsed `shade(shade(…))` into one call, and
+  since `shade` then handled only the first run the reserved zone silently went back to full
+  strength in the row's status colour while the prorated-spend zone stayed dim. The two-run
+  dim was live for an hour in 0.6.0 and nothing asked for it back — the commit message's
+  "the work the second shade was doing" meant the second *grey*, not the second call. The
+  runs still cannot merge: `budget_bars` keeps a free cell between them. Do not reach for it
+  to colour anything the builders did not mark with a glyph of its own.
+- **The TREND panel plots one series at a time, and only weight fits its own range.**
+  `c` cycles weight · intake · net over the window `+`/`-` already control; the two are
+  independent, so zooming must not reset the series. Weight is self-fitted because
+  anchored at zero a 70–75 kg band is a flat line at the top of the panel; both calorie
+  series pass `include_zero`, because a magnitude fitted to its own minimum reads as a
+  climb from nothing and a *signed* net fitted to itself draws the same line whether it
+  is a deficit or a surplus. The zero marker is a `┼` on the y-axis, never braille dots
+  — dots among the data are indistinguishable from data — and it appears only when zero
+  falls strictly inside the extent, because otherwise the extent label already says
+  `0`.
+- **A sparkline of a magnitude scales `from_zero`.** Fitting to the series' own
+  min made six months of level rent land on the lowest glyph, so the
+  second-largest spend category rendered as an empty floor. Weight, which only
+  means anything relative to itself, keeps min–max.
 - **Part-to-whole is ranked bars, not a pie.** A terminal has ~8 distinguishable
   fill glyphs against 9 categories, so a pie collides and still needs a legend to
   read amounts.
@@ -675,101 +759,13 @@ appended prose where it was convenient rather than editing the map.
   spend; a negative row keeps its amount and shows no share.
 - **`chart.py` and `widgets.py` import no Textual.** They are pure functions and
   unit-test as such.
-- **A prompt belongs to the tab that opened it, not the tab on screen.**
-  `InlinePrompt.owner` is a scope id, defaulting to the active one. Two prompts are opened
-  by a *worker* rather than a keypress — `confirm food` and `confirm activity`, arriving up
-  to a minute later — and the popup exists precisely so you can look at another tab while
-  you wait. Routed by the active tab, the answer went to a tab with no branch for that
-  label and no `else`: `enter` closed the prompt and wrote **nothing**, with no toast and no
-  way back, since `show_scope` refuses to switch while a prompt is open. A logged activity
-  vanishing is what the NULL-factor invariant exists to prevent, and this lost it on the
-  success path. The two async call sites pass `owner=self.id`; a keypress-opened prompt
-  cannot be mis-routed, because the tab cannot change while it is open. The *answer* routes
-  by owner and *focus* goes to the active tab — focusing a hidden tab's table is not a
-  thing.
-  **And it must not inherit the edit it landed on.** `action_dispatch` refuses every
-  keypress while a prompt is open, so no *key* can open a second one — but these two arrive
-  from a worker and `prompt.open` has no `is_open` check, so landing on an open edit prompt
-  it overwrote the label, value and owner while `_editing` stayed armed underneath. The
-  confirm itself was safe, which is what made this hard to see: `_submit_confirmed_food` and
-  `_submit_confirmed_activity` write their row directly and never ask `_take_editing`. The
-  damage landed on the **next ordinary entry**, which does. Reproduced: edit a 300 kcal
-  `oatmeal` row, let a `pizza` estimate land on top, accept it, then log `salad =250` — the
-  day holds pizza and salad with **oatmeal gone**, because the salad became an edit of it.
-  One row destroyed, one never inserted, the day's intake wrong, no toast about any of it.
-  `_disarm_for_confirm` clears **only** `_editing`, never `cancel_editing`: that also drops
-  `_pending`/`_pending_photo`/`_pending_activity`, which both callers set immediately
-  before, so it would lose the estimate being confirmed and leave an inbox file offered
-  forever. Unconditional rather than gated on `is_open`, because a worker's confirm is a
-  fresh write in every case.
-  It is called *beside* the two call sites rather than wrapping them: `hints.labels_in_source`
-  greps the open-a-prompt literals to prove every prompt has a hint, and a wrapper hid both
-  labels — the grep failed on the first run, which is the tripwire earning its keep. Writing
-  the pattern into the explaining docstring then made the grep match *that*, reporting a
-  prompt named by nothing but a sentence; the same self-match `tests/test_harness.py` records
-  about its own prose.
-- **Work in flight is announced by the popup, app-level, and nowhere else.** A
-  `claude -p` call runs for seconds to a minute, so the indicator has to outlive a
-  toast — that part was already true as a `"   estimating…"` suffix on the FOOD header
-  and `"   generating…"` on SUMMARY. What was wrong is that both lived on the tab that
-  started the work: pressing `3` erased every trace of a running estimate and the answer
-  arrived later as a prompt with no explanation. `app.begin_work(key, label, timeout)` /
-  `end_work(key)` is the only way to say it now, and a tab that grows a second indicator
-  is reintroducing the bug. Keyed, not a boolean: a food estimate, an activity inference
-  and the daily read can all be in flight at once, and the first two have separate worker
-  groups on purpose. Elapsed is shown against the call's own budget (`18s / 60s`) because
-  with animations off a static word cannot say "still alive"; the timer exists only while
-  a job does. It lives in `#bottom` with the prompt and the footer rather than floating,
-  so it pushes content up instead of covering the row you are reading, and costs no rows
-  when hidden. `summary.generate` takes `on_attempt` because each retry gets the *whole*
-  timeout, so the clock has to restart per attempt or the second attempt reads "200s / 120s"
-  — larger than the budget it is shown against.
-- **Animations stay off** (`self.animation_level = "none"`), because off is never
-  slower and nothing here is worth animating. This used to cite "383 ms → 127 ms per tab
-  switch" as measured fact while `test_tui_perf.py` said 106 and `app.py` said both in one
-  sentence; the figure is now stated only in `test_tui_perf.py`, next to what that harness
-  can actually re-derive. Don't restore a number here that no test can check. It is an
-  *instance* attribute in textual 8.2; a class attribute named `ANIMATION_LEVEL` is a
-  silent no-op.
-- **The data layer is fast; don't "optimise" it.** `summarize_month` over a
-  few hundred expenses is 0.15 ms and a full tab reload is under 0.6 ms. If
-  something feels slow, measure before touching queries — last time the entire
-  cost turned out to be a UI animation.
-- **No business logic in `daylogs/tui/`.** Tabs render and handle keys.
-  Arithmetic belongs in `body.py` / `money.py` / `summary.py`, with tests
-  there. A tab that grows a calculation is a bug worth rejecting.
-- **`T` previews; it does not ask you to name a theme.** The picker applies each theme
-  on `←`/`→`, `enter` keeps it, `esc` restores whatever was in effect when it opened. It
-  replaced a text prompt whose recorded justification was that cycling 21 themes "would
-  take up to 21 presses to get back to one you liked" — which assumed you know the name
-  you want, when the whole difficulty is that a name tells you nothing about how it looks
-  against charts and bars that are deliberately *not* themed. `esc` is the one-keypress
-  answer to that objection. It is a focused widget in the bottom container and **not** a
-  `ModalScreen`, because a modal covers the interface being previewed; tabs stay reachable
-  by digit and focus returns to the picker, since the charts and the summary are where the
-  difference shows. `←`/`→` are claimed in `on_key` with `stop()` + `prevent_default()`,
-  the same route `InlinePrompt` takes for `escape` — which is *why* those keys are
-  deliberately not priority bindings. `themes.check` went with the prompt: every name the
-  picker can produce came out of `names()`, and a validator with no caller rots.
-  Because its exit runs from `on_key`, it has to be **told** when something else takes the
-  keyboard: `InlinePrompt.open` calls `picker.cancel()`. Otherwise any write key left it
-  displayed but deaf — `esc` no longer restoring the theme its own subtitle named, the next
-  digit press re-stealing focus from the table, and an `enter` aimed at a row writing the
-  preview to `config.toml`. `cancel` posts no `Cancelled` message on purpose: that is what
-  returns focus to the tab, and the prompt that just took focus must keep it. A second `T`
-  mid-preview is a no-op, because `open` re-anchors what `esc` restores and reopening threw
-  away the one-keypress way back.
-  The README's picker box is **generated, not drawn** — a test pins it to `themes.strip`.
-  Hand-drawn art of a live widget is what `tools/screenshots.py` exists to prevent, and the
-  first version of that box had a border one column short of its sides, a truncated name
-  `strip` cannot emit, and a neighbourhood of the list the cursor does not produce.
-- **Every prompt declares a hint in `daylogs/tui/hints.py`**, and a test greps the
-  `prompt.open("…")` call sites to fail when one doesn't. `profile` shipped with a
-  working grammar and no way to discover it because the label *was* the placeholder,
-  so it vanished on the first keystroke and there was nowhere to put an example. The
-  three slots are now: border title = label, placeholder = a copyable example
-  (parsed by a test, so it must be valid), border subtitle = the grammar. An error
-  takes the subtitle, not the title — the label stays useful while you read it.
+- **The summary renders through Textual's `Markdown` widget.** Feed it markdown,
+  not Rich markup; the prompt is instructed to emit plain markdown and no LaTeX,
+  which no terminal renders. `markup.py` only converts legacy `<num>`/`<warn>`
+  tags in reports already stored.
+
+### Entry, editing and undo
+
 - **One grammar, in `parse.py`, on top of `sigil.py`.** A field is marked by a
   sigil at the start of a token, so nothing is scavenged out of free text — which
   is what lets the same line serve entry *and* edit prefill. The previous grammar
@@ -780,8 +776,6 @@ appended prose where it was convenient rather than editing the map.
 - **`sigil.py` and `complete.py` import no Textual**, like `chart.py` and
   `widgets.py`. Completion is a pure function of (line, cursor, vocabulary); the
   widget only decides when to call it.
-- **A prompt's sigils are data on its `Hint`.** Vocabularies resolve at call time
-  because `config.toml` can add categories, so a frozen literal would go stale.
 - **A prompt that exists to correct a row must arm that row before it opens.** `fix
   category` is the only one, and it did not: it re-enters `_submit_expense`, which asks
   `_take_editing("expense")` for a row id, and `_editing` was only ever set by the
@@ -894,22 +888,6 @@ appended prose where it was convenient rather than editing the map.
   filters on `source = 'recurring'`, so a line whose provenance flipped to `manual` stops
   travelling with its recurring item and the next `r` writes a second line beside it. That
   is why `source` is absent from `upsert_budget`'s ON CONFLICT clause — see there.
-- **`update_recurring` is keyed by id, and nothing may edit through
-  `upsert_recurring`.** That resolves conflicts on `name`, so a rename matches
-  nothing and INSERTs a second row; both then look active and the next
-  `roll_month_budgets` writes two budget lines for one subscription. `monthly_cost`
-  is a stored derived column and is recomputed whenever cost or cycle moves.
-  `active` is absent from the ON CONFLICT clause for the same class of reason:
-  `s` is add-*or-update* and its grammar cannot express the flag, so
-  `active = excluded.active` meant every re-add carried the parameter's `True`
-  default — raising a paused subscription's price un-paused it and the next roll
-  charged for it. `note` is still overwritten there, on purpose: the recurring
-  grammar has no `~note`, so that column is unreachable in both directions and
-  fixing half of it would be pretending.
-- **Pausing means "not from now on", never "this never happened".** A budget line
-  already rolled for the month stays when you pause the item — you may have paid it —
-  and next month's roll simply omits it. Same stance `_rename_rolled_budgets` takes on
-  a deleted item's line, and the reason there is no un-roll.
 - **Undo is an upsert on the primary key**, so one statement means "restore this row
   to these values" — covering a delete (row gone → insert) and an edit (row present
   → update). A plain INSERT raised on an edit's pre-image.
@@ -957,6 +935,73 @@ appended prose where it was convenient rather than editing the map.
   handler had just armed. A retry is the same submission, so it has to still be the same
   edit. Abandonment is unaffected: escape and an empty submit both still clear through
   `cancel_editing`. A tab that catches these errors discards what the user typed.
+
+### Storage, schema and config
+
+- **Adding a column is the one thing `CREATE TABLE IF NOT EXISTS` cannot do.**
+  `db._ADD_COLUMNS` is a list of `(table, column, decl)` ALTERed in on every open, guarded by
+  `PRAGMA table_info` so it is idempotent. Still not a migration framework, and it must stay
+  a list rather than grow into one: the columns are nullable with no default, which is what
+  makes the ALTER cheap and leaves old rows meaningful (NULL = "an ordinary expense"). A
+  change that needs to *rewrite* rows is where this stops being enough, and that is a
+  decision to take deliberately rather than by appending here.
+  **The version stamp only ever moves forward, and a newer database is logged, not ignored.**
+  `ensure_schema` writes `PRAGMA user_version` only when `SCHEMA_VERSION` is higher, because
+  iCloud syncs one file between installs and the daily `day` is a separate `uv tool install`
+  that can lag this checkout — so this function does run against databases newer than itself,
+  and a bare assignment moved the stamp *down*. Be precise about what that buys: it cannot
+  repair the past, since an older release runs its own bare-assignment copy; it guarantees
+  only that no future version lies about a file it did not write. The `current >
+  SCHEMA_VERSION` branch warns rather than proceeding silently, because nothing else reads
+  the pragma: `_DDL` is `IF NOT EXISTS` and `_ADD_COLUMNS` is additive, so an older reader
+  would otherwise no-op every statement and then read and write a schema it does not know.
+  Don't collapse it back to the one-liner; `test_the_version_stamp_only_ever_moves_forward`
+  is the tripwire.
+  **There is no `PRAGMA foreign_keys=ON`, because there are no foreign keys.**
+  `PRAGMA foreign_key_list` returns nothing for all seven tables, and `categories.py` names
+  "a table, three foreign keys and a service" as the design this app rejected. The pragma's
+  other effects govern `ALTER TABLE RENAME` and `DROP TABLE`, neither of which this codebase
+  issues. It read as a safety measure while enforcing nothing, under a test asserting the
+  pragma was merely *set*. `test_the_schema_declares_no_foreign_keys` replaces it and
+  deliberately does not observe the pragma: if a table ever grows a `REFERENCES` clause that
+  test fails, and the right response is to decide whether the constraint should be enforced
+  at runtime — SQLite defaults the pragma OFF per connection, so a declared-but-unenforced
+  foreign key accumulates orphans silently. Relaxing the assertion is the wrong response.
+- **`config.toml` is written by two functions that write to opposite ends, on
+  purpose.** `update_config` inserts scalars **before the first table header**;
+  `add_category` appends a `[[category]]` block **after everything**. TOML's scoping
+  is positional and both failures are silent, because the file still parses either
+  way: a scalar after `[[category]]` is a field of that table and is simply never read
+  again, and a table header among the scalars swallows every scalar below it. Both
+  edit the file as text so a hand-written comment survives. Neither is the general
+  case of the other — don't unify them.
+- **stdlib `sqlite3`, not an ORM.** Measured: the SQLAlchemy/SQLModel stack
+  cost 220 ms of import time for zero remaining consumers.
+- **`PRAGMA journal_mode=DELETE`, never WAL.** WAL sidecars sync independently
+  under iCloud and corrupt the DB on the receiving device.
+- **Hard delete plus session undo.** No `deleted_at` columns, no trash
+  service.
+- Amounts are positive for a spend. Dates are `TEXT` `YYYY-MM-DD`, local.
+  Timestamps are `INTEGER` unix seconds.
+
+### Performance and dependencies
+
+- **Animations stay off** (`self.animation_level = "none"`), because off is never
+  slower and nothing here is worth animating. This used to cite "383 ms → 127 ms per tab
+  switch" as measured fact while `test_tui_perf.py` said 106 and `app.py` said both in one
+  sentence; the figure is now stated only in `test_tui_perf.py`, next to what that harness
+  can actually re-derive. Don't restore a number here that no test can check. It is an
+  *instance* attribute in textual 8.2; a class attribute named `ANIMATION_LEVEL` is a
+  silent no-op.
+- **The data layer is fast; don't "optimise" it.** `summarize_month` over a
+  few hundred expenses is 0.15 ms and a full tab reload is under 0.6 ms. If
+  something feels slow, measure before touching queries — last time the entire
+  cost turned out to be a UI animation.
+- Single runtime dependency: `textual`. Adding another needs a reason that
+  beats the standard library.
+
+### Testing
+
 - **`claude -p` runners are always injected.** `DaylogsApp` takes
   `runner_text` / `runner_json` / `runner_image`; services take `runner=`. No
   test may spawn a subprocess.
@@ -996,16 +1041,6 @@ appended prose where it was convenient rather than editing the map.
   `cli.main` has no `now` seam and adding one to production to serve a test is not worth it.
   It reads the clock either side of the call and accepts both days, so a run straddling
   midnight there cannot flake.
-- **stdlib `sqlite3`, not an ORM.** Measured: the SQLAlchemy/SQLModel stack
-  cost 220 ms of import time for zero remaining consumers.
-- **`PRAGMA journal_mode=DELETE`, never WAL.** WAL sidecars sync independently
-  under iCloud and corrupt the DB on the receiving device.
-- **Hard delete plus session undo.** No `deleted_at` columns, no trash
-  service.
-- Amounts are positive for a spend. Dates are `TEXT` `YYYY-MM-DD`, local.
-  Timestamps are `INTEGER` unix seconds.
-- Single runtime dependency: `textual`. Adding another needs a reason that
-  beats the standard library.
 
 ## Working on it
 
