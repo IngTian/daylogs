@@ -799,6 +799,7 @@ class BodyTab(PanelTab):
         # `owner=self.id`, unlike every other prompt here: this one is opened by a worker
         # up to a minute after the keypress, so the active tab is whatever the user wandered
         # to while waiting — and the answer belongs to Body regardless.
+        self._disarm_for_confirm()
         self.app.prompt.open("confirm food", line, owner=self.id)
 
     # ── prompt handling ──────────────────────────────────────────────────
@@ -1160,12 +1161,51 @@ class BodyTab(PanelTab):
         self._pending_activity = effort
         # Worker-opened, like `confirm food` — see the note there, including why the `@` is
         # on the line: the confirm is re-parsed, and an absent `@` means now.
+        self._disarm_for_confirm()
         self.app.prompt.open(
             "confirm activity",
             f"{sigil.escape(r.description)} ={effort.factor:g}"
             f" @{r.date}/{hhmm(r.at, self.app.cfg.timezone)}",
             owner=self.id,
         )
+
+    def _disarm_for_confirm(self) -> None:
+        """Drop any armed edit before a worker opens its confirm prompt.
+
+        `action_dispatch` refuses every keypress while a prompt is open, so no *key* can
+        open a second one — but these two arrive from a worker up to a minute later, and
+        `prompt.open` has no `is_open` check. Landing on an open edit prompt it overwrote
+        the label, the value and the owner while `_editing` stayed armed underneath.
+
+        The confirm itself was safe: `_submit_confirmed_food` and
+        `_submit_confirmed_activity` write their row directly and never ask
+        `_take_editing`. That is what made this hard to see — the damage landed on the
+        *next* ordinary entry, which does ask. Reproduced: edit a 300 kcal `oatmeal` row,
+        let a `pizza` estimate land on top, accept it, then log `salad =250` — and the day
+        holds pizza and salad with **oatmeal gone**, because the salad became an edit of
+        it. One meal destroyed, one never inserted as a row, the day's intake wrong, and no
+        toast saying any of it.
+
+        Disarmed unconditionally rather than only when a prompt is open: a worker's confirm
+        is a fresh write in every case, so there is no state in which it should consume an
+        id the user armed by hand, and a conditional would invite the question of what the
+        other branch is for.
+
+        **Only `_editing`, never `cancel_editing`.** That also clears `_pending`,
+        `_pending_photo` and `_pending_activity` — which both callers set immediately
+        before this, so clearing them here would drop the estimate being confirmed and, on
+        the photo path, leave the inbox file to be offered again forever.
+
+        Called *beside* the two confirm call sites rather than wrapping them, because
+        `hints.labels_in_source` greps the open-a-prompt call literals to prove every
+        prompt declares a hint. Wrapping them in a helper hid both labels and that grep
+        failed immediately — the tripwire working, and worth more than the one line of
+        duplication it costs. This paragraph deliberately does not spell the call out
+        either: writing the pattern in prose made the grep match the docstring and report a
+        prompt named by nothing but this sentence, which is the self-match
+        `tests/test_harness.py` already records about its own text.
+        """
+        self._editing = None
 
     def _write_food(self, r, *, source: str) -> None:
         body.add_food(

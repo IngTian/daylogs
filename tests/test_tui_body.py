@@ -2,7 +2,7 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 import pytest
-from helpers import assert_armed, go_body, go_day
+from helpers import assert_armed, go_body, go_day, go_view
 
 from daylogs.body import add_food, add_weight, list_food, list_weight
 from daylogs.estimate import Estimate
@@ -3449,3 +3449,133 @@ async def test_an_inference_in_flight_at_shutdown_keeps_its_row_and_exits_clean(
         f"the in-flight activity was lost at shutdown: {rows}"
     )
     assert rows[0]["factor"] is None, "no number arrived, so the row carries NULL"
+
+
+async def test_a_confirm_arriving_mid_edit_does_not_write_to_the_edited_row(
+    make_app, db, type_into
+):
+    """A worker-opened prompt must not inherit the edit the user was in the middle of.
+
+    `action_dispatch` refuses every *keypress* while a prompt is open, so no key can open a
+    second prompt — but `_offer` calls `prompt.open` directly from a worker up to a minute
+    later, and `prompt.open` has no `is_open` guard. It overwrites the label, value and
+    owner while `_editing` stays armed from the edit underneath, so accepting the confirm
+    reaches `_submit_food`, whose first act is `_take_editing("food")`. The estimate is then
+    written over the row you were editing and the new meal is never recorded: one row
+    silently replaced, one meal lost, no toast saying either.
+    """
+    import asyncio
+
+    landed = asyncio.Event()
+    release = asyncio.Event()
+
+    async def wait_then_answer(**kw):
+        landed.set()
+        await release.wait()
+        return Estimate(description="pizza", kcal=800)
+
+    app = make_app()
+    async with app.run_test() as pilot:
+        import daylogs.tui.body_tab as bt
+        original = bt.estimate.from_text
+        bt.estimate.from_text = wait_then_answer
+        try:
+            add_food(db, description="oatmeal", kcal=300, source="labeled",
+                     date=app.today(), at=1)
+            tab = await go_view(pilot, app, "food")
+            await pilot.press("f")
+            await type_into(pilot, "pizza")     # no =kcal, so an estimate starts
+            await pilot.press("enter")
+            await landed.wait()
+            await pilot.pause()
+
+            # While it is in flight, start editing the existing row.
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.prompt.is_open and "oatmeal" in app.prompt.value, (
+                f"the edit has to be armed for this to mean anything: {app.prompt.value!r}"
+            )
+
+            release.set()                       # the estimate lands on top of the edit
+            await pilot.pause()
+            await pilot.pause()
+            assert app.prompt.label == "confirm food", (
+                f"the worker's prompt should be the one on screen: {app.prompt.label!r}"
+            )
+            await pilot.press("enter")          # accept the estimate
+            await pilot.pause()
+
+            # `_submit_confirmed_food` writes the row directly and never asks
+            # `_take_editing`, so the confirm itself is safe — and the stale arm from the
+            # stomped edit is still sitting there. The damage lands on the *next* ordinary
+            # entry, which does ask.
+            stale = tab._editing
+            await pilot.press("f")
+            await type_into(pilot, "salad =250")
+            await pilot.press("enter")
+            await pilot.pause()
+        finally:
+            bt.estimate.from_text = original
+
+    rows = {r["description"]: r["kcal"] for r in list_food(db, date=app.today())}
+    assert rows.get("oatmeal") == 300, (
+        f"a later entry consumed the stale arm and overwrote the edited row: {rows}"
+    )
+    assert rows.get("pizza") == 800, f"the estimated meal was never recorded: {rows}"
+    assert rows.get("salad") == 250, f"the later meal was turned into an edit: {rows}"
+    assert stale is None, f"the stomped edit was left armed for the next entry: {stale}"
+
+
+async def test_a_confirm_activity_arriving_mid_edit_does_not_inherit_it(
+    make_app, db, type_into
+):
+    """The activity half of the same defect, which shares `_open_confirm` and so would
+    break together. Worth its own test because the paths differ: the factor confirm is a
+    separate worker group, and `_submit_activity` consumes `_take_editing("activity")`."""
+    import asyncio
+
+    landed, release = asyncio.Event(), asyncio.Event()
+
+    async def wait_then_answer(**kw):
+        landed.set()
+        await release.wait()
+        return {"factor": 1.6}
+
+    app = make_app(runner_json=wait_then_answer)
+    async with app.run_test() as pilot:
+        tab = await go_view(pilot, app, "activity")
+        await pilot.press("a")
+        await type_into(pilot, "morning run =desk")   # typed factor: written, no call
+        await pilot.press("enter")
+        await pilot.pause()
+
+        await pilot.press("a")
+        await type_into(pilot, "evening gym")         # no factor, so an inference starts
+        await pilot.press("enter")
+        await landed.wait()
+        await pilot.pause()
+
+        await pilot.press("enter")                    # edit the existing row
+        await pilot.pause()
+        assert app.prompt.is_open and "morning run" in app.prompt.value, (
+            f"the edit has to be armed for this to mean anything: {app.prompt.value!r}"
+        )
+        release.set()
+        await pilot.pause()
+        await pilot.pause()
+        assert app.prompt.label == "confirm activity", f"got {app.prompt.label!r}"
+        await pilot.press("enter")                    # accept the inferred factor
+        await pilot.pause()
+        stale = tab._editing
+
+        await pilot.press("a")
+        await type_into(pilot, "swim =light")
+        await pilot.press("enter")
+        await pilot.pause()
+
+    rows = {r["description"]: r["factor"] for r in _act_rows(db, app.today())}
+    assert "morning run" in rows, (
+        f"a later entry consumed the stale arm and overwrote the edited row: {rows}"
+    )
+    assert "evening gym" in rows and "swim" in rows, f"an entry was lost: {rows}"
+    assert stale is None, f"the stomped edit was left armed for the next entry: {stale}"
