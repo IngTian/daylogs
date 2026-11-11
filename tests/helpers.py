@@ -56,6 +56,26 @@ async def go_body(pilot, app):
     return app.query_one("#body")
 
 
+async def go_view(pilot, app, view):
+    """Walk `tab` until the Body tab is showing `view`, and hand back the widget.
+
+    By name, never by counting presses — the Money panes' lesson applied to Body's three
+    sub-views before it costs anything. Body opens on `food`, not `weight`, so a test that
+    presses `tab` once to "reach food" lands on `activity` and then finds an empty table,
+    where `enter` arms nothing and the test proves whatever it likes.
+
+    Raises rather than looping forever if the view never arrives, so a typo'd name fails
+    loudly instead of hanging the suite.
+    """
+    tab = await go_body(pilot, app)
+    for _ in range(4):
+        if tab.table_mode == view:
+            return tab
+        await pilot.press("tab")
+        await pilot.pause()
+    raise AssertionError(f"never reached {view!r}; on {tab.table_mode!r}")
+
+
 async def go_day(pilot, app):
     """Switch to the Day tab — tab 1, and where the app should open."""
     await pilot.press("1")

@@ -669,6 +669,27 @@ appended prose where it was convenient rather than editing the map.
   cannot be mis-routed, because the tab cannot change while it is open. The *answer* routes
   by owner and *focus* goes to the active tab — focusing a hidden tab's table is not a
   thing.
+  **And it must not inherit the edit it landed on.** `action_dispatch` refuses every
+  keypress while a prompt is open, so no *key* can open a second one — but these two arrive
+  from a worker and `prompt.open` has no `is_open` check, so landing on an open edit prompt
+  it overwrote the label, value and owner while `_editing` stayed armed underneath. The
+  confirm itself was safe, which is what made this hard to see: `_submit_confirmed_food` and
+  `_submit_confirmed_activity` write their row directly and never ask `_take_editing`. The
+  damage landed on the **next ordinary entry**, which does. Reproduced: edit a 300 kcal
+  `oatmeal` row, let a `pizza` estimate land on top, accept it, then log `salad =250` — the
+  day holds pizza and salad with **oatmeal gone**, because the salad became an edit of it.
+  One row destroyed, one never inserted, the day's intake wrong, no toast about any of it.
+  `_disarm_for_confirm` clears **only** `_editing`, never `cancel_editing`: that also drops
+  `_pending`/`_pending_photo`/`_pending_activity`, which both callers set immediately
+  before, so it would lose the estimate being confirmed and leave an inbox file offered
+  forever. Unconditional rather than gated on `is_open`, because a worker's confirm is a
+  fresh write in every case.
+  It is called *beside* the two call sites rather than wrapping them: `hints.labels_in_source`
+  greps the open-a-prompt literals to prove every prompt has a hint, and a wrapper hid both
+  labels — the grep failed on the first run, which is the tripwire earning its keep. Writing
+  the pattern into the explaining docstring then made the grep match *that*, reporting a
+  prompt named by nothing but a sentence; the same self-match `tests/test_harness.py` records
+  about its own prose.
 - **Work in flight is announced by the popup, app-level, and nowhere else.** A
   `claude -p` call runs for seconds to a minute, so the indicator has to outlive a
   toast — that part was already true as a `"   estimating…"` suffix on the FOOD header
