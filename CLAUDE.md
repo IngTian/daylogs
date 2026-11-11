@@ -527,8 +527,14 @@ appended prose where it was convenient rather than editing the map.
   **The two runs must never merge, and that needs a guard.** With every expense in a category
   `#N`-marked (no solid) and the reservation covering all the remaining cap (no dots), the bar
   rendered fourteen identical cells and the amounts beside it did not disambiguate either —
-  reproduced. So when both runs exist and the reservation would eat the last free cell, it
-  gives one back. A bar one cell off still reads; a bar that asserts nothing does not.
+  reproduced. So when the **whole fill** is mosaic and the reservation would eat the last free
+  cell, it gives one back. `pro == filled`, not `pro`: any solid cell between the runs is
+  already a boundary, and the first condition fired on **78 of the 680** shapes at this bar
+  width where `████` was doing that job, each time stealing a reserved cell and understating
+  the commitment. Swept both forms; the narrow one misses none of the real cases. The `lock`
+  truthiness check is load-bearing rather than defensive — without it, `filled == pro ==
+  width` with `lock == free == 0` sets `lock` to -1 and emits a bar one cell too long, which
+  shifts every amount column right. A bar one cell off still reads; a bar that asserts nothing does not.
   Two shades did not have this failure, which is the honest cost of the simplification.
   The **categories pane** carries the figure as `reserved` with its share of the cap, because
   an amount alone does not say whether a cap is mostly spoken for or barely touched. The

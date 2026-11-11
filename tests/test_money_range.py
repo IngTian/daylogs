@@ -219,3 +219,30 @@ def test_grouping_preserves_the_incoming_row_order_within_a_group(seeded):
     groups = {g[0]: g for g in group_expenses(rows, collapsed=frozenset())}
     amounts = [r["amount"] for r in groups["grocery"][3]]
     assert amounts == sorted(amounts, reverse=True)
+
+
+def test_the_filter_matches_the_note_the_pane_displays(db):
+    """The note renders inside the description cell and its real use is naming which card
+    paid — so typing a card name into the only filter the app has returned nothing, and an
+    empty result reads as "I never paid with that card" rather than "this field is not
+    searched".
+
+    A note-less row is still excluded for the right reason: `NULL LIKE ?` is NULL and a
+    WHERE of `false OR false OR NULL` selects nothing, so no COALESCE is needed.
+    """
+    add_expense(db, amount=12.0, description="milk", category="grocery",
+                date="2026-08-10", note="Amex")
+    add_expense(db, amount=30.0, description="bus pass", category="transport",
+                date="2026-08-11", note="Visa")
+    add_expense(db, amount=5.0, description="gum", category="grocery", date="2026-08-12")
+
+    view = MoneyView(anchor="2026-08-31", horizon="1m", filter_text="amex")
+    got = [r["description"] for r in query_expenses(db, view=view)]
+    assert got == ["milk"], f"the note has to be searchable: {got}"
+
+    # and the two fields it already matched still work
+    assert [r["description"] for r in query_expenses(
+        db, view=MoneyView(anchor="2026-08-31", horizon="1m", filter_text="gum"))] == ["gum"]
+    assert sorted(r["description"] for r in query_expenses(
+        db, view=MoneyView(anchor="2026-08-31", horizon="1m", filter_text="grocery"))
+    ) == ["gum", "milk"], "the category match is unchanged"

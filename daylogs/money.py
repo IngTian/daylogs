@@ -950,11 +950,19 @@ def query_expenses(conn, view) -> list[sqlite3.Row]:
         args.append(view.filter_category)
     if view.filter_text:
         needle = f"%{_escape_like(view.filter_text.lower())}%"
+        # The note too, because the pane *displays* it: it renders inside the description
+        # cell and its real use is naming which card paid, so typing a card name into the
+        # one filter the app has returned nothing — and an empty result reads as "I never
+        # paid with that card", not "this field is not searched".
+        #
+        # No COALESCE: `NULL LIKE ?` is NULL and a WHERE of `false OR false OR NULL` already
+        # selects nothing, so a note-less row is excluded for the right reason.
         sql += (
             " AND (lower(description) LIKE ? ESCAPE '\\'"
-            " OR lower(category) LIKE ? ESCAPE '\\')"
+            " OR lower(category) LIKE ? ESCAPE '\\'"
+            " OR lower(note) LIKE ? ESCAPE '\\')"
         )
-        args.extend([needle, needle])
+        args.extend([needle, needle, needle])
 
     column = _SORT_COLUMN.get(view.sort_field)
     if column is None:

@@ -338,7 +338,14 @@ def budget_bars(
             # saying where spend ended and cap began. Reproduced before fixing. One cell is
             # a cheaper lie than a bar that asserts nothing, and it only costs that cell in
             # this one case: `lock` is otherwise untouched.
-            if pro and lock and lock == free:
+            # `pro == filled`, not `pro`: the runs can only touch when the *whole* fill is
+            # mosaic, because any solid cell between them already separates them. Swept all
+            # 680 shapes at this width — the old `pro and …` fired on 78 where `████` was
+            # doing the job, stealing a reserved cell and understating the commitment, and
+            # the narrow form misses none of the real cases. The `lock` truthiness check is
+            # load-bearing: without it, filled=pro=width with lock=free=0 sets lock to -1
+            # and emits a bar one cell too long, which shifts the amount columns.
+            if pro == filled > 0 and lock and lock == free:
                 lock -= 1
             bar = (
                 PRORATED_GLYPH * pro
