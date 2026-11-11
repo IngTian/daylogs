@@ -112,14 +112,26 @@ appended prose where it was convenient rather than editing the map.
   row's id and armed an edit against whatever matched. `categories` is deliberately absent
   from the mapping, which is what makes `.get` the right lookup: a pane with no row table
   returns None and the key refuses instead of guessing.
-  The budget pane does **not** arm `_editing`, because `_submit_budget` writes through
-  `upsert_budget`, which resolves on `(month, name)` and so updates the selected row without
-  its id — arming a slot `_take_editing` is never asked for would be dead state. The cost is
-  that a **rename** adds a line instead of renaming one, the `upsert_recurring` shape
-  recorded below. Accepted rather than fixed: a budget line's name is its link to a recurring
-  item (`r` matches by name, `_rename_rolled_budgets` keeps them in step), so renaming from
-  this pane has no clear meaning — and it is now *visible*, which is what made the old
-  failures bad. Renaming in place needs `update_budget` by id and a decision about that link.
+  **The budget pane arms `_editing`, and `_submit_budget` edits by id.** It did not at
+  first, on the reasoning that `upsert_budget` resolves on `(month, name)` and so updates
+  the selected row without needing its id — true for the amount, and wrong for a rename:
+  a new name *added* a line, and a name another row in the month already held updated
+  **that** row and left the selected one untouched, so one keypress rewrote a different
+  visible line. `money.update_budget` goes by id, which is the same resolution
+  `update_recurring` has against `upsert_recurring` and for the same reason.
+  **A rolled line cannot be renamed, and that is what makes the link decidable.** A
+  `source='recurring'` line's name *is* its link: `roll_month_budgets` matches by name and
+  `_rename_rolled_budgets` carries the line when the item is renamed. Renaming it from this
+  pane would break the match silently and the next roll would add a second line for the same
+  subscription — the defect `_rename_rolled_budgets` exists to stop. So it raises, and the
+  message names the key that does work (`s`, which carries the line). Its amount and
+  category stay freely editable: those are this month's numbers, and overriding them is what
+  the pane is for. A name another line in the month holds raises too — `UNIQUE(month, name)`
+  leaves no third option, and resolving it against the other row is the behaviour this
+  replaced.
+  Adding is still an upsert, because `b` means "add" and typing an existing name again *is*
+  an update of it. The two paths split on whether a row was armed, exactly as
+  `_submit_expense` does.
   **Tests navigate panes by name, never by counting `tab`.** `helpers.go_pane` presses until
   `view.pane` matches. Inserting this pane broke sixteen tests at once, every one of them
   because it pressed `tab` once to mean "expenses" — none about the behaviour under test.

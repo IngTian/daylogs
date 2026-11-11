@@ -1498,14 +1498,15 @@ async def test_editing_a_budget_line_is_undoable(make_app, db, type_into):
     assert [r["amount"] for r in list_budget(db, month="2026-09")] == [500.0], "u must undo"
 
 
-async def test_a_budget_edit_naming_another_line_is_undoable(make_app, db, type_into):
-    """The rename case, which does not do what it looks like: submitting a name another
-    line in the month already holds updates *that* line and leaves the selected one alone.
+async def test_a_budget_edit_cannot_take_a_name_another_line_already_holds(
+    make_app, db, type_into
+):
+    """It used to apply the edit to *that* other line and leave the selected one alone —
+    one keypress rewriting a different visible row. Now that `_submit_budget` edits by id a
+    rename moves the row you picked, so a collision is a real conflict and is refused with
+    the text kept, rather than resolved against a row you were not looking at.
 
-    Not prevented — a budget line's name is its link to a recurring item, so renaming from
-    this pane has no clear meaning — but it must be visible and recoverable. The pre-image
-    is read by `(month, name)`, which is what `upsert_budget` resolves on, so it is the row
-    that actually changes rather than the row under the cursor.
+    `budget` is `UNIQUE(month, name)`, so there is no third option.
     """
     upsert_budget(db, month="2026-09", name="Rent", category="housing", amount=1400.0)
     upsert_budget(db, month="2026-09", name="Storage", category="housing", amount=100.0)
@@ -1519,15 +1520,67 @@ async def test_a_budget_edit_naming_another_line_is_undoable(make_app, db, type_
         await type_into(pilot, "1500 Storage !housing")
         await pilot.press("enter")
         await pilot.pause()
-        caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
-        assert caps == {"Rent": 1400.0, "Storage": 1500.0}, (
-            f"the submitted name is what upsert_budget resolves on: {caps}"
-        )
-        await pilot.press("u")
+        assert app.prompt.is_open, "a rejected edit keeps the prompt and the typed line"
+    caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert caps == {"Rent": 1400.0, "Storage": 100.0}, (
+        f"neither row may move: the old behaviour rewrote Storage to 1500: {caps}"
+    )
+
+
+async def test_renaming_a_budget_line_moves_the_row_you_selected(make_app, db, type_into):
+    """The point of editing by id. `upsert_budget` resolves on `(month, name)`, so a new
+    name used to *add* a line and leave the original standing — two lines where you meant
+    one, both counting toward the cap."""
+    upsert_budget(db, month="2026-09", name="Storage", category="housing", amount=100.0)
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("enter")
         await pilot.pause()
-    back = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
-    assert back == {"Rent": 1400.0, "Storage": 100.0}, (
-        f"u must restore the row that actually changed, not the selected one: {back}"
+        assert app.prompt.is_open, "enter did not arm an edit, so this test proves nothing"
+        app.prompt.value = ""
+        await type_into(pilot, "120 Lockup !housing")
+        await pilot.press("enter")
+        await pilot.pause()
+    caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert caps == {"Lockup": 120.0}, f"a rename must move the row, not add one: {caps}"
+
+
+async def test_a_rolled_line_cannot_be_renamed_and_says_where_to_do_it(
+    make_app, db, type_into
+):
+    """A rolled line's name *is* its link to the recurring item: `roll_month_budgets`
+    matches by name and `_rename_rolled_budgets` carries the line when the item is renamed.
+    Renaming it here would break that match silently, and the next roll would add a second
+    line for the same subscription — the defect `_rename_rolled_budgets` exists to stop.
+
+    So it is refused, and the message names the key that does work. The amount stays
+    editable, because overriding this month's number is what the pane is for.
+    """
+    from daylogs.money import roll_month_budgets, upsert_recurring
+
+    upsert_recurring(db, name="Rent", cost=750.0, cycle="monthly", category="housing")
+    roll_month_budgets(db, month="2026-09")
+    app = make_app()
+    async with app.run_test(size=(120, 34)) as pilot:
+        await go_pane(pilot, app, "budget")
+        await pilot.press("enter")
+        await pilot.pause()
+        app.prompt.value = ""
+        await type_into(pilot, "800 Mortgage !housing")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.prompt.is_open, "rejected, with the line kept"
+        sub = str(app.query_one("#prompt").border_subtitle or "")
+        assert "rename the item with s" in sub, f"it must name the key that works: {sub!r}"
+        # the amount alone still goes through
+        app.prompt.value = ""
+        await type_into(pilot, "800 Rent !housing")
+        await pilot.press("enter")
+        await pilot.pause()
+    caps = {r["name"]: (r["amount"], r["source"]) for r in list_budget(db, month="2026-09")}
+    assert caps == {"Rent": (800.0, "recurring")}, (
+        f"the number is this month's to override, the name is not: {caps}"
     )
 
 

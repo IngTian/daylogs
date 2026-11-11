@@ -13,6 +13,7 @@ from daylogs.money import (
     roll_month_budgets,
     summarize_month,
     summarize_span,
+    update_budget,
     update_recurring,
     upsert_budget,
     upsert_recurring,
@@ -670,3 +671,47 @@ def test_editing_a_rolled_budget_line_does_not_change_its_source(db):
     assert caps == {"Food": 700.0}, (
         f"a renamed item must not leave a stale line for the roll to double: {caps}"
     )
+
+
+def test_update_budget_refuses_to_rename_a_rolled_line(db):
+    """At the data layer, so the rule holds for any caller. A rolled line's name is its
+    link to the recurring item; breaking it silently is how one item became two lines."""
+    upsert_recurring(db, name="Rent", cost=750.0, cycle="monthly", category="housing")
+    roll_month_budgets(db, month="2026-09")
+    line = list_budget(db, month="2026-09")[0]
+
+    with pytest.raises(MoneyError, match="rename the item with s"):
+        update_budget(db, line["id"], None, name="Mortgage")
+
+    # the amount and category are this month's to override
+    assert update_budget(db, line["id"], None, amount=800.0)
+    after = list_budget(db, month="2026-09")[0]
+    assert (after["name"], after["amount"], after["source"]) == ("Rent", 800.0, "recurring")
+
+
+def test_update_budget_renames_a_manual_line_in_place(db):
+    """`upsert_budget` resolves on `(month, name)`, so a rename through it added a line and
+    left the original standing. By id it moves the row."""
+    rid = upsert_budget(db, month="2026-09", name="Storage", category="housing", amount=100.0)
+    assert update_budget(db, rid, None, name="Lockup", amount=120.0)
+    rows = [(r["id"], r["name"], r["amount"]) for r in list_budget(db, month="2026-09")]
+    assert rows == [(rid, "Lockup", 120.0)], f"same row, new name: {rows}"
+
+
+def test_update_budget_refuses_a_name_another_line_in_the_month_holds(db):
+    """`UNIQUE(month, name)` leaves no third option, and resolving it against the other
+    row — which is what `upsert_budget` did — rewrites a line the caller never selected."""
+    a = upsert_budget(db, month="2026-09", name="Rent", category="housing", amount=1400.0)
+    upsert_budget(db, month="2026-09", name="Storage", category="housing", amount=100.0)
+    with pytest.raises(MoneyError, match="already has a line called"):
+        update_budget(db, a, None, name="Storage", amount=1500.0)
+    caps = {r["name"]: r["amount"] for r in list_budget(db, month="2026-09")}
+    assert caps == {"Rent": 1400.0, "Storage": 100.0}, f"neither row moves: {caps}"
+
+
+def test_update_budget_cannot_touch_source(db):
+    """Provenance is not an editable field — `_rename_rolled_budgets` filters on it, and it
+    is why `source` is absent from `upsert_budget`'s ON CONFLICT clause too."""
+    rid = upsert_budget(db, month="2026-09", name="Rent", category="housing", amount=750.0)
+    with pytest.raises(MoneyError, match="cannot update"):
+        update_budget(db, rid, None, source="recurring")

@@ -788,25 +788,17 @@ class MoneyTab(PanelTab):
             # the rest were uneditable — including the rolled line that sends you looking
             # for why a changed recurring price never landed on this month.
             #
-            # No `_editing` arm, unlike the two below: `_submit_budget` writes through
-            # `upsert_budget`, which resolves on `(month, name)` and so updates this very
-            # row without needing its id. Arming a slot `_take_editing` is never asked for
-            # would be dead state of exactly the kind this file keeps finding.
+            # Armed, so `_submit_budget` edits **by id** — which is what makes a rename
+            # move the row you selected. `upsert_budget` resolves on `(month, name)`, so
+            # before this a new name added a line, and a name another row in the month
+            # already held updated *that* row and left this one untouched.
             #
-            # The cost is a **rename**, and it is not the mild one an earlier version of
-            # this comment claimed. "Adds a line rather than renaming this one" holds only
-            # while the new name is free; submit one another line in the month already
-            # holds and `upsert_budget` updates *that* line, leaving the selected row
-            # untouched — so the keypress rewrites a different visible row's amount and
-            # category, and the category's cap moves by the difference between them.
-            # `_submit_budget` pushes the overwritten row's pre-image, so `u` takes it back,
-            # and the toast names the category it actually wrote.
-            #
-            # Still not fixed with an `update_budget` by id, because a budget line's name
-            # is its link to a recurring item — `r` matches by name and
-            # `_rename_rolled_budgets` keeps the two in step — so renaming from this pane
-            # has no clear meaning, and both outcomes are now visible on the pane and
-            # undoable. Doing it properly means deciding what that link should survive.
+            # The name-to-item link is settled in `money.update_budget` rather than here: a
+            # rolled line's name *is* its link, so renaming one is refused and the caller is
+            # pointed at `s`, which carries the line through `_rename_rolled_budgets`. Its
+            # amount and category stay editable, because those are this month's numbers and
+            # overriding them is what the pane exists for.
+            self._editing = (which, row_id)
             self.app.prompt.open("budget", prefill=parse.render_budget(row))
             return
         self._editing = (which, row_id)
@@ -1076,31 +1068,46 @@ class MoneyTab(PanelTab):
         cfg = self.app.cfg
         r = parse_budget(value, known_slugs=money.slugs(cfg))
         month = self._budget_month()
-        # The row this upsert is about to overwrite, if any — read by `(month, name)`
-        # because that is what `upsert_budget` resolves on, so it is the row that will
-        # actually change rather than the one under the cursor. Those differ, and that is
-        # the second reason to read it: submitting a name another line in the month already
-        # holds updates *that* line and leaves the selected one alone. `Rent` 1,400 and
-        # `Storage` 100 on screen, `enter` on Rent, submit `1500 Storage !housing`, and
-        # Storage becomes 1,500 while Rent is untouched — the housing cap goes 1,500 to
-        # 2,900 on one keypress, with the row you were editing unchanged.
+        # Two paths, and which one runs is decided by whether a row was armed — the same
+        # split `_submit_expense` makes. An armed id came from `enter` on the budget pane
+        # and means *edit this line*, so it goes through `update_budget` **by id**: that is
+        # what lets a rename move the row you selected rather than adding one, or silently
+        # updating whichever other row already held the submitted name. Unarmed means `b`,
+        # which adds — and `upsert_budget`'s resolve on `(month, name)` is right there,
+        # because typing an existing name again is an update of it.
         #
-        # This was also the only Money write path with no pre-image at all, one keypress
-        # away from `x`'s own "deleted · u to undo", while the README promises `u` undoes an
-        # edit. Pushed only when a row existed: an *add* has no pre-image, the same rule
-        # `_submit_expense` follows, and `u` on a fresh line would otherwise resurrect
-        # nothing and consume a turn.
-        before = self.app.conn.execute(
-            "SELECT * FROM budget WHERE month = ? AND name = ?", (month, r.name)
-        ).fetchone()
-        money.upsert_budget(
-            self.app.conn,
-            month=month,
-            name=r.name,
-            category=r.category,
-            amount=r.amount,
-            cfg=cfg,
-        )
+        # The pre-image is read *before* either write and pushed only when a row existed:
+        # an add has no pre-image, the same rule `_submit_expense` follows, and `u` on a
+        # fresh line would otherwise resurrect nothing and consume a turn. This was the
+        # only Money write path with none at all, one keypress from `x`'s own
+        # "deleted · u to undo" while the README promises `u` undoes an edit.
+        row_id = self._take_editing("budget")
+        if row_id is not None:
+            before = self.app.conn.execute(
+                "SELECT * FROM budget WHERE id = ?", (row_id,)
+            ).fetchone()
+            if before is None:
+                self.app.notify("that row is gone", timeout=3)
+                return
+            # Raises on a rolled line's rename, which the app turns back into the prompt
+            # with the text intact — so the message arrives where it can be acted on.
+            money.update_budget(
+                self.app.conn, row_id, cfg,
+                name=r.name, category=r.category, amount=r.amount,
+            )
+            month = before["month"]
+        else:
+            before = self.app.conn.execute(
+                "SELECT * FROM budget WHERE month = ? AND name = ?", (month, r.name)
+            ).fetchone()
+            money.upsert_budget(
+                self.app.conn,
+                month=month,
+                name=r.name,
+                category=r.category,
+                amount=r.amount,
+                cfg=cfg,
+            )
         if before is not None:
             self.app.undo_stack.push("budget", dict(before))
         s = self.reload()

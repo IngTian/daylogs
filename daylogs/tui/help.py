@@ -40,7 +40,21 @@ class HelpScreen(ModalScreen):
         """Two columns, because every key in one column pushes the write keys below
         the fold on a 40-row terminal — the help is useless if the half you came
         looking for needs scrolling to find. (No literal count here: the one that
-        used to be written down had already drifted from `len(KEYMAP)`.)"""
+        used to be written down had already drifted from `len(KEYMAP)`.)
+
+        **Two columns are not enough, and no arrangement is.** Measured: the groups are 17 /
+        15 / 14 / 5 rows, 51 in total. Every contiguous two-way split was enumerated —
+        `[nav] | rest` is 17/34, the current `[nav, view] | [write, danger]` is 32/19, and
+        `[nav, view, write] | [danger]` is 46/5 — so the split in use is already the best
+        one at a 32-row tallest column. 51 rows cannot fit a 24-row terminal, and it still
+        scrolls by 13 at the canonical 100x30. Under `-narrow` the columns stack, which
+        takes the virtual height to 53 against a 16-row body at 80x24: the title, "Move
+        around", and nav keys, with nothing on screen suggesting the other 37 rows exist.
+        That impression — rather than the layout — is the defect, so the footer says when
+        there is more. Reordering the groups was the obvious alternative and is wrong: of
+        the keys that appear *only* here and not in the footer, nav holds 7 and view 3
+        against write's 1, so the current order front-loads the half you came for.
+        """
         groups = list(km.help_groups().items())
         half = (len(groups) + 1) // 2
         with VerticalScroll(id="help-body"):
@@ -48,7 +62,24 @@ class HelpScreen(ModalScreen):
             with Horizontal(id="help-columns"):
                 for column in (groups[:half], groups[half:]):
                     yield Static(_render_column(column), classes="help-col")
-            yield Static("esc or ? to close", classes="muted")
+            yield Static("esc or ? to close", classes="muted", id="help-foot")
+
+    def on_mount(self) -> None:
+        """Say so when the overlay scrolls, and only then.
+
+        Deferred because `max_scroll_y` is 0 until the body has been laid out, and read
+        from the widget rather than computed from a row count so it cannot drift from what
+        the terminal is actually showing. A terminal tall enough to hold all 51 rows gets
+        no hint it does not need.
+        """
+        self.call_after_refresh(self._note_scroll)
+
+    def _note_scroll(self) -> None:
+        body = self.query_one("#help-body", VerticalScroll)
+        if body.max_scroll_y > 0:
+            self.query_one("#help-foot", Static).update(
+                "esc or ? to close · ↑↓ pgup pgdn for the rest"
+            )
 
     def action_close(self) -> None:
         self.app.pop_screen()
