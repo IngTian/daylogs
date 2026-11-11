@@ -370,7 +370,7 @@ class DaylogsApp(App):
         if item is None:
             self.notify("nothing to undo", timeout=3)
             return
-        table, row = item
+        table, row, deleted = item
         cols = ", ".join(row)
         marks = ", ".join("?" for _ in row)
         # An upsert on the primary key rather than a plain INSERT, so one statement
@@ -378,6 +378,35 @@ class DaylogsApp(App):
         # delete) or present with different values (undoing an edit). A plain INSERT
         # raises on an edit's pre-image; delete-then-insert would churn the id and
         # invalidate the table's cached id list.
+        #
+        # **But a delete's pre-image may no longer own its id.** SQLite hands out
+        # `max(rowid)+1`, not a monotonic counter, so deleting the newest row frees its id
+        # and the next insert takes it — two keypresses. The upsert then updated a row the
+        # user had just created, destroying it, and the toast still said "restored".
+        # Reproduced: two expenses, delete the second, add a third (which gets id 2), press
+        # `u`, and the third is gone with the second in its place.
+        #
+        # So a delete's pre-image is applied only to a *free* id. An edit's is the opposite
+        # expectation — the row is supposed to still be there — which is why the stack
+        # records which kind it is rather than inferring: only `expense` has `created_at`,
+        # so there is no field that says "this is still my row" across the other six tables.
+        #
+        # Residual, stated rather than claimed away: an *edit* entry reached after its row
+        # was deleted and the id reused would still update the stranger. That needs a `u`
+        # pressed past the delete's own entry, which the stack hands back first and which
+        # restores the id to its original row — so it is far narrower than the case above,
+        # and closing it properly needs an identity column on all seven tables.
+        if deleted:
+            taken = self.conn.execute(
+                f"SELECT 1 FROM {table} WHERE id = ?", (row["id"],)
+            ).fetchone()
+            if taken is not None:
+                self.undo_stack.push(table, row, deleted=True)
+                self.notify_error(
+                    f"cannot restore that {table} row — id {row['id']} now belongs to a"
+                    " newer row, and overwriting it would delete that one"
+                )
+                return
         sets = ", ".join(f"{c} = excluded.{c}" for c in row if c != "id")
         try:
             self.conn.execute(
@@ -396,7 +425,7 @@ class DaylogsApp(App):
             # that named the older row. Measured: depth 2 -> 1 across a `u` that changed
             # nothing, then the second `u` resurrected a deleted expense while the rename
             # the user actually asked to undo became unreachable.
-            self.undo_stack.push(table, row)
+            self.undo_stack.push(table, row, deleted=deleted)
             self.notify_error(f"undo failed: {e}")
             return
         self.notify(f"restored {table} row", timeout=3)

@@ -1579,3 +1579,52 @@ async def test_a_cap_committed_past_what_is_left_is_not_shown_as_free(make_app, 
     assert "0.00 free" in head, f"nothing is free, and that is what it should say: {head}"
     assert "30.00 reserved" in head, f"how far past is the reserved figure: {head}"
     assert "⚠" in head, "colour is never the only signal"
+
+
+async def test_undo_refuses_a_deleted_row_whose_id_a_newer_row_has_taken(make_app, db):
+    """SQLite hands out `max(rowid)+1`, not a counter, so deleting the newest row frees its
+    id and the very next insert takes it. `ON CONFLICT(id) DO UPDATE` then overwrote the
+    row the user had just created — destroying it — and the toast still said "restored".
+
+    Two keypresses and one entry apart. Reproduced at the data layer before the fix: two
+    expenses, delete the second, add a third which gets id 2, undo, and the third is gone
+    with the second in its place.
+
+    Refused rather than resolved: restoring the old row means deleting the new one, which
+    is not an undo. The entry stays parked so `u` is not consumed either — the same stance
+    as a unique-index collision.
+    """
+    app = make_app()
+    notes = []
+    async with app.run_test(size=(120, 34)) as pilot:
+        app.notify_error = lambda msg, **kw: notes.append(str(msg))  # type: ignore[method-assign]
+        add_expense(db, amount=10.0, description="first", category="grocery",
+                    date="2026-09-01")
+        second = add_expense(db, amount=20.0, description="second", category="grocery",
+                             date="2026-09-02")
+        await go_pane(pilot, app, "expenses")
+        table = app.query_one("#money-table")
+        # newest-first, so row 0 is `second`
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert [r["description"] for r in all_expenses(db)] == ["first"], "delete first"
+
+        fresh = add_expense(db, amount=99.0, description="brand new", category="grocery",
+                            date="2026-09-03")
+        assert fresh == second, (
+            f"this test needs SQLite to reuse the freed id; got {fresh} vs {second}"
+        )
+        await pilot.press("u")
+        await pilot.pause()
+        assert table is not None
+
+    rows = {r["description"]: r["amount"] for r in all_expenses(db)}
+    assert rows.get("brand new") == 99.0, (
+        f"the undo overwrote a row the user had just created: {rows}"
+    )
+    assert "second" not in rows, "and it must not have been restored on top of it"
+    assert any("belongs to a newer row" in n for n in notes), (
+        f"refusing silently is the other half of the bug: {notes}"
+    )
